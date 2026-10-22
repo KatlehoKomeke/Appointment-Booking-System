@@ -14,7 +14,7 @@ a simulated SMS confirmation that cannot be lost.
 | Stage | Design complete. Implementation starts with milestone M0. |
 | Run locally | `make up` (arrives in M0) |
 | Hosted demo | Optional, in AWS Cape Town, defined in AWS CDK ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)) |
-| AWS connection | GitHub Actions reaches AWS through OpenID Connect, with no stored keys ([infra/README.md](infra/README.md)) |
+| Deployment | Every push to `main` is tested and deployed to AWS Cape Town through OpenID Connect, with no stored keys ([ADR-0007](docs/adr/0007-continuous-deployment-from-main.md), [infra/README.md](infra/README.md)) |
 
 This README grows with each milestone. Sections marked *planned* describe what is coming, not what exists yet.
 

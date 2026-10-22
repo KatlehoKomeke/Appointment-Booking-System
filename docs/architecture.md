@@ -204,4 +204,6 @@ a real database. See [SECURITY.md](../SECURITY.md).
 
 Locally, `make up` starts the jar and PostgreSQL with Docker Compose. The optional hosted demo runs in AWS Cape
 Town (`af-south-1`) and is defined entirely in AWS CDK under `infra/`
-([ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md)).
+([ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md)). Every push to `main` is tested and deployed automatically
+by GitHub Actions, which signs in to AWS through OpenID Connect without stored keys
+([ADR-0007](adr/0007-continuous-deployment-from-main.md)).

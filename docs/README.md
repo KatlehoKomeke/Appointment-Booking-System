@@ -5,7 +5,7 @@ Start with the [project README](../README.md). This folder holds everything that
 | Document | What it answers | Status |
 |---|---|---|
 | [architecture.md](architecture.md) | How the system is built and why: containers, modules, the booking transaction, the confirmation, the data model, time and personal information. | Written |
-| [adr/](adr/README.md) | Each significant decision, the alternatives rejected and the consequences accepted. | Six records written |
+| [adr/](adr/README.md) | Each significant decision, the alternatives rejected and the consequences accepted. | Seven records written |
 | [domain-rules.md](domain-rules.md) | Every business rule, where it is enforced and the test that proves it. | Written; tests land with the milestones |
 | [errors.md](errors.md) | Every error code the API returns, when, and what the customer sees. | Written |
 | openapi.yaml | The API contract, generated from the code and pinned by a test. | Arrives in M2 |

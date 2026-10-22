@@ -6,12 +6,33 @@ in TypeScript. Nothing is created by hand in the AWS console. The reasoning is i
 
 ## What exists today
 
-| Stack | Region | What it creates | Monthly cost |
-|---|---|---|---|
-| `BranchbookAccount` | us-east-1 | GitHub as an OpenID Connect identity provider; the `branchbook-github-deploy` role; a monthly cost budget with e-mail alerts at 50, 80 and 100 percent | $0 |
+| Stack | Region | Deployed by | What it creates | Monthly cost |
+|---|---|---|---|---|
+| `BranchbookAccount` | us-east-1 | An administrator, by hand | GitHub as an OpenID Connect identity provider; the `branchbook-github-deploy` role; a monthly cost budget with e-mail alerts at 50, 80 and 100 percent | $0 |
+| `BranchbookRelease` | af-south-1 | The pipeline, on every push to `main` | The SSM parameter `/branchbook/release`, holding the commit most recently deployed | $0 |
 
 The stacks that host the application, `BranchbookDns`, `BranchbookData` and `BranchbookApp` in `af-south-1`
-(Cape Town), are added once there is an application to host.
+(Cape Town), join the pipeline once there is an application to host.
+
+## Automatic deployment
+
+Every push to `main` runs [.github/workflows/deploy.yml](../.github/workflows/deploy.yml)
+([ADR-0007](../docs/adr/0007-continuous-deployment-from-main.md)):
+
+1. **Test.** Type-check and unit-test the CDK app. Nothing reaches AWS if this fails.
+2. **Deploy.** Sign in to AWS through OpenID Connect as `branchbook-github-deploy`, then `cdk deploy` the workload stacks.
+3. **Verify.** Read `/branchbook/release` back from AWS and fail unless it equals the pushed commit.
+
+To see what is live, read the parameter:
+
+```bash
+aws ssm get-parameter --name /branchbook/release --query Parameter.Value --output text --profile branchbook-admin
+```
+
+**The pipeline cannot change its own access.** `BranchbookAccount` defines the role the pipeline assumes, so it is
+only part of the CDK app when `BRANCHBOOK_ALERT_EMAIL` is set. An administrator sets it on their own machine, and the
+credential-free `infra` workflow sets a placeholder to test synthesis. The deploy workflow never sets it, so it cannot
+synthesise that stack, let alone deploy it.
 
 ## How GitHub reaches AWS without keys
 
@@ -92,7 +113,7 @@ These steps need you personally, and only happen once.
      --profile branchbook-admin --tags project=branchbook
    ```
 
-   Bootstrap `af-south-1` the same way before the application stacks are added.
+   Bootstrap `af-south-1` the same way: the pipeline deploys there.
 
 6. **Deploy the connection:**
 
@@ -138,5 +159,7 @@ environment afterwards.
 |---|---|
 | `bin/branchbook.ts` | The CDK app: which stacks exist and where they deploy |
 | `lib/account-stack.ts` | `AccountStack`: the GitHub OIDC trust, the deploy role and the budget |
-| `test/account-stack.test.ts` | Unit tests that prove the stack's security properties |
+| `lib/release-stack.ts` | `ReleaseStack`: records the deployed commit in `/branchbook/release` |
+| `test/account-stack.test.ts` | Unit tests that prove the connection's security properties |
+| `test/release-stack.test.ts` | Unit tests for the release record the pipeline verifies |
 | `cdk.json` | Non-sensitive configuration (repository name and public IDs, environment, budget) and CDK feature flags |

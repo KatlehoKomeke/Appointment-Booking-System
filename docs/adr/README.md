@@ -13,6 +13,7 @@ updated to point at it.
 | [0003](0003-transactional-outbox-for-confirmations.md) | The simulated confirmation is a transactional outbox | Accepted |
 | [0004](0004-restraint-no-login-no-id-number.md) | No login, no ID number and no staff endpoints in v1 | Accepted |
 | [0005](0005-committed-openapi-contract.md) | A committed OpenAPI contract with a generated TypeScript client | Accepted |
-| [0006](0006-hosted-demo-on-aws-with-cdk.md) | An optional hosted demo in AWS Cape Town, owned by AWS CDK | Accepted |
+| [0006](0006-hosted-demo-on-aws-with-cdk.md) | An optional hosted demo in AWS Cape Town, owned by AWS CDK | Accepted; delivery trigger superseded by 0007 |
+| [0007](0007-continuous-deployment-from-main.md) | Continuous deployment from main, through OpenID Connect | Accepted |
 
 New records start from [0000-template.md](0000-template.md).

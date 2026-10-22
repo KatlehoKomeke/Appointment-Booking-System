@@ -1,6 +1,6 @@
 # ADR-0006: An optional hosted demo in AWS Cape Town, owned by AWS CDK
 
-- **Status:** Accepted
+- **Status:** Accepted. The delivery trigger is superseded by [ADR-0007](0007-continuous-deployment-from-main.md): every push to `main` deploys.
 - **Date:** 2026-10-22
 
 ## Context
