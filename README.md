@@ -14,6 +14,7 @@ a simulated SMS confirmation that cannot be lost.
 | Stage | Design complete. Implementation starts with milestone M0. |
 | Run locally | `make up` (arrives in M0) |
 | Hosted demo | Optional, in AWS Cape Town, defined in AWS CDK ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)) |
+| AWS connection | GitHub Actions reaches AWS through OpenID Connect, with no stored keys ([infra/README.md](infra/README.md)) |
 
 This README grows with each milestone. Sections marked *planned* describe what is coming, not what exists yet.
 
@@ -120,6 +121,7 @@ Docker is the only prerequisite.
 | [docs/adr](docs/adr/README.md) | Architecture decision records |
 | [docs/domain-rules.md](docs/domain-rules.md) | Every business rule, where it is enforced and the test that proves it |
 | [docs/errors.md](docs/errors.md) | Every API error code, when it happens and what the customer sees |
+| [infra/README.md](infra/README.md) | The AWS CDK app: what exists in AWS, how GitHub connects without keys, first-time setup |
 | [SECURITY.md](SECURITY.md) | Secrets, personal information and vulnerability reporting |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Workflow, commit conventions and the documentation standard |
 

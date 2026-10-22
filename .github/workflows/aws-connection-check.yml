@@ -1,0 +1,35 @@
+# .github/workflows/aws-connection-check.yml
+#
+# Proves that GitHub Actions can reach AWS through OpenID Connect, without any stored access key.
+# Run it by hand from the Actions tab after deploying the BranchbookAccount stack (see infra/README.md).
+#
+# Needs: the GitHub environment `aws-demo` and the repository secret `AWS_DEPLOY_ROLE_ARN`.
+# The account ID is masked in the log, because the logs of a public repository are public.
+
+name: aws-connection-check
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # lets the job request a GitHub OIDC token for AWS
+  contents: read
+
+jobs:
+  assume-deploy-role:
+    runs-on: ubuntu-24.04
+    environment: aws-demo
+    timeout-minutes: 5
+    steps:
+      - name: Assume the deploy role through OpenID Connect
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: aws-connection-check-${{ github.run_id }}
+          aws-region: us-east-1
+          mask-aws-account-id: true
+
+      - name: Report the role obtained, with the account ID hidden
+        run: |
+          identity="$(aws sts get-caller-identity --query Arn --output text)"
+          echo "Connected to AWS as: ${identity//[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]/************}"

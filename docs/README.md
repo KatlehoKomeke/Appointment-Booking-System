@@ -10,7 +10,7 @@ Start with the [project README](../README.md). This folder holds everything that
 | [errors.md](errors.md) | Every error code the API returns, when, and what the customer sees. | Written |
 | openapi.yaml | The API contract, generated from the code and pinned by a test. | Arrives in M2 |
 | runbook.md | Operating the system: health checks, replaying a failed message, tracing a request. | Arrives in M5 |
-| deployment/aws.md | The hosted demo in AWS Cape Town: CDK stacks, first deploy, guardrails and teardown. | Arrives with the deployment |
+| [../infra/README.md](../infra/README.md) | The AWS CDK app: what exists in AWS, how GitHub Actions connects without keys, and the first-time setup. | Written; grows with each stack |
 
 Project-wide policies live at the repository root:
 

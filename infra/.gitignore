@@ -1,0 +1,10 @@
+# infra/.gitignore
+# TypeScript runs directly through tsx, so compiled output is never committed.
+*.js
+!jest.config.js
+*.d.ts
+node_modules
+
+# CDK synthesis output and asset staging (also ignored at the repository root).
+.cdk.staging
+cdk.out

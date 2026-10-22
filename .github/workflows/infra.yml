@@ -1,0 +1,56 @@
+# .github/workflows/infra.yml
+#
+# Type-checks, unit-tests and synthesises the AWS CDK app in infra/ on every change to it.
+# It needs no AWS credentials: the tests assert on the generated CloudFormation, and synth never calls AWS.
+
+name: infra
+
+on:
+  push:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/infra.yml'
+  pull_request:
+    paths:
+      - 'infra/**'
+      - '.github/workflows/infra.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: infra-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-synth:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install the pinned dependencies
+        run: npm ci
+
+      - name: Type-check
+        run: npm run build
+
+      - name: Unit-test the synthesised templates
+        run: npm test -- --ci
+
+      - name: Synthesise every stack
+        # A placeholder address: the real one is supplied only when deploying, never committed.
+        env:
+          BRANCHBOOK_ALERT_EMAIL: alerts@example.com
+        run: npx cdk synth --quiet

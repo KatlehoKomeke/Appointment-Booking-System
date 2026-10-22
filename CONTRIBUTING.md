@@ -35,7 +35,7 @@ documentation is incomplete.
 - **Enforced in CI:** Javadoc linting (`-Xdoclint`) fails the build on missing or broken documentation of public
   types, from milestone M0.
 
-### TypeScript (`web/`)
+### TypeScript (`web/` and `infra/`)
 
 - **Every exported component, hook and function has a TSDoc comment.** It covers purpose, parameters or props,
   and side effects such as network calls or storage.
