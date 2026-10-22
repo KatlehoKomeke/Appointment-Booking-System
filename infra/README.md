@@ -34,13 +34,14 @@ sequenceDiagram
 - **The role can do almost nothing itself.** It may only assume the roles that `cdk bootstrap` created, and those
   carry out deployments. A unit test fails if any other permission is added.
 - **No account ID is ever committed.** The account comes from the credentials in use, and the role ARN is stored
-  as a GitHub secret, so it is masked in the public workflow logs.
+  as a GitHub environment secret, so it is masked in the public workflow logs.
 
 ## Prerequisites
 
-- An AWS account you own, with MFA on the root user and an administrator user in IAM Identity Center. The
+- An AWS account you own, with MFA on the root user and an administrator IAM user for daily work. The
   [first-time setup](#first-time-setup) below walks through it.
-- [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) and Node.js 24.
+- [AWS CLI v2](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) 2.32 or later (for
+  `aws login`) and Node.js 24.
 
 ## Commands
 
@@ -61,27 +62,34 @@ ever committed. Any placeholder works for `synth` and `test`; use your real addr
 These steps need you personally, and only happen once.
 
 1. **Create the AWS account.** Sign up at https://aws.amazon.com and choose the paid plan, so the account never
-   closes automatically; new-account credits still apply. Turn on MFA for the root user, then stop using it.
-2. **Create your administrator.** In IAM Identity Center, create a user with the `AdministratorAccess` permission
-   set, and sign in once with it.
-3. **Enable Cape Town.** In the console, under Account, then AWS Regions, enable **Africa (Cape Town) af-south-1**.
-   It can take a while to activate, and the application stacks will need it.
-4. **Sign in from your terminal:**
+   closes automatically; new-account credits still apply. Turn on MFA for the root user.
+2. **Create one administrator user, then stop using root.** Signed in as root, create the IAM user
+   `branchbook-admin` with console access and the `AdministratorAccess` policy, and turn on its MFA. Creating the
+   first administrator is the one task root is meant for. IAM Identity Center is the alternative when several people
+   need access; for a one-person account an IAM user signed in through `aws login` is simpler and still issues only
+   short-lived credentials.
+3. **Enable Cape Town.** Under Account, then AWS Regions, enable **Africa (Cape Town) af-south-1**. It can take a
+   while to activate, and the application stacks need it.
+4. **Sign the CLI in** while the browser is signed in as `branchbook-admin`:
 
    ```bash
-   aws configure sso --profile branchbook-admin   # once; opens a browser to approve
-   aws sso login --profile branchbook-admin       # whenever the session expires
+   aws configure set region af-south-1 --profile branchbook-admin
+   aws login --profile branchbook-admin            # opens the browser; choose the branchbook-admin session
+   aws sts get-caller-identity --profile branchbook-admin --query Arn --output text   # must end in user/branchbook-admin
    ```
 
-5. **Bootstrap CDK** in both Regions the project uses. This creates the deployment roles, an S3 bucket and an
-   ECR repository that CDK needs:
+   `aws login` stores temporary credentials and refreshes them; no access key is created. Run it again when the
+   session expires.
+
+5. **Bootstrap CDK** in the Region the connection stack uses. This creates the roles, S3 bucket and ECR repository
+   CDK deploys through; it trusts no other AWS account:
 
    ```bash
-   npx cdk bootstrap --profile branchbook-admin \
-     aws://$(aws sts get-caller-identity --profile branchbook-admin --query Account --output text)/us-east-1
+   npx cdk bootstrap "aws://$(aws sts get-caller-identity --profile branchbook-admin --query Account --output text)/us-east-1" \
+     --profile branchbook-admin --tags project=branchbook
    ```
 
-   Bootstrap `af-south-1` the same way once the Region is enabled.
+   Bootstrap `af-south-1` the same way before the application stacks are added.
 
 6. **Deploy the connection:**
 
@@ -89,12 +97,15 @@ These steps need you personally, and only happen once.
    BRANCHBOOK_ALERT_EMAIL=<your address> npx cdk deploy BranchbookAccount --profile branchbook-admin
    ```
 
-   AWS e-mails a subscription confirmation for the budget alerts; accept it. The deploy prints `DeployRoleArn`.
+7. **Tell GitHub about it.** In the repository settings, under **Environments**, create `aws-demo`. Inside that
+   environment, add the secret `AWS_DEPLOY_ROLE_ARN` with the role ARN. An environment secret is only readable by
+   jobs that declare the environment, which is tighter than a repository-wide secret. This copies the ARN to the
+   clipboard without printing your account ID:
 
-7. **Tell GitHub about it.** In the repository settings:
-   - Under **Environments**, create `aws-demo`.
-   - Under **Secrets and variables**, then **Actions**, add the repository secret `AWS_DEPLOY_ROLE_ARN` with the
-     `DeployRoleArn` value.
+   ```bash
+   aws cloudformation describe-stacks --stack-name BranchbookAccount --region us-east-1 --profile branchbook-admin \
+     --query "Stacks[0].Outputs[?OutputKey=='DeployRoleArn'].OutputValue" --output text | tr -d '\n' | pbcopy
+   ```
 
 8. **Prove the connection.** Under **Actions**, run **aws-connection-check**. It assumes the role and reports which
    role it obtained, with the account ID masked.
@@ -105,7 +116,8 @@ These steps need you personally, and only happen once.
 npx cdk destroy BranchbookAccount --profile branchbook-admin
 ```
 
-This removes the role, the GitHub trust and the budget. Delete the `AWS_DEPLOY_ROLE_ARN` secret afterwards.
+This removes the role, the GitHub trust and the budget. Delete the `AWS_DEPLOY_ROLE_ARN` secret from the `aws-demo`
+environment afterwards.
 
 ## Dependency notes
 

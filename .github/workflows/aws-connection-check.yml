@@ -3,7 +3,7 @@
 # Proves that GitHub Actions can reach AWS through OpenID Connect, without any stored access key.
 # Run it by hand from the Actions tab after deploying the BranchbookAccount stack (see infra/README.md).
 #
-# Needs: the GitHub environment `aws-demo` and the repository secret `AWS_DEPLOY_ROLE_ARN`.
+# Needs: the GitHub environment `aws-demo` holding the secret `AWS_DEPLOY_ROLE_ARN`.
 # The account ID is masked in the log, because the logs of a public repository are public.
 
 name: aws-connection-check

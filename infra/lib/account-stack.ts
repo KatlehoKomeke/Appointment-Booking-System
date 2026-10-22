@@ -11,7 +11,7 @@ export const GITHUB_OIDC_AUDIENCE = 'sts.amazonaws.com';
 
 /**
  * Name of the IAM role that GitHub Actions assumes. Fixed, so the role ARN is predictable and can be stored as the
- * repository secret `AWS_DEPLOY_ROLE_ARN` (see infra/README.md).
+ * secret `AWS_DEPLOY_ROLE_ARN` of the `aws-demo` GitHub environment (see infra/README.md).
  */
 export const DEPLOY_ROLE_NAME = 'branchbook-github-deploy';
 
@@ -103,11 +103,11 @@ export class AccountStack extends Stack {
       })),
     });
 
-    // Store this value as the GitHub secret AWS_DEPLOY_ROLE_ARN. It is kept out of the repository because it
-    // contains the AWS account ID.
+    // Store this value as the secret AWS_DEPLOY_ROLE_ARN of the aws-demo GitHub environment. It is kept out of the
+    // repository because it contains the AWS account ID.
     new CfnOutput(this, 'DeployRoleArn', {
       value: this.deployRole.roleArn,
-      description: 'Store as the GitHub repository secret AWS_DEPLOY_ROLE_ARN.',
+      description: 'Store as the secret AWS_DEPLOY_ROLE_ARN of the aws-demo GitHub environment.',
     });
   }
 }
