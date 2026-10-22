@@ -23,6 +23,18 @@ export interface AccountStackProps extends StackProps {
   readonly githubRepository: string;
 
   /**
+   * The numeric ID of the repository owner on GitHub. Public, not a secret (`gh api repos/OWNER/REPO --jq .owner.id`).
+   * GitHub's immutable subject claims include it, so a deleted-and-recreated account with the same name cannot match.
+   */
+  readonly githubOwnerId: string;
+
+  /**
+   * The numeric ID of the repository on GitHub. Public, not a secret (`gh api repos/OWNER/REPO --jq .id`).
+   * Included for the same reason: a new repository created later under the same name gets a different ID.
+   */
+  readonly githubRepositoryId: string;
+
+  /**
    * The GitHub environment a workflow job must declare before it may assume the deploy role. Requiring an
    * environment, not just the repository, means a workflow on an unprotected branch or a fork cannot deploy.
    */
@@ -62,7 +74,8 @@ export class AccountStack extends Stack {
     });
 
     // The `sub` claim pins the trust to one repository AND one environment: a token minted for any other repository,
-    // branch-only workflow or fork does not match, so it cannot assume the role.
+    // branch-only workflow or fork does not match, so it cannot assume the role. GitHub issues immutable subjects,
+    // which carry the numeric owner and repository IDs next to their names (see githubSubject).
     this.deployRole = new iam.Role(this, 'DeployRole', {
       roleName: DEPLOY_ROLE_NAME,
       description: `Assumed by GitHub Actions in ${props.githubRepository} (environment ${props.githubEnvironment}) to run cdk deploy.`,
@@ -70,7 +83,7 @@ export class AccountStack extends Stack {
       assumedBy: new iam.WebIdentityPrincipal(github.oidcProviderArn, {
         StringEquals: {
           'token.actions.githubusercontent.com:aud': GITHUB_OIDC_AUDIENCE,
-          'token.actions.githubusercontent.com:sub': `repo:${props.githubRepository}:environment:${props.githubEnvironment}`,
+          'token.actions.githubusercontent.com:sub': githubSubject(props),
         },
       }),
     });
@@ -113,12 +126,25 @@ export class AccountStack extends Stack {
 }
 
 /**
+ * The exact `sub` claim GitHub puts in the OIDC token of a job that declares the environment, in GitHub's immutable
+ * subject format: `repo:OWNER@OWNER_ID/REPO@REPO_ID:environment:NAME`. The repository setting is visible with
+ * `gh api repos/OWNER/REPO/actions/oidc/customization/sub` (`use_immutable_subject: true`).
+ */
+export function githubSubject(props: Pick<AccountStackProps, 'githubRepository' | 'githubOwnerId' | 'githubRepositoryId' | 'githubEnvironment'>): string {
+  const [owner, repository] = props.githubRepository.split('/');
+  return `repo:${owner}@${props.githubOwnerId}/${repository}@${props.githubRepositoryId}:environment:${props.githubEnvironment}`;
+}
+
+/**
  * Fails synthesis early, with a clear message, when the configuration would create a role that trusts the wrong
  * repository or a budget that cannot alert anyone.
  */
 function validateProps(props: AccountStackProps): void {
   if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(props.githubRepository)) {
     throw new Error(`githubRepository must look like owner/name, got "${props.githubRepository}"`);
+  }
+  if (!/^\d+$/.test(props.githubOwnerId) || !/^\d+$/.test(props.githubRepositoryId)) {
+    throw new Error('githubOwnerId and githubRepositoryId must be the numeric IDs GitHub assigns');
   }
   if (!/^[A-Za-z0-9._-]+$/.test(props.githubEnvironment)) {
     throw new Error(`githubEnvironment must be a plain environment name, got "${props.githubEnvironment}"`);

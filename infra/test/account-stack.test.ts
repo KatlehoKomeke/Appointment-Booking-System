@@ -9,6 +9,8 @@ import { AccountStack, AccountStackProps, DEPLOY_ROLE_NAME } from '../lib/accoun
 const validProps: AccountStackProps = {
   env: { account: '111111111111', region: 'us-east-1' },
   githubRepository: 'KatlehoKomeke/Appointment-Booking-System',
+  githubOwnerId: '88820937',
+  githubRepositoryId: '1423867330',
   githubEnvironment: 'aws-demo',
   alertEmail: 'alerts@example.com',
   monthlyBudgetUsd: 90,
@@ -27,7 +29,7 @@ describe('AccountStack', () => {
     });
   });
 
-  test('lets only this repository, in the aws-demo environment, assume the deploy role', () => {
+  test('lets only this repository, identified by its immutable IDs, in the aws-demo environment, assume the deploy role', () => {
     synth().hasResourceProperties('AWS::IAM::Role', {
       RoleName: DEPLOY_ROLE_NAME,
       MaxSessionDuration: 3600,
@@ -39,7 +41,7 @@ describe('AccountStack', () => {
               StringEquals: {
                 'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com',
                 'token.actions.githubusercontent.com:sub':
-                  'repo:KatlehoKomeke/Appointment-Booking-System:environment:aws-demo',
+                  'repo:KatlehoKomeke@88820937/Appointment-Booking-System@1423867330:environment:aws-demo',
               },
             },
           }),
@@ -71,6 +73,7 @@ describe('AccountStack', () => {
 
   test.each([
     ['a repository without an owner', { githubRepository: 'Appointment-Booking-System' }, /owner\/name/],
+    ['a non-numeric repository ID', { githubRepositoryId: 'Appointment-Booking-System' }, /numeric IDs/],
     ['an environment name with spaces', { githubEnvironment: 'aws demo' }, /environment name/],
     ['a missing alert address', { alertEmail: '' }, /BRANCHBOOK_ALERT_EMAIL/],
     ['a zero budget', { monthlyBudgetUsd: 0 }, /positive number/],

@@ -32,6 +32,8 @@ new AccountStack(app, 'BranchbookAccount', {
   env: { account: process.env.CDK_DEFAULT_ACCOUNT, region: 'us-east-1' },
   description: 'BranchBook: GitHub OIDC deploy role and monthly cost budget (no customer data).',
   githubRepository: context('githubRepository'),
+  githubOwnerId: context('githubOwnerId'),
+  githubRepositoryId: context('githubRepositoryId'),
   githubEnvironment: context('githubEnvironment'),
   alertEmail,
   monthlyBudgetUsd: Number(context('monthlyBudgetUsd')),

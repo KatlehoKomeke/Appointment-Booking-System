@@ -21,7 +21,7 @@ sequenceDiagram
     participant STS as AWS STS
     participant Role as branchbook-github-deploy
     participant Boot as CDK bootstrap roles
-    GH->>STS: OIDC token for KatlehoKomeke/Appointment-Booking-System, environment aws-demo
+    GH->>STS: OIDC token for KatlehoKomeke@88820937/Appointment-Booking-System@1423867330, environment aws-demo
     STS->>Role: token matches the role's trust policy
     STS-->>GH: credentials valid for at most 1 hour
     GH->>Boot: cdk deploy assumes the cdk-hnb659fds-* roles
@@ -30,7 +30,10 @@ sequenceDiagram
 - **No access key exists anywhere.** GitHub proves the workflow's identity with a short-lived token, and AWS
   answers with credentials that expire within an hour.
 - **The trust is narrow.** Only jobs in this repository that declare the `aws-demo` GitHub environment match the
-  role's trust policy. Forks and other repositories cannot assume it.
+  role's trust policy. Forks and other repositories cannot assume it. The match uses GitHub's immutable subject,
+  `repo:KatlehoKomeke@88820937/Appointment-Booking-System@1423867330:environment:aws-demo`, which includes the
+  numeric owner and repository IDs. A repository recreated later under the same name gets a new ID, so it cannot
+  inherit the trust. The IDs are public GitHub identifiers, kept in `cdk.json`.
 - **The role can do almost nothing itself.** It may only assume the roles that `cdk bootstrap` created, and those
   carry out deployments. A unit test fails if any other permission is added.
 - **No account ID is ever committed.** The account comes from the credentials in use, and the role ARN is stored
@@ -136,4 +139,4 @@ environment afterwards.
 | `bin/branchbook.ts` | The CDK app: which stacks exist and where they deploy |
 | `lib/account-stack.ts` | `AccountStack`: the GitHub OIDC trust, the deploy role and the budget |
 | `test/account-stack.test.ts` | Unit tests that prove the stack's security properties |
-| `cdk.json` | Non-sensitive configuration (repository, environment, budget) and CDK feature flags |
+| `cdk.json` | Non-sensitive configuration (repository name and public IDs, environment, budget) and CDK feature flags |
