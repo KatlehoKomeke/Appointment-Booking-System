@@ -1,0 +1,89 @@
+# .gitignore
+# Keeps secrets, personal tooling files and build output out of the repository.
+# Rule of thumb: if a file holds credentials, personal data or machine-specific state, it is listed here.
+
+# ---------------------------------------------------------------------------
+# Secrets and local configuration (never commit these)
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.crt
+*.der
+id_rsa*
+id_ed25519*
+credentials
+credentials.*
+*.secret
+*.secrets
+secrets/
+.aws/
+.npmrc
+.netrc
+
+# ---------------------------------------------------------------------------
+# Personal tool and assistant settings (machine paths, local permissions)
+# ---------------------------------------------------------------------------
+.claude/
+CLAUDE.local.md
+.playwright-mcp/
+.idea/
+*.iml
+.vscode/
+!.vscode/extensions.json
+.fleet/
+.history/
+
+# ---------------------------------------------------------------------------
+# Operating system files
+# ---------------------------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------------
+# Java and Maven (api/)
+# ---------------------------------------------------------------------------
+target/
+*.class
+*.log
+hs_err_pid*
+replay_pid*
+.mvn/wrapper/maven-wrapper.jar
+# The jar serves the built SPA; the copy is produced by the build, not committed.
+api/src/main/resources/static/
+
+# ---------------------------------------------------------------------------
+# Node, Vite and Playwright (web/)
+# ---------------------------------------------------------------------------
+node_modules/
+dist/
+.vite/
+coverage/
+playwright-report/
+test-results/
+blob-report/
+*.tsbuildinfo
+npm-debug.log*
+
+# ---------------------------------------------------------------------------
+# AWS CDK (infra/)
+# ---------------------------------------------------------------------------
+cdk.out/
+# The app avoids context lookups, so there is nothing to cache; ignoring the file
+# also guarantees that account IDs never reach the repository.
+cdk.context.json
+
+# ---------------------------------------------------------------------------
+# Local databases, dumps and scratch output
+# ---------------------------------------------------------------------------
+*.dump
+*.sql.gz
+*.backup
+tmp/

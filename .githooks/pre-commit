@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# .githooks/pre-commit
+#
+# Blocks a commit when the staged changes contain a secret or a forbidden file.
+# Enable it once per clone with `make hooks` (sets core.hooksPath to .githooks).
+#
+# Checks, in order:
+#   1. No forbidden files are staged (.env files, keys, assistant settings).
+#   2. gitleaks finds no secrets in the staged diff.
+# The hook fails closed: if gitleaks cannot run, the commit is refused with instructions.
+
+set -euo pipefail
+
+GITLEAKS_VERSION="v8.30.1"
+GITLEAKS_IMAGE="ghcr.io/gitleaks/gitleaks:${GITLEAKS_VERSION}"
+repo_root="$(git rev-parse --show-toplevel)"
+
+# 1. Forbidden files. .gitignore should already stop these; this catches `git add -f`.
+forbidden_pattern='(^|/)(\.env(\..+)?|.*\.(pem|key|p12|pfx|jks|keystore)|id_(rsa|ed25519).*|\.claude/.*|CLAUDE\.local\.md|cdk\.context\.json)$'
+staged_files="$(git diff --cached --name-only --diff-filter=ACMR)"
+blocked="$(printf '%s\n' "${staged_files}" | grep -E "${forbidden_pattern}" | grep -v -E '(^|/)\.env\.example$' || true)"
+if [[ -n "${blocked}" ]]; then
+  echo "pre-commit: refusing to commit files that may hold secrets or personal settings:" >&2
+  printf '  %s\n' ${blocked} >&2
+  echo "Unstage them with: git restore --staged <file>" >&2
+  exit 1
+fi
+
+# 2. Secret scan of exactly what is being committed.
+scan_staged_diff() {
+  if command -v gitleaks >/dev/null 2>&1; then
+    git diff --cached --no-color --unified=0 \
+      | gitleaks stdin --config "${repo_root}/.gitleaks.toml" --redact --no-banner --verbose
+  elif command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+    git diff --cached --no-color --unified=0 \
+      | docker run --rm -i -v "${repo_root}/.gitleaks.toml:/config/gitleaks.toml:ro" "${GITLEAKS_IMAGE}" \
+          stdin --config /config/gitleaks.toml --redact --no-banner --verbose
+  else
+    echo "pre-commit: gitleaks is not installed and Docker is not running." >&2
+    echo "Install gitleaks ${GITLEAKS_VERSION} or start Docker, then commit again." >&2
+    return 2
+  fi
+}
+
+if ! scan_staged_diff; then
+  echo "pre-commit: commit blocked. Remove the secret from the staged changes;" >&2
+  echo "if it was ever real, rotate it first (see SECURITY.md)." >&2
+  exit 1
+fi

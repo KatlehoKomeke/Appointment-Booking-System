@@ -1,0 +1,38 @@
+# .gitleaks.toml
+# Secret-scanner configuration, used by the pre-commit hook (.githooks/pre-commit),
+# `make secrets-scan` and the secret-scan GitHub Actions workflow.
+#
+# It extends gitleaks' default rule set (cloud keys, tokens, private keys, connection strings)
+# and adds rules for this project. Allowlist entries must be justified in a comment.
+
+title = "BranchBook secret scanning"
+
+[extend]
+useDefault = true
+
+# A PostgreSQL connection URL that embeds a user name and password before the host name.
+# (No literal example here: it would trip this very rule.)
+[[rules]]
+id = "postgres-url-with-password"
+description = "PostgreSQL connection string with an inline password"
+regex = '''postgres(?:ql)?://[^\s:/@]+:[^\s@]{4,}@[^\s/]+'''
+keywords = ["postgres://", "postgresql://"]
+
+# The AWS account ID of a real deployment should never be committed (cdk.context.json is ignored too).
+[[rules]]
+id = "aws-account-arn"
+description = "ARN containing a 12-digit AWS account ID"
+regex = '''arn:aws:[a-z0-9-]+:[a-z0-9-]*:\d{12}:'''
+keywords = ["arn:aws:"]
+
+[allowlist]
+description = "Paths that are never scanned"
+paths = [
+  # Version-control internals and dependency or build output.
+  '''(^|/)\.git/''',
+  '''(^|/)node_modules/''',
+  '''(^|/)target/''',
+  '''(^|/)cdk\.out/''',
+  # Lock files contain integrity hashes that look like secrets.
+  '''(^|/)package-lock\.json$''',
+]

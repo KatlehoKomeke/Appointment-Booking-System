@@ -1,0 +1,21 @@
+# .gitattributes
+# Normalises line endings so scripts run on every platform and diffs stay clean.
+
+* text=auto eol=lf
+
+# Windows-only launchers keep CRLF.
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Shell scripts and the Maven wrapper must keep LF or they fail on Linux and macOS.
+*.sh text eol=lf
+mvnw text eol=lf
+.githooks/* text eol=lf
+
+# Binary assets: never diff or normalise.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.woff2 binary
+*.jar binary
