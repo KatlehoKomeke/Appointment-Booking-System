@@ -2,6 +2,7 @@ import { CfnOutput, Duration, Stack, StackProps } from 'aws-cdk-lib/core';
 import * as budgets from 'aws-cdk-lib/aws-budgets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
+import { RELEASE_PARAMETER_NAME } from './release-stack';
 
 /** The issuer of the OpenID Connect tokens that GitHub Actions presents to AWS. */
 export const GITHUB_OIDC_URL = 'https://token.actions.githubusercontent.com';
@@ -45,6 +46,12 @@ export interface AccountStackProps extends StackProps {
 
   /** Monthly cost, in US dollars, at which the budget alerts are measured (they fire at 50, 80 and 100 percent). */
   readonly monthlyBudgetUsd: number;
+
+  /**
+   * The Region of the release record the deploy workflow reads back after each deployment (see {@link ReleaseStack}).
+   * The deploy role may read that one parameter and nothing else.
+   */
+  readonly releaseRegion: string;
 }
 
 /**
@@ -54,7 +61,8 @@ export interface AccountStackProps extends StackProps {
  * - **GitHub as a trusted identity provider** (OpenID Connect), so workflows obtain short-lived AWS credentials
  *   and no long-lived access key exists anywhere to leak.
  * - **A deploy role** that only one repository's jobs in one GitHub environment can assume. The role can do nothing
- *   except assume the roles that `cdk bootstrap` created; those roles carry out the deployment.
+ *   except assume the roles that `cdk bootstrap` created, which carry out the deployment, and read the one release
+ *   parameter the pipeline checks afterwards.
  * - **A monthly cost budget** that e-mails at 50, 80 and 100 percent of the limit.
  *
  * IAM and AWS Budgets are global, so this stack is deployed once to `us-east-1`, where Budgets lives. It holds no
@@ -95,6 +103,16 @@ export class AccountStack extends Stack {
         sid: 'AssumeCdkBootstrapRolesOnly',
         actions: ['sts:AssumeRole'],
         resources: [`arn:${this.partition}:iam::${this.account}:role/cdk-hnb659fds-*`],
+      }),
+    );
+
+    // After deploying, the pipeline reads the release record back to prove the pushed commit is live. Reading that
+    // single parameter is the only thing the role may do directly.
+    this.deployRole.addToPolicy(
+      new iam.PolicyStatement({
+        sid: 'ReadReleaseRecordOnly',
+        actions: ['ssm:GetParameter'],
+        resources: [`arn:${this.partition}:ssm:${props.releaseRegion}:${this.account}:parameter${RELEASE_PARAMETER_NAME}`],
       }),
     );
 
@@ -151,6 +169,9 @@ function validateProps(props: AccountStackProps): void {
   }
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(props.alertEmail)) {
     throw new Error('alertEmail must be an e-mail address (set BRANCHBOOK_ALERT_EMAIL before cdk synth or deploy)');
+  }
+  if (!/^[a-z]{2}(-[a-z]+)+-\d$/.test(props.releaseRegion)) {
+    throw new Error(`releaseRegion must be an AWS Region name such as af-south-1, got "${props.releaseRegion}"`);
   }
   if (!(props.monthlyBudgetUsd > 0)) {
     throw new Error(`monthlyBudgetUsd must be a positive number, got ${props.monthlyBudgetUsd}`);

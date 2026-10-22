@@ -14,6 +14,7 @@ const validProps: AccountStackProps = {
   githubEnvironment: 'aws-demo',
   alertEmail: 'alerts@example.com',
   monthlyBudgetUsd: 90,
+  releaseRegion: 'af-south-1',
 };
 
 function synth(overrides: Partial<AccountStackProps> = {}): Template {
@@ -50,15 +51,18 @@ describe('AccountStack', () => {
     });
   });
 
-  test('grants the deploy role nothing except assuming the CDK bootstrap roles', () => {
+  test('grants the deploy role only the CDK bootstrap roles and a read of the release record', () => {
     const template = synth();
     const policies = template.findResources('AWS::IAM::Policy');
     const statements = Object.values(policies).flatMap(
       (policy: any) => policy.Properties.PolicyDocument.Statement as any[],
     );
-    expect(statements).toHaveLength(1);
+    expect(statements).toHaveLength(2);
     expect(statements[0].Action).toBe('sts:AssumeRole');
     expect(JSON.stringify(statements[0].Resource)).toContain(':role/cdk-hnb659fds-*');
+    expect(statements[1].Action).toBe('ssm:GetParameter');
+    expect(JSON.stringify(statements[1].Resource)).toContain(':ssm:af-south-1:');
+    expect(JSON.stringify(statements[1].Resource)).toContain(':parameter/branchbook/release');
     expect(JSON.stringify(statements)).not.toContain('"*"');
   });
 
@@ -77,6 +81,7 @@ describe('AccountStack', () => {
     ['an environment name with spaces', { githubEnvironment: 'aws demo' }, /environment name/],
     ['a missing alert address', { alertEmail: '' }, /BRANCHBOOK_ALERT_EMAIL/],
     ['a zero budget', { monthlyBudgetUsd: 0 }, /positive number/],
+    ['a misspelt release Region', { releaseRegion: 'cape-town' }, /AWS Region/],
   ])('refuses to synthesise with %s', (_label, overrides, message) => {
     expect(() => synth(overrides as Partial<AccountStackProps>)).toThrow(message);
   });

@@ -8,7 +8,7 @@ in TypeScript. Nothing is created by hand in the AWS console. The reasoning is i
 
 | Stack | Region | Deployed by | What it creates | Monthly cost |
 |---|---|---|---|---|
-| `BranchbookAccount` | us-east-1 | An administrator, by hand | GitHub as an OpenID Connect identity provider; the `branchbook-github-deploy` role; a monthly cost budget with e-mail alerts at 50, 80 and 100 percent | $0 |
+| `BranchbookAccount` | us-east-1 | An administrator, by hand | GitHub as an OpenID Connect identity provider; the `branchbook-github-deploy` role, allowed only to assume the CDK bootstrap roles and read `/branchbook/release`; a monthly cost budget with e-mail alerts at 50, 80 and 100 percent | $0 |
 | `BranchbookRelease` | af-south-1 | The pipeline, on every push to `main` | The SSM parameter `/branchbook/release`, holding the commit most recently deployed | $0 |
 
 The stacks that host the application, `BranchbookDns`, `BranchbookData` and `BranchbookApp` in `af-south-1`
@@ -55,8 +55,9 @@ sequenceDiagram
   `repo:KatlehoKomeke@88820937/Appointment-Booking-System@1423867330:environment:aws-demo`, which includes the
   numeric owner and repository IDs. A repository recreated later under the same name gets a new ID, so it cannot
   inherit the trust. The IDs are public GitHub identifiers, kept in `cdk.json`.
-- **The role can do almost nothing itself.** It may only assume the roles that `cdk bootstrap` created, and those
-  carry out deployments. A unit test fails if any other permission is added.
+- **The role can do almost nothing itself.** It may assume the roles that `cdk bootstrap` created, which carry out
+  deployments, and read the single release parameter the pipeline checks afterwards. A unit test fails if any other
+  permission is added.
 - **No account ID is ever committed.** The account comes from the credentials in use, and the role ARN is stored
   as a GitHub environment secret, so it is masked in the public workflow logs.
 

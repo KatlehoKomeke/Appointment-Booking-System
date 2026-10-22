@@ -48,6 +48,7 @@ if (alertEmail !== undefined) {
     githubEnvironment: context('githubEnvironment'),
     alertEmail,
     monthlyBudgetUsd: Number(context('monthlyBudgetUsd')),
+    releaseRegion: 'af-south-1',
   });
 }
 
