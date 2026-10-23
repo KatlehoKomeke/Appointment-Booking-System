@@ -3,8 +3,9 @@
 This document explains how BranchBook is built and why. The decisions behind it are recorded one per file in
 [docs/adr](adr/README.md); the business rules are in [domain-rules.md](domain-rules.md).
 
-**Status: design complete.** The structure below is the plan the code follows. Diagrams use Mermaid, which GitHub
-renders in place.
+**Status: design complete; milestone M0 is built.** M0 is the skeleton: one jar that serves the app, PostgreSQL 17
+migrated by Flyway, health probes and security headers. The modules below arrive milestone by milestone. Diagrams
+use Mermaid, which GitHub renders in place.
 
 ## 1. What the system does
 

@@ -26,7 +26,7 @@ documentation is incomplete.
 ### Java (`api/`)
 
 - **Every package has a `package-info.java`.** It states the module and layer's responsibility and what may
-  depend on it.
+  depend on it. `PackageDocumentationTest` fails the build when one is missing.
 - **Every public class, interface, record and enum has Javadoc.** It explains the responsibility and, where one
   applies, the business rule it implements, for example `{@code BR-7}`.
 - **Every public method whose contract is not obvious from its signature has Javadoc.** It covers preconditions,

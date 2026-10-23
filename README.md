@@ -11,8 +11,8 @@ a simulated SMS confirmation that cannot be lost.
 
 | | |
 |---|---|
-| Stage | Design complete. Implementation starts with milestone M0. |
-| Run locally | `make up` (arrives in M0) |
+| Stage | Milestone M0 complete: the skeleton builds, passes every check and runs with `make up`. The booking flow comes next. |
+| Run locally | `make up`, then open http://localhost:8080 |
 | Hosted demo | Optional, in AWS Cape Town, defined in AWS CDK ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)) |
 | Deployment | Every push to `main` is tested and deployed to AWS Cape Town through OpenID Connect, with no stored keys ([ADR-0007](docs/adr/0007-continuous-deployment-from-main.md), [infra/README.md](infra/README.md)) |
 
@@ -68,13 +68,30 @@ with boundaries enforced by architecture tests. The full picture is in [docs/arc
 
 | Layer | Choice |
 |---|---|
-| Back end | Java 25 LTS (21 as a fallback), Spring Boot 4.1, Spring Data JPA, Flyway |
+| Back end | Java 25 LTS, Spring Boot 4.1, Spring Data JPA, Flyway |
 | Database | PostgreSQL 17 with `btree_gist` |
 | Front end | React 19, TypeScript (strict), Vite, TanStack Query, react-hook-form with zod |
 | Tests | JUnit, Testcontainers on real PostgreSQL, ArchUnit, Vitest, Playwright |
 | Delivery | Docker Compose locally, GitHub Actions, AWS CDK for the optional hosted demo |
 
-Exact versions are recorded in a Versions table on the day the project is scaffolded (*planned*, M0).
+### Versions
+
+Recorded when the project was scaffolded (M0). Dependabot proposes updates weekly.
+
+| Component | Version | Pinned in |
+|---|---|---|
+| Java | 25 LTS; Eclipse Temurin 25.0.4.1 in the image | `api/pom.xml`, `Dockerfile` |
+| Spring Boot | 4.1.1, with Spring Framework 7.0.9 and Spring Security 7.1.1 | `api/pom.xml` |
+| Hibernate ORM, Flyway | 7.4.5, 12.4.0 | managed by Spring Boot |
+| PostgreSQL | 17.11; JDBC driver 42.7.13 | `compose.yaml`, `TestcontainersConfiguration` |
+| JUnit, Testcontainers | 6.0.3, 2.0.5 | managed by Spring Boot |
+| Maven | 3.10.0, checksum-verified by the wrapper | `api/.mvn/wrapper/maven-wrapper.properties` |
+| Node.js | 24; 24.22.1 in the build image | `.nvmrc`, `Dockerfile` |
+| React | 19.3.1 | `web/package-lock.json` |
+| TypeScript | 6.0.3 | `web/` and `infra/` lockfiles |
+| Vite, Vitest | 8.3.5, 5.0.5 | `web/package-lock.json` |
+| ESLint | 10.13.0 | `web/` and `infra/` lockfiles |
+| AWS CDK | `aws-cdk-lib` 2.274.0, CLI 2.1146.1 | `infra/package.json` |
 
 ## Scope
 
@@ -91,17 +108,48 @@ real SMS or email providers, a message broker, microservices and Kubernetes mani
 
 ## Getting started
 
-Today the repository holds the plan and its documentation. Code arrives milestone by milestone.
+### Run it
+
+Docker is the only prerequisite.
 
 ```bash
 git clone https://github.com/KatlehoKomeke/Appointment-Booking-System.git
 cd Appointment-Booking-System
-make hooks        # scan every commit for secrets before it is created
-make help         # list the available tasks
+make up       # build the image, start the app and PostgreSQL, wait until both are healthy
+make smoke    # check the running app over HTTP
+make down     # stop everything and delete the local database
 ```
 
-*Planned (M0):* `make up` builds and starts the application and its database with Docker, and prints the URL.
-Docker is the only prerequisite.
+`make up` prints the address: http://localhost:8080 unless you change it. If port 8080 is taken, choose another
+with `APP_PORT=18080 make up`, or in a `.env` file copied from [.env.example](.env.example). Without make, run
+`docker compose up --build --wait`.
+
+### Develop it
+
+Development also needs JDK 25 and Node 24.
+
+```bash
+make hooks     # once per clone: scan every commit for secrets before it is created
+make dev-api   # the API on port 8080, with a throwaway PostgreSQL in Docker
+make dev-web   # the web app on port 5173 with hot reload, calling the API
+make test      # every check CI runs on the API and the web app
+make help      # every other task
+```
+
+Each part has its own guide: [api/README.md](api/README.md), [web/README.md](web/README.md) and
+[infra/README.md](infra/README.md).
+
+## Repository layout
+
+```text
+api/                     Spring Boot application: the API, the confirmation dispatcher, and serving the web app
+web/                     React app
+infra/                   AWS CDK app for the hosted demo
+docs/                    architecture, decision records, domain rules, error codes
+scripts/smoke.sh         HTTP smoke test of a running instance
+Dockerfile, compose.yaml the image and the local stack behind `make up`
+Makefile                 one entry point for every task
+```
 
 ## Assumptions
 
