@@ -13,7 +13,7 @@
 # The build stages run on the builder's own platform, because JavaScript and Java bytecode are the same everywhere;
 # only the runtime stage is built for the target platform (amd64 or arm64).
 
-FROM --platform=$BUILDPLATFORM node:24.22.1-alpine AS web
+FROM --platform=$BUILDPLATFORM node:26.12.0-alpine AS web
 WORKDIR /src/web
 # Dependencies first, so this layer is rebuilt only when the lockfile changes.
 COPY web/package.json web/package-lock.json ./
