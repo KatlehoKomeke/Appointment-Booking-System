@@ -18,7 +18,11 @@ import { ReleaseStack } from '../lib/release-stack';
 
 const app = new App();
 
-/** Reads a required string or number from cdk.json context, failing with a clear message when it is missing. */
+/**
+ * Reads a required string or number from cdk.json context, failing with a clear message when it is missing.
+ *
+ * @param key - the context key, for example `githubRepository`
+ */
 function context(key: string): string {
   const value: unknown = app.node.tryGetContext(key);
   if (typeof value === 'string' && value.trim() !== '') {

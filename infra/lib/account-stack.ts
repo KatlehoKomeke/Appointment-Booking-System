@@ -147,6 +147,8 @@ export class AccountStack extends Stack {
  * The exact `sub` claim GitHub puts in the OIDC token of a job that declares the environment, in GitHub's immutable
  * subject format: `repo:OWNER@OWNER_ID/REPO@REPO_ID:environment:NAME`. The repository setting is visible with
  * `gh api repos/OWNER/REPO/actions/oidc/customization/sub` (`use_immutable_subject: true`).
+ *
+ * @param props - the repository's name, numeric IDs and the environment that may deploy
  */
 export function githubSubject(props: Pick<AccountStackProps, 'githubRepository' | 'githubOwnerId' | 'githubRepositoryId' | 'githubEnvironment'>): string {
   const [owner, repository] = props.githubRepository.split('/');
@@ -156,6 +158,8 @@ export function githubSubject(props: Pick<AccountStackProps, 'githubRepository' 
 /**
  * Fails synthesis early, with a clear message, when the configuration would create a role that trusts the wrong
  * repository or a budget that cannot alert anyone.
+ *
+ * @param props - the stack's configuration, as passed to the constructor
  */
 function validateProps(props: AccountStackProps): void {
   if (!/^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(props.githubRepository)) {
@@ -174,6 +178,6 @@ function validateProps(props: AccountStackProps): void {
     throw new Error(`releaseRegion must be an AWS Region name such as af-south-1, got "${props.releaseRegion}"`);
   }
   if (!(props.monthlyBudgetUsd > 0)) {
-    throw new Error(`monthlyBudgetUsd must be a positive number, got ${props.monthlyBudgetUsd}`);
+    throw new Error(`monthlyBudgetUsd must be a positive number, got ${String(props.monthlyBudgetUsd)}`);
   }
 }

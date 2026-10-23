@@ -1,6 +1,6 @@
 # .github/workflows/infra.yml
 #
-# Type-checks, unit-tests and synthesises the AWS CDK app in infra/ on every change to it.
+# Lints, type-checks, unit-tests and synthesises the AWS CDK app in infra/ on every change to it.
 # It needs no AWS credentials: the tests assert on the generated CloudFormation, and synth never calls AWS.
 
 name: infra
@@ -42,6 +42,9 @@ jobs:
 
       - name: Install the pinned dependencies
         run: npm ci
+
+      - name: Lint, including TSDoc on every export
+        run: npm run lint
 
       - name: Type-check
         run: npm run build

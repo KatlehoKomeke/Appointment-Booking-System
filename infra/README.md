@@ -19,7 +19,7 @@ The stacks that host the application, `BranchbookDns`, `BranchbookData` and `Bra
 Every push to `main` runs [.github/workflows/deploy.yml](../.github/workflows/deploy.yml)
 ([ADR-0007](../docs/adr/0007-continuous-deployment-from-main.md)):
 
-1. **Test.** Type-check and unit-test the CDK app. Nothing reaches AWS if this fails.
+1. **Test.** Lint, type-check and unit-test the CDK app. Nothing reaches AWS if this fails.
 2. **Deploy.** Sign in to AWS through OpenID Connect as `branchbook-github-deploy`, then `cdk deploy` the workload stacks.
 3. **Verify.** Read `/branchbook/release` back from AWS and fail unless it equals the pushed commit.
 
@@ -74,10 +74,14 @@ All commands run from this folder.
 
 ```bash
 npm ci                                                     # install the pinned dependencies
+npm run lint                                               # ESLint, including TSDoc on every export
 npm run build                                              # type-check
 npm test                                                   # unit tests on the synthesised templates
 BRANCHBOOK_ALERT_EMAIL=alerts@example.com npx cdk synth    # render CloudFormation without touching AWS
 ```
+
+The lint rules are in [eslint.config.mjs](eslint.config.mjs). They use typescript-eslint, which needs the TypeScript
+compiler API that TypeScript 7 does not yet provide, so this package uses TypeScript 6.0, the same as `web/`.
 
 `BRANCHBOOK_ALERT_EMAIL` is where budget alerts go. It is read from the environment so that no personal address is
 ever committed. Any placeholder works for `synth` and `test`; use your real address only when deploying.

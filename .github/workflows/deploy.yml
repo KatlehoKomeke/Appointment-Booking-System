@@ -3,7 +3,7 @@
 # Continuous deployment: every push to main is tested, deployed to AWS and verified
 # (docs/adr/0007-continuous-deployment-from-main.md).
 #
-# - test:   type-checks and unit-tests the CDK app; nothing reaches AWS if this fails.
+# - test:   lints, type-checks and unit-tests the CDK app; nothing reaches AWS if this fails.
 # - deploy: signs in to AWS through OpenID Connect (no stored keys) using the role in the aws-demo environment, runs
 #           `cdk deploy` for the workload stacks, then reads back the recorded release to prove the new commit is live.
 #
@@ -45,6 +45,9 @@ jobs:
 
       - name: Install the pinned dependencies
         run: npm ci
+
+      - name: Lint, including TSDoc on every export
+        run: npm run lint
 
       - name: Type-check
         run: npm run build

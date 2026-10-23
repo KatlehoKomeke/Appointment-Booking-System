@@ -17,6 +17,11 @@ const validProps: AccountStackProps = {
   releaseRegion: 'af-south-1',
 };
 
+/** The parts of a synthesised `AWS::IAM::Policy` resource that the assertions below read. */
+interface PolicyResource {
+  Properties: { PolicyDocument: { Statement: { Action: string | string[]; Resource: unknown }[] } };
+}
+
 function synth(overrides: Partial<AccountStackProps> = {}): Template {
   const app = new App();
   return Template.fromStack(new AccountStack(app, 'Account', { ...validProps, ...overrides }));
@@ -53,10 +58,8 @@ describe('AccountStack', () => {
 
   test('grants the deploy role only the CDK bootstrap roles and a read of the release record', () => {
     const template = synth();
-    const policies = template.findResources('AWS::IAM::Policy');
-    const statements = Object.values(policies).flatMap(
-      (policy: any) => policy.Properties.PolicyDocument.Statement as any[],
-    );
+    const policies = template.findResources('AWS::IAM::Policy') as Record<string, PolicyResource>;
+    const statements = Object.values(policies).flatMap((policy) => policy.Properties.PolicyDocument.Statement);
     expect(statements).toHaveLength(2);
     expect(statements[0].Action).toBe('sts:AssumeRole');
     expect(JSON.stringify(statements[0].Resource)).toContain(':role/cdk-hnb659fds-*');
