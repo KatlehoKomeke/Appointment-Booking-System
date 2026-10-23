@@ -1,0 +1,6 @@
+# Generated output and the lockfile are never formatted by hand.
+dist
+coverage
+package-lock.json
+# Markdown follows the repository-wide documentation style, which Prettier does not apply anywhere else.
+*.md

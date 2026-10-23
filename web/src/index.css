@@ -1,0 +1,90 @@
+/*
+ * index.css: global styles and the colour tokens.
+ *
+ * The palette is Fynbos Bank's own (fynbos green), never a real bank's brand colours. Every text and background
+ * pair meets WCAG 2.2 AA contrast.
+ */
+
+:root {
+  --colour-brand: #1e6b52;
+  --colour-on-brand: #ffffff;
+  --colour-text: #1b1f1d;
+  --colour-text-muted: #4a524e;
+  --colour-surface: #ffffff;
+  --colour-notice: #fff4d6;
+  --colour-notice-border: #c99a1e;
+
+  --space-2: 0.5rem;
+  --space-3: 1rem;
+  --space-5: 2.5rem;
+
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    sans-serif;
+  font-size: 100%;
+  line-height: 1.5;
+  color: var(--colour-text);
+  background: var(--colour-surface);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+.notice {
+  padding: var(--space-2) var(--space-3);
+  background: var(--colour-notice);
+  border-bottom: 2px solid var(--colour-notice-border);
+  font-size: 0.875rem;
+}
+
+.notice p {
+  margin: 0 auto;
+  max-width: 40rem;
+}
+
+.header {
+  padding: var(--space-3);
+  background: var(--colour-brand);
+  color: var(--colour-on-brand);
+}
+
+.brand {
+  margin: 0 auto;
+  max-width: 40rem;
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.brand-owner {
+  font-size: 0.875rem;
+  font-weight: 400;
+}
+
+.main {
+  margin: 0 auto;
+  max-width: 40rem;
+  padding: var(--space-5) var(--space-3);
+}
+
+.main h1 {
+  margin: 0 0 var(--space-3);
+  font-size: 1.75rem;
+  line-height: 1.2;
+}
+
+.placeholder {
+  color: var(--colour-text-muted);
+}
