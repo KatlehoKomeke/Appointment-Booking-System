@@ -1,0 +1,72 @@
+# application.yml
+#
+# Settings shared by every environment. Each property carries the reason for its value (CONTRIBUTING.md).
+# Credentials never appear here: the database connection comes from environment variables at runtime, which
+# docker compose sets locally and AWS Secrets Manager supplies in the hosted demo.
+
+spring:
+  application:
+    # Names the application in logs and in /actuator/info.
+    name: branchbook
+
+  threads:
+    virtual:
+      # Serves each request on a virtual thread, so requests waiting on PostgreSQL do not tie up a
+      # fixed-size thread pool. Java 24 and later no longer pin a virtual thread inside synchronized blocks.
+      enabled: true
+
+  datasource:
+    # The database to connect to, for example jdbc:postgresql://db:5432/branchbook. There are deliberately no
+    # defaults: if a variable is missing, startup fails instead of connecting to a database nobody configured.
+    url: ${DB_URL}
+    # The database user and password. Never logged, never committed.
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+
+  flyway:
+    # Migrations in src/main/resources/db/migration create and change the schema at startup. A missing folder is
+    # a packaging mistake, so it fails startup instead of starting with an empty schema.
+    fail-on-missing-locations: true
+
+  jpa:
+    # Database connections are held only inside a transaction, never while a response is written.
+    open-in-view: false
+    hibernate:
+      # Flyway owns the schema. Hibernate only checks at startup that the entities match it.
+      ddl-auto: validate
+    properties:
+      hibernate:
+        jdbc:
+          # Reads and writes timestamps in UTC whatever the JVM's time zone (docs/architecture.md, section 8).
+          time_zone: UTC
+
+  lifecycle:
+    # On shutdown, in-flight requests get up to 20 seconds to finish. Shorter than the 30 seconds docker
+    # compose and Amazon ECS wait before they force-stop the container.
+    timeout-per-shutdown-phase: 20s
+
+server:
+  # The HTTP port. A hosting platform can set PORT; otherwise 8080.
+  port: ${PORT:8080}
+  # Stops accepting new requests and lets in-flight ones finish before the process exits. This is Spring Boot's
+  # default, stated because the shutdown timeout above depends on it.
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Only health and info are reachable over HTTP. Endpoints such as env, beans and heapdump stay closed.
+        include: health, info
+  endpoint:
+    health:
+      probes:
+        # Serves the liveness probe at /livez and the readiness probe at /readyz on the main port. The Docker
+        # health check and the AWS load balancer use /readyz.
+        enabled: true
+        add-additional-paths: true
+      group:
+        readiness:
+          # Ready only once the application has started and PostgreSQL answers. Liveness deliberately ignores
+          # the database, so an outage takes the instance out of service instead of restarting it in a loop.
+          include: readinessState, db
