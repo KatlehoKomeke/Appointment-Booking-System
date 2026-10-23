@@ -52,7 +52,9 @@ documentation is incomplete.
 
 - **Test names read as requirements,** for example `twentyRacersForOneSeatProduceExactlyOne201`.
 - **A test that proves a business rule cites it** (`BR-n`) in its Javadoc or display name. The rule's entry in
-  [docs/domain-rules.md](docs/domain-rules.md) names the test.
+  [docs/domain-rules.md](docs/domain-rules.md) names the test, and its status says whether the rule is proven or
+  planned. `scripts/check-test-refs.sh` (`make test-docs`, and in CI) fails if a rule has no status or no proof, or
+  if a proven rule or the README cites a test that does not exist. Only methods annotated as tests count.
 
 ### Configuration, scripts and workflows
 

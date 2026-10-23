@@ -12,7 +12,7 @@ GITLEAKS_IMAGE := ghcr.io/gitleaks/gitleaks:$(GITLEAKS_VERSION)
 GIT_SAFE_DIR := -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs psql smoke dev-api dev-web test test-api test-web fmt hooks secrets-scan secrets-scan-history
+.PHONY: help up down logs psql smoke dev-api dev-web test test-api test-web test-docs fmt hooks secrets-scan secrets-scan-history
 
 help: ## List the available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-22s %s\n", $$1, $$2}'
@@ -43,13 +43,16 @@ dev-api: ## Run the API on port 8080 with a throwaway PostgreSQL in Docker (JDK 
 dev-web: web/node_modules ## Run the web app on port 5173 with hot reload, calling the API on port 8080 (Node 24)
 	cd web && npm run dev
 
-test: test-api test-web ## Run every check that CI runs on the API and the web app
+test: test-api test-web test-docs ## Run every check that CI runs on the API, the web app and the docs
 
 test-api: ## Build the API and run its unit and integration tests, formatting and Javadoc checks (JDK 25, Docker)
 	cd api && ./mvnw -B verify
 
 test-web: web/node_modules ## Lint, type-check, format-check, test and build the web app (Node 24)
 	cd web && npm run lint && npm run typecheck && npm run format:check && npm test && npm run build
+
+test-docs: ## Check that the tests the README and the proven domain rules cite exist
+	scripts/check-test-refs.sh
 
 fmt: web/node_modules ## Format the Java and TypeScript code
 	cd api && ./mvnw -B -q spotless:apply

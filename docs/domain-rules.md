@@ -3,14 +3,19 @@
 The single register of BranchBook's business rules. Every rule has an identifier, the layer that enforces it,
 and the test that proves it. Code comments and pull requests refer to rules by identifier (for example `BR-7`).
 
-**Status: planned.** The tests named here are written as the milestones land. From M1, `scripts/check-test-refs.sh`
-fails CI if any test cited in this file or in the README does not exist, so this register cannot drift from the code.
+Each rule has a status. **Proven** means every test it cites exists and passes in CI. **Planned** names the milestone
+that will prove it; parts already built are noted beside it. `scripts/check-test-refs.sh` runs in CI. It fails if a
+rule has no status or no proof, if a proven rule cites a test that does not exist, or if the README does, so a rule
+cannot be marked proven before its tests are written. Whether the tests cover every clause of a rule is a matter for
+review.
 
 How to read a rule:
 
 - **Rule**: the behaviour, stated so a reviewer can check it without running the code.
-- **Enforced in**: where the rule lives. When a database constraint is listed, the rule holds even for code that bypasses the application.
+- **Enforced in**: where the rule lives. A database constraint listed here enforces, for every code path including
+  ones that bypass the application, the part of the rule it names, and only that part.
 - **Proven by**: the test class and method. Names read as requirements.
+- **Status**: proven, or planned for a named milestone.
 
 ## Contents
 
@@ -49,14 +54,18 @@ How to read a rule:
 
 **Proven by.** `SlotCalendarTest.slotsStartAtOpeningAndStepByServiceDuration`
 
+**Status.** Planned for M2.
+
 <a id="br-2"></a>
 ## BR-2: Slots fit inside trading hours
 
 **Rule.** A slot is offered only if startsAt >= opens_at and startsAt + duration <= closes_at. Worked values: weekday 30-minute last start 16:30 and 45-minute 16:15; Saturday (08:00-13:00) 45-minute last start 11:45; Rustenburg Saturday (08:00-12:00) 45-minute last start 11:00 and 30-minute 11:30. On-grid starts that end after closing are 422 SLOT_OUTSIDE_HOURS: 17:00 on a 08:00-17:00 day, 12:30 for a 45-minute service on a 13:00 Saturday, 11:45 for a 45-minute service at RUS. ends_at is always computed server-side.
 
-**Enforced in.** domain (SlotCalendar.validate) + database constraint (appointments_ends_after_starts)
+**Enforced in.** domain (SlotCalendar.validate) + database constraint (appointments_ends_after_starts: an appointment ends after it starts; trading hours are not known to the constraint)
 
 **Proven by.** `SlotCalendarTest.saturdayFortyFiveMinuteLastStartIs1145`, `SlotCalendarTest.rustenburgSaturdayFortyFiveMinuteLastStartIs1100`, `SlotCalendarTest.onGridStartEndingAfterCloseIsOutsideHours`
+
+**Status.** Planned for M2.
 
 <a id="br-3"></a>
 ## BR-3: Closed days and public holidays have no slots
@@ -65,7 +74,9 @@ How to read a rule:
 
 **Enforced in.** domain (SlotCalendar + PublicHolidayCalendar pure function)
 
-**Proven by.** `PublicHolidayCalendarTest.sundayHoliday9Aug2026IsObservedOnMonday10Aug`
+**Proven by.** `PublicHolidayCalendarTest.sundayHoliday9Aug2026IsObservedOnMonday10Aug`, `BranchApiIT.detailListsClosedDatesWithHolidayNames`, `BranchApiIT.dayWithoutTradingHoursIsListedAsAClosedDay`
+
+**Status.** Planned for M2. Built in M1: the holiday calendar and the closed days in `GET /api/v1/branches/{code}`; availability and booking apply them from M2.
 
 <a id="br-4"></a>
 ## BR-4: Two-hour lead time
@@ -76,6 +87,8 @@ How to read a rule:
 
 **Proven by.** `SlotCalendarTest.excludesSlotsStartingWithinTwoHoursOfNow`
 
+**Status.** Planned for M2.
+
 <a id="br-5"></a>
 ## BR-5: Thirty-day booking horizon
 
@@ -83,7 +96,9 @@ How to read a rule:
 
 **Enforced in.** domain (SlotCalendar, BookingWindow) + application service (AvailabilityController date check)
 
-**Proven by.** `AvailabilityApiIT.dateOutsideWindowReturns422`, `SlotCalendarTest.horizonHasExactlyThirtyBookableDates`
+**Proven by.** `BookingWindowTest.thirtyDayHorizonGivesExactlyThirtyBookableDates`, `BranchApiIT.detailCarriesServerBookableWindow`, `BranchApiIT.windowStartsOnTheBranchsDateNotTheUtcDate`, `AvailabilityApiIT.dateOutsideWindowReturns422`
+
+**Status.** Planned for M2. Built in M1: the window, published as `bookableFrom` and `bookableTo`.
 
 <a id="br-6"></a>
 ## BR-6: Only services the branch offers
@@ -94,14 +109,18 @@ How to read a rule:
 
 **Proven by.** `AvailabilityApiIT.serviceNotOfferedAtBranchReturns422`
 
+**Status.** Planned for M2. Built in M1: the composite foreign key, proven by `SchemaConstraintIT`.
+
 <a id="br-7"></a>
 ## BR-7: Capacity: lowest free seat under a row lock
 
 **Rule.** At most branch_services.capacity active appointments of a service may overlap at any instant; seats are allocated as the lowest free seat under the branch_services row lock; a full slot returns 409 SLOT_FULL with up to three alternatives; a race for the last seat yields exactly one 201 (the 20 racers use 20 distinct synthetic mobiles so only the seat rule is under test).
 
-**Enforced in.** database constraint (appointments_seat_no_overlap) + application service (BookAppointmentHandler FOR UPDATE + generate_series seat query)
+**Enforced in.** application service (BookAppointmentHandler: the branch_services row lock, then the lowest free seat from generate_series(1, capacity)) + database constraint (appointments_seat_no_overlap: a seat is never used twice at once; the database does not cap seat_no at the capacity, only at 20)
 
 **Proven by.** `ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201`
+
+**Status.** Planned for M5. Built in M1: the exclusion constraint (BR-8).
 
 <a id="br-8"></a>
 ## BR-8: The database rejects a double booking from any code path
@@ -110,7 +129,9 @@ How to read a rule:
 
 **Enforced in.** database constraint (appointments_seat_no_overlap, btree_gist)
 
-**Proven by.** `DatabaseBackstopIT.directInsertOnTakenSeatIsRejectedByExclusionConstraint`
+**Proven by.** `SchemaConstraintIT.overlappingSeatIsRejectedEvenWithoutTheApplication`
+
+**Status.** Proven.
 
 <a id="br-9"></a>
 ## BR-9: One person, one place at a time
@@ -121,6 +142,8 @@ How to read a rule:
 
 **Proven by.** `BookAppointmentIT.overlappingAppointmentAtAnotherBranchReturns409CustomerOverlap`
 
+**Status.** Planned for M3. Built in M1: the database backstop, `appointments_customer_no_overlap`, proven by `SchemaConstraintIT`.
+
 <a id="br-10"></a>
 ## BR-10: One upcoming appointment per service
 
@@ -129,6 +152,8 @@ How to read a rule:
 **Enforced in.** application service (BookAppointmentHandler step 5, under the step 4 pg_advisory_xact_lock)
 
 **Proven by.** `BookAppointmentIT.sameMobileSameServiceSecondBookingReturns409WithoutRevealingReference`
+
+**Status.** Planned for M3.
 
 <a id="br-11"></a>
 ## BR-11: Unambiguous, unguessable references
@@ -139,6 +164,8 @@ How to read a rule:
 
 **Proven by.** `AppointmentReferenceTest.usesOnlyUnambiguousAlphabet`
 
+**Status.** Planned for M3. Built in M1: the reference format and uniqueness constraints.
+
 <a id="br-12"></a>
 ## BR-12: Idempotent booking
 
@@ -147,6 +174,8 @@ How to read a rule:
 **Enforced in.** database constraint (idempotency_keys_pkey via ON CONFLICT DO NOTHING) + application service (BookAppointmentHandler step 1)
 
 **Proven by.** `IdempotencyIT.concurrentSameKey_bookOnceAndBothReceiveSameReference`
+
+**Status.** Planned for M5.
 
 <a id="br-13"></a>
 ## BR-13: Lookup needs the reference and the last four digits
@@ -157,23 +186,29 @@ How to read a rule:
 
 **Proven by.** `AppointmentApiIT.getWithWrongLast4Returns404NotForbidden`
 
+**Status.** Planned for M3.
+
 <a id="br-14"></a>
 ## BR-14: Cancellation rules
 
-**Rule.** Cancellation: CONFIRMED -> CANCELLED only while now < starts_at (else 409 TOO_LATE_TO_CANCEL); a repeat cancel is a 200 no-op that queues nothing; the seat is released immediately and a CANCELLATION message is queued in the same transaction.
+**Rule.** Cancellation: CONFIRMED -> CANCELLED only while now < starts_at (else 409 TOO_LATE_TO_CANCEL); a repeat cancel is a 200 no-op that queues nothing; the seat is released immediately and a CANCELLATION message is queued in the same transaction. Cancellation is the only status change the API offers.
 
 **Enforced in.** domain (Appointment.cancel guard, @Version) + application service (CancelAppointmentHandler)
 
 **Proven by.** `CancelAppointmentIT.cancelFreesSeatForNewBooking`
 
+**Status.** Planned for Tier 2 (cancellation).
+
 <a id="br-15"></a>
 ## BR-15: Appointment lifecycle
 
-**Rule.** AppointmentStatus has exactly five states with four legal edges (CONFIRMED->CANCELLED|CHECKED_IN|NO_SHOW, CHECKED_IN->COMPLETED); terminal states reject every transition; only CONFIRMED->CANCELLED is reachable through the API; the Java ACTIVE set equals the schema predicate and ACTIVE_SQL is its only spelling in native SQL.
+**Rule.** AppointmentStatus has exactly five states with four legal edges (CONFIRMED->CANCELLED|CHECKED_IN|NO_SHOW, CHECKED_IN->COMPLETED); terminal states reject every transition; only CONFIRMED and CHECKED_IN hold a seat, and the Java ACTIVE set equals the schema's predicates; each lifecycle timestamp is set exactly when its status says the event happened.
 
 **Enforced in.** domain (AppointmentStatus.canTransitionTo) + database constraint (status CHECK, timestamp-consistency CHECKs, partial predicates)
 
-**Proven by.** `AppointmentStatusTest.terminalStatesRejectEveryTransition`
+**Proven by.** `AppointmentStatusTest.hasExactlyTheFiveStatusesOfTheLifecycle`, `SchemaConstraintIT.statusCheckAllowsExactlyTheJavaStatuses`, `AppointmentStatusTest.terminalStatesRejectEveryTransition`, `AppointmentStatusTest.exactlyFourTransitionsAreLegal`, `AppointmentStatusTest.onlyConfirmedAndCheckedInHoldASeat`, `SchemaConstraintIT.activeStatusesMatchSchemaPredicate`, `SchemaConstraintIT.rawInsertViolatingEachNamedConstraintIsRejected`
+
+**Status.** Proven. Which transitions the API offers is BR-14. Native SQL, from M2, spells the active statuses only through `AppointmentStatus.ACTIVE_SQL`.
 
 <a id="br-16"></a>
 ## BR-16: The confirmation is committed with the booking
@@ -184,6 +219,8 @@ How to read a rule:
 
 **Proven by.** `ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically`
 
+**Status.** Planned for M5.
+
 <a id="br-17"></a>
 ## BR-17: Delivery with retries and a final FAILED state
 
@@ -192,6 +229,8 @@ How to read a rule:
 **Enforced in.** application service (DispatchDueMessages) + database (partial index ix_notification_messages_due, row locks)
 
 **Proven by.** `NotificationDispatcherIT.retriesWithBackoffThenMarksFailedAfterFiveAttempts`
+
+**Status.** Planned for M5.
 
 <a id="br-18"></a>
 ## BR-18: The SMS fits one segment
@@ -202,14 +241,18 @@ How to read a rule:
 
 **Proven by.** `NotificationTemplatesTest.confirmationFitsOneGsm7SegmentForLongestSeededNames`, `NotificationPropertiesTest.rejectsBaseUrlThatOverflowsSms`, `NotificationTemplatesTest.rendersEnglishDayNamesUnderAnyDefaultLocale`
 
+**Status.** Planned for M3. Built in M1: the GSM-7 checks on short names and the coarse SMS length guard.
+
 <a id="br-19"></a>
 ## BR-19: South African mobile numbers, never logged
 
-**Rule.** A South African mobile number is mandatory, accepted in the six documented formats, parsed only when libphonenumber reports MOBILE and the E.164 form matches the schema CHECK pattern, stored only as E.164, displayed 082 123 4567, masked 082 *** 4567 only to a caller who proved the number, redacted 082 *** **** in the inbox and every other surface; logs, MDC, the PostgreSQL log and exception messages carry no name, email, number or masked last four digits.
+**Rule.** A South African mobile number is mandatory, accepted in the six documented formats, parsed only when libphonenumber reports MOBILE and the E.164 form matches the schema CHECK pattern, stored only as E.164, displayed 082 555 0101, masked 082 *** 0101 only to a caller who proved the number, redacted 082 *** **** in the inbox and every other surface; logs, MDC, the PostgreSQL log and exception messages carry no name, email, number or masked last four digits.
 
 **Enforced in.** domain (MobileNumber, CustomerName) + database constraint (customer_mobile CHECK; log_error_verbosity=terse) + driver (pgjdbc logServerErrorDetail=false) + application service (ProblemDetailHandler never echoes input; log events carry messageId, reference, channel only)
 
-**Proven by.** `MobileNumberTest.sixInputFormatsNormaliseToPlus27821234567`, `LogRedactionTest.bookingLogsContainNoCustomerNameOrMobile`
+**Proven by.** `MobileNumberTest.sixInputFormatsNormaliseToPlus27825550101`, `LogRedactionTest.bookingLogsContainNoCustomerNameOrMobile`
+
+**Status.** Planned for M3. Built in M1: the mobile number CHECK, terse database error logging and `logServerErrorDetail=false`.
 
 <a id="br-20"></a>
 ## BR-20: Time is stored in UTC and shown in SAST
@@ -220,6 +263,8 @@ How to read a rule:
 
 **Proven by.** `AvailabilityApiIT.rendersStartsAtWithJohannesburgOffset`, `NativeSqlUsesBoundNowTest.noJavaSqlLiteralCallsNow`
 
+**Status.** Planned for M2.
+
 <a id="br-21"></a>
 ## BR-21: One validation code, fixed precedence
 
@@ -228,6 +273,8 @@ How to read a rule:
 **Enforced in.** domain (SlotCalendar.validate)
 
 **Proven by.** `SlotCalendarTest.validatePrecedence`
+
+**Status.** Planned for M2.
 
 <a id="br-22"></a>
 ## BR-22: Bookings by one mobile are serialised
@@ -238,6 +285,8 @@ How to read a rule:
 
 **Proven by.** `ConcurrentBookingIT.sameMobileTwoBranchesOverlappingConcurrentlyGivesOne201AndOne409CustomerOverlap`
 
+**Status.** Planned for M5.
+
 <a id="br-23"></a>
 ## BR-23: Error bodies never reveal another booking
 
@@ -246,6 +295,8 @@ How to read a rule:
 **Enforced in.** application service (ProblemDetailHandler, ConstraintViolationTranslator)
 
 **Proven by.** `AppointmentApiIT.noProblemBodyEverContainsAnAppointmentReference`
+
+**Status.** Planned for M3.
 
 <a id="br-24"></a>
 ## BR-24: No confirmation after a cancellation
@@ -256,6 +307,8 @@ How to read a rule:
 
 **Proven by.** `NotificationDispatcherIT.pendingConfirmationIsSupersededByCancellation`
 
+**Status.** Planned for Tier 2 (cancellation).
+
 <a id="br-25"></a>
 ## BR-25: Past appointments never block a new booking
 
@@ -264,3 +317,5 @@ How to read a rule:
 **Enforced in.** application service (BookAppointmentHandler step 5: ends_at > :now) + domain (Appointment.canCancel(now))
 
 **Proven by.** `BookAppointmentIT.pastConfirmedAppointmentDoesNotBlockSameServiceBooking`
+
+**Status.** Planned for M3.

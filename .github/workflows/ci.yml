@@ -3,7 +3,9 @@
 # Builds and tests the application on every push to main and every pull request. Three jobs run in parallel:
 #
 # - api:   `./mvnw verify` on JDK 25. Compiler and Javadoc lint, unit tests, integration tests on a real
-#          PostgreSQL 17 (Testcontainers), the formatting check and the coverage report.
+#          PostgreSQL 17 (Testcontainers), the formatting check and the coverage report. Then
+#          scripts/check-test-refs.sh: every rule in docs/domain-rules.md has a status and a proof, and every test
+#          that a proven rule or README.md cites exists, unless README.md marks it as planned.
 # - web:   lint, type check, format check, unit tests in two time zones, and the production build.
 # - stack: builds the Docker image and starts it with PostgreSQL through docker compose, exactly as `make up` does on
 #          a reviewer's machine. It then runs scripts/smoke.sh and checks that the logs hold no credentials.
@@ -45,6 +47,10 @@ jobs:
 
       - name: Build and run every check
         run: ./mvnw -B -ntp verify
+
+      - name: Check that the tests the README and the proven domain rules cite exist
+        working-directory: .
+        run: scripts/check-test-refs.sh
 
       - name: Keep the test reports of a failed run
         if: failure()
