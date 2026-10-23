@@ -2,6 +2,7 @@ package za.co.fynbos.branchbook;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
 
 /**
@@ -12,8 +13,12 @@ import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoCon
  * accounts (docs/adr/0004-restraint-no-login-no-id-number.md). Left in place, Spring Boot would
  * create a default user and print its generated password in the startup log, and no password may
  * ever appear in a log.
+ *
+ * <p>Typed settings (records annotated {@code @ConfigurationProperties}, in {@code shared.config})
+ * are found by scanning, so adding one needs no registration here.
  */
 @SpringBootApplication(exclude = UserDetailsServiceAutoConfiguration.class)
+@ConfigurationPropertiesScan
 public class BranchBookApplication {
 
   /** Called by Spring when it builds the application context; never by application code. */

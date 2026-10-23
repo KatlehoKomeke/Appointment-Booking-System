@@ -2,8 +2,9 @@
 
 Every error the API returns is an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457) `application/problem+json`
 body with a stable `code`. The web app chooses its wording from the code, never from the `detail` text, so the
-wording can change without breaking the client. This file is the contract for those codes and is kept in step
-with the `ProblemCode` enum by review.
+wording can change without breaking the client. This file is the contract for those codes.
+`ProblemCodeCatalogueTest` fails the build if the table below and the `ProblemCode` enum disagree on any code or
+status.
 
 ## Shape of a problem body
 
@@ -13,7 +14,7 @@ with the `ProblemCode` enum by review.
   "title": "That time was just taken",
   "status": 409,
   "detail": "All seats for this time were booked while you were completing your details.",
-  "instance": "/api/v1/appointments",
+  "instance": "urn:branchbook:request:3f6d2c0e-7a1b-4d7e-9f0c-2b1a9e8d7c6b",
   "code": "SLOT_FULL",
   "correlationId": "3f6d2c0e-7a1b-4d7e-9f0c-2b1a9e8d7c6b",
   "alternatives": [
@@ -28,8 +29,17 @@ Rules that apply to every problem body:
   reference or a booked time ([BR-23](domain-rules.md#br-23)).
 - **`correlationId` is always present.** It matches the `X-Correlation-Id` response header and the server logs,
   so a support request can be traced without sharing personal data.
+- **`instance` identifies the occurrence, not the request.** It is `urn:branchbook:request:` followed by the
+  correlation id. It is never the request path, because a path is the caller's input and can carry personal data
+  or a booking reference.
 - **Field problems carry `errors[]`.** Each item is `{field, code, message}`; the web form maps them onto inputs.
 - **Stack traces are never serialised.** An unexpected failure is a `500 INTERNAL_ERROR` with only the correlation id.
+- **Failures the API never returns on purpose carry no code.** A path that does not exist (404), a wrong HTTP method
+  (405) or an unsupported media type (415) keeps its status and standard title, has no `detail`, and still carries
+  `correlationId`. The web app never makes such requests, so it needs no code for them.
+- **Requests that fail before reaching the application still get a problem.** A URL that the security firewall
+  rejects (for example one containing `;`) is a `400 VALIDATION_FAILED`, and a failure in a servlet filter is a
+  `500 INTERNAL_ERROR`, both with `correlationId`.
 
 ## Precedence
 
@@ -62,7 +72,7 @@ One request yields exactly one code:
 | `TOO_LATE_TO_CANCEL` | 409 | Cancellation was requested at or after the appointment's start time. | "This appointment has already started." |
 | `LOOKUP_RATE_LIMITED` | 429 | Five wrong lookups for one reference within an hour. Carries `Retry-After`. | "Too many attempts. Try again later." |
 | `INTERNAL_ERROR` | 500 | An unexpected failure. Only the correlation id is returned. | A generic error with the correlation id to quote. |
-| `TRY_AGAIN` | 503 | A lock or statement timeout, a deadlock after one automatic retry, or no database connection. Carries `Retry-After`. | The web app retries once with the same idempotency key, then asks the customer to try again. |
+| `TRY_AGAIN` | 503 | A lock or statement timeout, a deadlock after one automatic retry, no database connection, or any other temporary failure. Always carries `Retry-After`. | The web app retries once with the same idempotency key, then asks the customer to try again. |
 
 Not in v1: `413 PAYLOAD_TOO_LARGE`. Request-body size limits belong to the gateway or WAF in front of the
 application, and the request-body filter was cut from the plan.
