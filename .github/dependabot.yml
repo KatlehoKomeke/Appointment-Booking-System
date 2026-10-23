@@ -4,6 +4,11 @@
 # version. CI must pass before such a pull request is merged. Minor and patch updates are grouped into one pull
 # request per package ecosystem, so updates stay reviewable; a major version always gets its own pull request,
 # because it may need code changes.
+#
+# Some majors are deliberate choices, so they are ignored here; adopting one is a decision of its own:
+# - Java and Node.js stay on their LTS lines (25 and 24), and @types/node follows the Node.js line in .nvmrc.
+# - TypeScript stays on 6.x: typescript-eslint needs the compiler API that TypeScript 7 does not provide yet.
+# - PostgreSQL stays on 17, the version the design and Amazon RDS target (docs/adr/0006-hosted-demo-on-aws-with-cdk.md).
 
 version: 2
 
@@ -20,6 +25,11 @@ updates:
     directory: /web
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
     groups:
       web-minor-and-patch:
         update-types: [minor, patch]
@@ -28,20 +38,34 @@ updates:
     directory: /infra
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
     groups:
       infra-minor-and-patch:
         update-types: [minor, patch]
 
-  # The base images in the Dockerfile and the PostgreSQL image in compose.yaml.
+  # The base images in the Dockerfile.
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: eclipse-temurin
+        update-types: ['version-update:semver-major']
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
 
+  # The PostgreSQL image in compose.yaml.
   - package-ecosystem: docker-compose
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: postgres
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: github-actions
     directory: /
