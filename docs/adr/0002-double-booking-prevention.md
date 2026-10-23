@@ -33,8 +33,11 @@ appointments, nor two upcoming appointments for the same service. Clients retry 
 
 ## Consequences
 
-- The invariants hold even for code that bypasses the application; `DatabaseBackstopIT` proves this with raw JDBC.
-- `ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201` proves the race outcome on real PostgreSQL.
+- Both invariants hold even for code that bypasses the application. `SchemaConstraintIT` proves this with raw
+  JDBC: `overlappingSeatIsRejectedEvenWithoutTheApplication` for the seat, and the `appointments_customer_no_overlap`
+  case of `rawInsertViolatingEachNamedConstraintIsRejected` for the customer.
+- `ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201` will prove the race outcome on real PostgreSQL
+  (planned for M5, BR-7).
 - The schema needs real PostgreSQL with `btree_gist`. Distributed "PostgreSQL-compatible" databases such as Aurora
   DSQL or CockroachDB cannot run it.
 - The fixed lock order rules out deadlocks between bookings; a deadlock from any other path is retried once, then

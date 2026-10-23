@@ -11,7 +11,7 @@ a simulated SMS confirmation that cannot be lost.
 
 | | |
 |---|---|
-| Stage | Milestone M0 complete: the skeleton builds, passes every check and runs with `make up`. The booking flow comes next. |
+| Stage | Milestone M1 complete: the schema with every constraint proven, the seeded catalogue, the public-holiday rule and the branch API. Slots and availability come next (M2). |
 | Run locally | `make up`, then open http://localhost:8080 |
 | Hosted demo | Optional, in AWS Cape Town, defined in AWS CDK ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)) |
 | Deployment | Every push to `main` is tested and deployed to AWS Cape Town through OpenID Connect, with no stored keys ([ADR-0007](docs/adr/0007-continuous-deployment-from-main.md), [infra/README.md](infra/README.md)) |
@@ -31,13 +31,14 @@ This README grows with each milestone. Sections marked *planned* describe what i
 | to schedule | A four-step booking flow: branch, service, date, slot. Slots respect trading hours, public holidays, a two-hour lead time, a 30-day horizon and each service's capacity. | `/book`, `POST /api/v1/appointments` | `SlotCalendarTest.excludesSlotsStartingWithinTwoHoursOfNow`, `ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201` |
 | branch appointments | Six fictional branches in six provinces, each with its own trading hours and per-service capacity. | Flyway reference data | `SlotCalendarTest.saturdayFortyFiveMinuteLastStartIs1145`, `PublicHolidayCalendarTest.sundayHoliday9Aug2026IsObservedOnMonday10Aug` |
 | communicates a simulated confirmation | The booking transaction writes the SMS to an outbox table. A dispatcher delivers it through a simulated gateway with retries, and the confirmation page shows its status live. | `/appointments/:reference` | `ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically` |
-| front end and back end | A React 19 app served by one Spring Boot jar, over PostgreSQL 17. | `make up` | `book-appointment.spec.ts` |
+| front end and back end | A React 19 app served by one Spring Boot jar, over PostgreSQL 17. | `make up` | `book-appointment.spec.ts` (*planned*, M6) |
 
 ## What makes it correct
 
 - **Double booking is impossible.** PostgreSQL exclusion constraints reject an overlapping seat, even from code
-  that bypasses the application. A fixed lock order makes the race outcome deterministic, and a 20-thread test
-  proves exactly one booking wins ([ADR-0002](docs/adr/0002-double-booking-prevention.md)).
+  that bypasses the application, which a raw-SQL test proves today. A fixed lock order makes the race outcome
+  deterministic; a 20-thread test that proves exactly one booking wins is planned for M5
+  ([ADR-0002](docs/adr/0002-double-booking-prevention.md)).
 - **Retries are safe.** An `Idempotency-Key` is the first thing the booking transaction records, so a double-click
   or a mobile-network retry returns the same booking.
 - **The confirmation cannot be lost.** It commits with the booking and is delivered by a background dispatcher
@@ -85,6 +86,7 @@ Recorded when the project was scaffolded (M0). Dependabot proposes updates weekl
 | Hibernate ORM, Flyway | 7.4.5, 12.4.0 | managed by Spring Boot |
 | PostgreSQL | 17.11; JDBC driver 42.7.13 | `compose.yaml`, `TestcontainersConfiguration` |
 | JUnit, Testcontainers | 6.0.3, 2.0.5 | managed by Spring Boot |
+| ArchUnit | 1.5.1 | `api/pom.xml` |
 | Maven | 3.10.0, checksum-verified by the wrapper | `api/.mvn/wrapper/maven-wrapper.properties` |
 | Node.js | 24; 24.22.1 in the build image | `.nvmrc`, `Dockerfile` |
 | React | 19.3.1 | `web/package-lock.json` |
@@ -158,8 +160,39 @@ Makefile                 one entry point for every task
 - **Each service has a fixed duration** of 15, 30 or 45 minutes, and a capacity per branch: the number of
   consultants who can see customers at the same time.
 - **Bookings close two hours before a slot,** and open 30 days ahead.
-- **Public holidays are seeded for 2026 and 2027** from the official Schedule 1 list.
+- **Public holidays are seeded for 2026 and 2027.** See [Reference data](#reference-data).
 - **A customer is identified by their mobile number.** There are no accounts in this version.
+
+## Reference data
+
+Flyway seeds the catalogue of the fictional Fynbos Bank
+([V3__reference_data.sql](api/src/main/resources/db/migration/V3__reference_data.sql)). The names and street
+addresses are made up; no migration contains personal data.
+
+| Branch | Code | Province | Sundays | Why it is there |
+|---|---|---|---|---|
+| Bellville Kingsway | `BEL` | Western Cape | Closed | |
+| Gqeberha Baywater | `GQE` | Eastern Cape | Closed | Offers no home loans |
+| Polokwane Savannah | `POL` | Limpopo | Closed | One seat per service, so a race for the last seat is easy to show |
+| Rustenburg Bojanala | `RUS` | North West | Closed | Closes at 12:00 on Saturdays |
+| Sandton Summit Mall | `SAN` | Gauteng | 09:00 to 13:00 | Three seats for FICA and credit consultations |
+| Umhlanga Ridge | `UMH` | KwaZulu-Natal | 09:00 to 13:00 | |
+
+Every branch trades 08:00 to 17:00 on weekdays and 08:00 to 13:00 on Saturdays, with two seats per service unless
+the table says otherwise. The six services are a FICA update and a card replacement (15 minutes), opening an
+account, a credit consultation and deceased-estate help (30 minutes), and a home loan consultation (45 minutes).
+Each lists the documents to bring.
+
+**Public holidays.** Every branch closes on public holidays.
+
+- The dates in law are seeded for 2026 and 2027
+  ([V4__public_holidays_2026_2027.sql](api/src/main/resources/db/migration/V4__public_holidays_2026_2027.sql)):
+  Schedule 1 of the Public Holidays Act, and 4 November 2026, which the President declared a public holiday for the
+  local government elections.
+- When a holiday falls on a Sunday, the Monday after it is a holiday too (section 2(1) of the Act). These Mondays
+  are derived in code, not stored: 10 August 2026, 22 March 2027 and 27 December 2027. A holiday on a Saturday
+  moves nowhere.
+- Coverage ends on 31 December 2027. Adding 2028 is one new migration, not a code change.
 
 ## Documentation
 

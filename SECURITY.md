@@ -43,8 +43,14 @@ BranchBook is designed around the Protection of Personal Information Act, even t
   ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)).
 - **No exposure.** Full mobile numbers are never displayed. Error bodies never contain personal data or another
   booking's details ([BR-23](docs/domain-rules.md#br-23)).
-- **No personal data in logs.** Application logs and PostgreSQL's own error logs carry no names or numbers. A test,
-  `LogRedactionTest`, checks this against a real database.
+- **No personal data in logs.** Application logs and PostgreSQL's own error logs carry no names or numbers:
+  - PostgreSQL logs errors tersely, without the DETAIL line that quotes a constraint's conflicting values (set in
+    `compose.yaml` and for the test database).
+  - The JDBC driver leaves those values out of its exception messages;
+    `SchemaConstraintIT.violationMessagesNeverQuoteTheConflictingValues` checks this.
+  - Unexpected exceptions are logged with their types and stack frames but never their messages;
+    `ProblemDetailHandlerTest` and `ErrorDispatchControllerTest` check this.
+  - `LogRedactionTest`, which inspects every log of a real booking, arrives with the booking flow (M3).
 - **Synthetic test data only.** Tests and demos use made-up names and the published demo numbers (`082 555 01xx`).
   Never use a real person's details, including your own.
 - **A hosted demo cannot collect real data.** It accepts only the published demo numbers, each locked to a

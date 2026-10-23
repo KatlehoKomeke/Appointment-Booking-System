@@ -3,9 +3,10 @@
 This document explains how BranchBook is built and why. The decisions behind it are recorded one per file in
 [docs/adr](adr/README.md); the business rules are in [domain-rules.md](domain-rules.md).
 
-**Status: design complete; milestone M0 is built.** M0 is the skeleton: one jar that serves the app, PostgreSQL 17
-migrated by Flyway, health probes and security headers. The modules below arrive milestone by milestone. Diagrams
-use Mermaid, which GitHub renders in place.
+**Status: design complete; milestones M0 and M1 are built.** M0 is the skeleton: one jar that serves the app,
+PostgreSQL 17 migrated by Flyway, health probes and security headers. M1 adds the whole schema, the seeded
+catalogue, the `catalogue` module with the public-holiday rule, and the shared error and correlation-id handling.
+The other modules arrive milestone by milestone. Diagrams use Mermaid, which GitHub renders in place.
 
 ## 1. What the system does
 
@@ -68,9 +69,9 @@ flowchart LR
 
 Inside every module the layers are `api` (HTTP only), `application` (use cases; the only layer that opens
 transactions), `domain` (plain Java, no Spring imports) and `infrastructure` (adapters). `booking` never imports
-`notification`: it defines the `ConfirmationOutbox` port, and `notification` implements it. Four ArchUnit tests
-enforce the rules: no package cycles, no Spring in the domain, controllers depend on application code only, and
-only application code opens transactions.
+`notification`: it defines the `ConfirmationOutbox` port, and `notification` implements it. Four ArchUnit rules in
+`ArchitectureTest` enforce this on every build: no cycles between modules, no Spring in any domain package,
+controllers never reach the infrastructure layer, and only application code declares transactions.
 
 ## 4. The booking transaction
 
@@ -182,8 +183,22 @@ erDiagram
     }
 ```
 
-`public_holidays` has no foreign key; `SlotCalendar` reads it, together with the rule that a Sunday holiday is
-observed on the Monday (Public Holidays Act 36 of 1994, s2(1)). Customer details live on the appointment; there is
+The schema is created by four Flyway migrations, never edited once committed:
+
+| Migration | Contents |
+|---|---|
+| `V1__enable_btree_gist.sql` | The extension the exclusion constraints need |
+| `V2__schema.sql` | The eight tables, with every constraint named and the non-obvious ones commented |
+| `V3__reference_data.sql` | Six branches, their hours, six services and the capacities |
+| `V4__public_holidays_2026_2027.sql` | The public holidays in law for 2026 and 2027 |
+
+Every constraint is named, because the application maps a violation to an API error by its name.
+`SchemaConstraintIT` proves each one fires, using raw SQL that bypasses the application, and fails if a constraint
+is added without a test.
+
+`public_holidays` has no foreign key. `PublicHolidayCalendar` in the catalogue module reads it and adds the rule that a
+Sunday holiday is observed on the Monday (Public Holidays Act 36 of 1994, s2(1)); `BranchCalendar` combines it with a
+branch's trading hours, and the slot calendar builds on that. Customer details live on the appointment; there is
 no customers table and no login.
 
 ## 8. Time
@@ -197,9 +212,11 @@ Standard Time whatever the device's time zone.
 ## 9. Personal information
 
 BranchBook stores a first name, a last name and a South African mobile number, nothing more. The full number is
-never shown: a caller who has just proved the last four digits sees `082 *** 4567`; everyone else, including the
-simulated inbox, sees `082 *** ****`. Logs, metrics and error bodies carry no personal data, which a test checks on
-a real database. See [SECURITY.md](../SECURITY.md).
+never shown: a caller who has just proved the last four digits sees `082 *** 0101`; everyone else, including the
+simulated inbox, sees `082 *** ****`. Logs, metrics and error bodies carry no personal data. Error bodies never
+quote the request, and unexpected exceptions are logged with their types and stack frames but not their messages,
+which can quote a name or a number. `LogRedactionTest` will check every log of a real booking (M3). See
+[SECURITY.md](../SECURITY.md).
 
 ## 10. Deployment
 
