@@ -1,0 +1,52 @@
+# .github/dependabot.yml
+#
+# Each week, Dependabot opens a pull request when a pinned dependency, base image or GitHub Action has a newer
+# version. CI must pass before such a pull request is merged. Minor and patch updates are grouped into one pull
+# request per package ecosystem, so updates stay reviewable; a major version always gets its own pull request,
+# because it may need code changes.
+
+version: 2
+
+updates:
+  - package-ecosystem: maven
+    directory: /api
+    schedule:
+      interval: weekly
+    groups:
+      api-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    groups:
+      web-minor-and-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /infra
+    schedule:
+      interval: weekly
+    groups:
+      infra-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The base images in the Dockerfile and the PostgreSQL image in compose.yaml.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions-minor-and-patch:
+        update-types: [minor, patch]
