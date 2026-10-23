@@ -21,7 +21,7 @@ RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
 COPY web/ ./
 RUN npm run build
 
-FROM --platform=$BUILDPLATFORM eclipse-temurin:25.0.4.1_1-jdk-alpine AS api
+FROM --platform=$BUILDPLATFORM eclipse-temurin:26.0.2_10-jdk-alpine AS api
 WORKDIR /src/api
 COPY api/.mvn/ .mvn/
 COPY api/mvnw api/pom.xml ./
@@ -31,7 +31,7 @@ COPY --from=web /src/web/dist/ src/main/resources/static/
 RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -ntp -DskipTests package \
  && java -Djarmode=tools -jar target/branchbook.jar extract --layers --destination /extracted
 
-FROM eclipse-temurin:25.0.4.1_1-jre-alpine AS runtime
+FROM eclipse-temurin:26.0.2_10-jre-alpine AS runtime
 LABEL org.opencontainers.image.title="BranchBook" \
       org.opencontainers.image.description="Branch appointment booking for the fictional Fynbos Bank" \
       org.opencontainers.image.source="https://github.com/KatlehoKomeke/Appointment-Booking-System" \
