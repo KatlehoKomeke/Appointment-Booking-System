@@ -1,9 +1,9 @@
 # Makefile
-# One entry point for common tasks. Every target prints what it runs, so you can copy the raw
-# command on systems without make (for example Windows without WSL).
+# One entry point for common tasks. `make` or `make help` lists them. Every target prints the commands it runs, so
+# they can be copied on systems without make (for example Windows without WSL).
 #
-# Targets for building, testing and running the application (up, down, dev, test, e2e, smoke, fmt)
-# arrive with the first code milestone (M0) and are documented in README.md as they land.
+# Running the application needs only Docker (`make up`). Developing it also needs JDK 25 and Node 24; see
+# README.md, "Getting started".
 
 SHELL := /usr/bin/env bash
 GITLEAKS_VERSION := v8.30.1
@@ -12,10 +12,55 @@ GITLEAKS_IMAGE := ghcr.io/gitleaks/gitleaks:$(GITLEAKS_VERSION)
 GIT_SAFE_DIR := -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'
 
 .DEFAULT_GOAL := help
-.PHONY: help hooks secrets-scan secrets-scan-history
+.PHONY: help up down logs psql smoke dev-api dev-web test test-api test-web fmt hooks secrets-scan secrets-scan-history
 
 help: ## List the available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-22s %s\n", $$1, $$2}'
+
+# --- Run -------------------------------------------------------------------------------------------------------------
+
+up: ## Build and start the app and its database, wait until both are healthy, and print the URL
+	docker compose up --build --detach --wait --wait-timeout 300
+	@echo "BranchBook is running at http://$$(docker compose port app 8080)"
+
+down: ## Stop the app and the database, and delete the local database
+	docker compose down --volumes --remove-orphans
+
+logs: ## Follow the application's log
+	docker compose logs --follow app
+
+psql: ## Open a SQL shell on the local database
+	docker compose exec db sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
+
+smoke: ## Check the running app over HTTP (after `make up`)
+	scripts/smoke.sh "http://$$(docker compose port app 8080)"
+
+# --- Develop ---------------------------------------------------------------------------------------------------------
+
+dev-api: ## Run the API on port 8080 with a throwaway PostgreSQL in Docker (JDK 25)
+	cd api && ./mvnw spring-boot:test-run
+
+dev-web: web/node_modules ## Run the web app on port 5173 with hot reload, calling the API on port 8080 (Node 24)
+	cd web && npm run dev
+
+test: test-api test-web ## Run every check that CI runs on the API and the web app
+
+test-api: ## Build the API and run its unit and integration tests, formatting and Javadoc checks (JDK 25, Docker)
+	cd api && ./mvnw -B verify
+
+test-web: web/node_modules ## Lint, type-check, format-check, test and build the web app (Node 24)
+	cd web && npm run lint && npm run typecheck && npm run format:check && npm test && npm run build
+
+fmt: web/node_modules ## Format the Java and TypeScript code
+	cd api && ./mvnw -B -q spotless:apply
+	cd web && npm run format
+
+# Installs the web app's dependencies when the lockfile changes.
+web/node_modules: web/package.json web/package-lock.json
+	cd web && npm ci
+	@touch web/node_modules
+
+# --- Repository safety -----------------------------------------------------------------------------------------------
 
 hooks: ## Enable the repository's git hooks (secret scan before every commit). Run once per clone.
 	git config core.hooksPath .githooks

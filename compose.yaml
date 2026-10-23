@@ -1,0 +1,48 @@
+# compose.yaml
+#
+# Runs BranchBook on one machine: the application image built from this repository, and a throwaway PostgreSQL 17.
+#
+#   make up     builds, starts and waits until both services are healthy, then prints the URL
+#   make down   stops both and deletes the database
+#
+# Both services listen on 127.0.0.1 only, so nothing is reachable from the local network. The database password is
+# a local-only placeholder for a database that exists only on this machine. Any value can be overridden in a
+# git-ignored .env file (see .env.example).
+
+name: branchbook
+
+services:
+  db:
+    image: postgres:17.11-alpine
+    environment:
+      POSTGRES_DB: branchbook
+      POSTGRES_USER: ${DB_USER:-branchbook}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-local-dev-only-change-me}
+    # Keeps personal data out of the database log. A constraint violation's DETAIL line quotes the conflicting
+    # values (a mobile number, for example), so errors are logged tersely, and failed statements are not echoed.
+    command: ['postgres', '-c', 'log_error_verbosity=terse', '-c', 'log_min_error_statement=panic']
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  app:
+    build: .
+    image: branchbook:local
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://db:5432/branchbook
+      DB_USER: ${DB_USER:-branchbook}
+      DB_PASSWORD: ${DB_PASSWORD:-local-dev-only-change-me}
+    ports:
+      - '127.0.0.1:${APP_PORT:-8080}:8080'
+    # Longer than the application's 20-second graceful shutdown, so in-flight requests finish.
+    stop_grace_period: 30s
+
+volumes:
+  db-data:

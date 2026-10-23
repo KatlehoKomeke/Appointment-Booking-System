@@ -1,0 +1,20 @@
+# .dockerignore
+#
+# The image build receives only what the Dockerfile copies. Everything else stays out, so that git history,
+# .env files, credentials, local build output and node_modules can never reach an image layer.
+
+*
+!api/.mvn/
+!api/mvnw
+!api/pom.xml
+!api/src/
+!web/
+
+# Re-exclude what lives inside the allowed folders but must not be sent.
+api/src/main/resources/static/
+web/node_modules/
+web/dist/
+web/coverage/
+**/.env*
+**/*.log
+**/.DS_Store
