@@ -21,7 +21,7 @@ staged_files="$(git diff --cached --name-only --diff-filter=ACMR)"
 blocked="$(printf '%s\n' "${staged_files}" | grep -E "${forbidden_pattern}" | grep -v -E '(^|/)\.env\.example$' || true)"
 if [[ -n "${blocked}" ]]; then
   echo "pre-commit: refusing to commit files that may hold secrets or personal settings:" >&2
-  printf '  %s\n' ${blocked} >&2
+  printf '%s\n' "${blocked}" | sed 's/^/  /' >&2
   echo "Unstage them with: git restore --staged <file>" >&2
   exit 1
 fi
