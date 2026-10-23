@@ -5,20 +5,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
-import za.co.fynbos.branchbook.TestcontainersConfiguration;
+import za.co.fynbos.branchbook.support.IntegrationTest;
 
 /**
  * Proves the defences that {@link SecurityConfig} promises, through the full filter chain of the
  * running application.
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class SecurityHeadersIT {
 
   @Autowired private MockMvcTester mvc;

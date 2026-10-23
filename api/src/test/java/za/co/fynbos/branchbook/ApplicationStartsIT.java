@@ -4,19 +4,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
+import za.co.fynbos.branchbook.support.IntegrationTest;
 
 /**
  * The day-0 spike, kept as a regression test: the application starts on Java 25, Flyway migrates a
  * real PostgreSQL 17, and the probes that Docker and the load balancer rely on answer.
  */
-@SpringBootTest
-@AutoConfigureMockMvc
-@Import(TestcontainersConfiguration.class)
+@IntegrationTest
 class ApplicationStartsIT {
 
   @Autowired private JdbcTemplate jdbc;

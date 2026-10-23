@@ -1,6 +1,7 @@
 package za.co.fynbos.branchbook;
 
 import org.springframework.boot.SpringApplication;
+import za.co.fynbos.branchbook.support.TestcontainersConfiguration;
 
 /**
  * Runs the application on a developer's machine against a throwaway PostgreSQL in Docker, with no
