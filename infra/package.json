@@ -19,7 +19,7 @@
     "@swc/core": "^1.15.0",
     "@swc/jest": "^0.2.39",
     "@types/jest": "^30",
-    "@types/node": "^24.10.1",
+    "@types/node": "^26.6.5",
     "aws-cdk": "2.1146.1",
     "eslint": "^10.13.0",
     "eslint-plugin-jsdoc": "^65.4.1",
