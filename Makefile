@@ -47,9 +47,11 @@ test: test-api test-web test-docs ## Run every check that CI runs on the API, th
 
 test-api: ## Build the API and run its unit and integration tests, formatting and Javadoc checks (JDK 25, Docker)
 	cd api && ./mvnw -B verify
+	@# As in CI: slots must not depend on the JVM's zone, so the unit and API tests run again in New York (BR-20).
+	cd api && TZ=America/New_York ./mvnw -B verify -Dit.test='*ApiIT' -Djacoco.skip=true
 
-test-web: web/node_modules ## Lint, type-check, format-check, test and build the web app (Node 24)
-	cd web && npm run lint && npm run typecheck && npm run format:check && npm test && npm run build
+test-web: web/node_modules ## Check the API types, then lint, type-check, format-check, test and build the web app (Node 24)
+	cd web && npm run check:api && npm run lint && npm run typecheck && npm run format:check && npm test && npm run build
 
 test-docs: ## Check that the tests the README and the proven domain rules cite exist
 	scripts/check-test-refs.sh

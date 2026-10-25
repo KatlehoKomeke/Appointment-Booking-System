@@ -3,10 +3,13 @@
 # Builds and tests the application on every push to main and every pull request. Three jobs run in parallel:
 #
 # - api:   `./mvnw verify` on JDK 25. Compiler and Javadoc lint, unit tests, integration tests on a real
-#          PostgreSQL 17 (Testcontainers), the formatting check and the coverage report. Then
+#          PostgreSQL 17 (Testcontainers), the formatting check, the OpenAPI contract check (docs/openapi.yaml must be
+#          what the API generates) and the coverage report. The unit tests and the API tests then run again in
+#          America/New_York, because slot times must not depend on the JVM's zone. Last,
 #          scripts/check-test-refs.sh: every rule in docs/domain-rules.md has a status and a proof, and every test
 #          that a proven rule or README.md cites exists, unless README.md marks it as planned.
-# - web:   lint, type check, format check, unit tests in two time zones, and the production build.
+# - web:   the API types must be what docs/openapi.yaml generates; then lint, type check, format check, unit tests
+#          in two time zones, and the production build.
 # - stack: builds the Docker image and starts it with PostgreSQL through docker compose, exactly as `make up` does on
 #          a reviewer's machine. It then runs scripts/smoke.sh and checks that the logs hold no credentials.
 #
@@ -48,6 +51,13 @@ jobs:
       - name: Build and run every check
         run: ./mvnw -B -ntp verify
 
+      # The runner's zone is UTC, like the containers'. Slots are computed in the branch's zone, so the unit tests
+      # and the API tests must also pass in a zone with a negative offset and daylight saving time (BR-20).
+      - name: Unit tests and API tests in America/New_York
+        run: ./mvnw -B -ntp verify -Dit.test='*ApiIT' -Djacoco.skip=true
+        env:
+          TZ: America/New_York
+
       - name: Check that the tests the README and the proven domain rules cite exist
         working-directory: .
         run: scripts/check-test-refs.sh
@@ -81,6 +91,11 @@ jobs:
 
       - name: Install the pinned dependencies
         run: npm ci
+
+      # src/api/schema.d.ts is generated from the committed contract and committed itself, so a reviewer can read
+      # it. Regenerating it must change nothing (ADR-0005).
+      - name: Check that the API types match docs/openapi.yaml
+        run: npm run check:api
 
       - name: Lint, including TSDoc and accessibility rules
         run: npm run lint

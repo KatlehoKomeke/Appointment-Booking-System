@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 #
 # scripts/smoke.sh: checks that a running BranchBook works end to end over HTTP. It checks the readiness probe, the
-# app and its assets, the app's routes, the branch API and its error contract (including a request rejected before
-# Spring MVC), real 404s, closed operational endpoints and the security headers.
+# app and its assets, the app's routes, the branch and availability APIs and their error contract (including a request
+# rejected before Spring MVC), the OpenAPI document and Swagger UI, real 404s, closed operational endpoints and the
+# security headers.
 #
 # Usage: scripts/smoke.sh [base-url]        default: http://localhost:8080
 #
@@ -64,6 +65,23 @@ rejected_request_is_a_problem() {
     && grep --quiet --fixed-strings -- '"correlationId":"smoke-rejected-1"' <<<"$response"
 }
 
+# Prints a branch's last bookable date, as GET /api/v1/branches/<code> publishes it. The smoke test runs on the real
+# clock, so it asks the server for a date inside the window rather than computing one.
+bookable_to() {
+  curl --silent --fail "$base_url/api/v1/branches/$1" | grep --only-matching -E '"bookableTo":"[0-9-]+"' | cut -d'"' -f4
+}
+
+# Succeeds if Sandton's FICA availability on its last bookable date lists slots with the branch's +02:00 offset, or,
+# should that date be a public holiday, says so.
+availability_is_served() {
+  local date body
+  date="$(bookable_to SAN)"
+  [[ -n "$date" ]] || return 1
+  body="$(curl --silent --fail "$base_url/api/v1/branches/SAN/availability?service=FICA&date=$date")"
+  grep --quiet --fixed-strings -- "\"date\":\"$date\"" <<<"$body" \
+    && grep --quiet -E '"startsAt":"[^"]+\+02:00"|"closedReason":"PUBLIC_HOLIDAY"' <<<"$body"
+}
+
 # Succeeds if the script that index.html loads is served, which proves the web build is inside the jar.
 app_script_is_served() {
   local script
@@ -80,6 +98,13 @@ check "the app's script is served" app_script_is_served
 check 'an app route serves the app' body_contains /appointments/APT-7K3M-9Q2X '<div id="root"></div>'
 check 'the branch API lists the seeded branches' body_contains /api/v1/branches '"code":"POL"'
 check 'a branch lists its bookable window' body_contains /api/v1/branches/SAN '"bookableFrom":'
+check 'availability lists slots in South African time' availability_is_served
+check 'a date outside the window is refused' \
+  problem_code_is '/api/v1/branches/SAN/availability?service=FICA&date=2000-01-01' DATE_OUTSIDE_BOOKING_WINDOW
+check 'a service the branch does not offer is refused' \
+  problem_code_is "/api/v1/branches/GQE/availability?service=HOME&date=$(bookable_to GQE)" SERVICE_NOT_OFFERED_AT_BRANCH
+check 'the OpenAPI document is served' body_contains /v3/api-docs '"openapi":"3.1.0"'
+check 'Swagger UI is served' status_is /swagger-ui/index.html 200
 check 'an unknown branch is a 404 problem' status_is /api/v1/branches/XYZ 404
 check 'problems carry a stable code' problem_code_is /api/v1/branches/XYZ BRANCH_NOT_FOUND
 check 'the correlation id is echoed' echoes_correlation_id /api/v1/branches smoke-test-1
