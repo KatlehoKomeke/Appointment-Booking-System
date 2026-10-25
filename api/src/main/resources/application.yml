@@ -70,6 +70,10 @@ branchbook:
     lead-time: PT2H
     # Thirty bookable dates: today and the next 29 days, in the branch's time zone (BR-5).
     horizon: P30D
+    # Opening an appointment needs its reference and the last four digits of the mobile number. Five wrong tries
+    # block that reference for an hour from the first, so the 10,000 combinations cannot be tried (BR-13).
+    lookup-max-failures: 5
+    lookup-window: PT1H
   notification:
     # The address customers reach the app at, which ends the confirmation SMS's link to /manage. At most 28
     # characters with no trailing slash, so the longest confirmation fits one SMS; a longer value stops start-up

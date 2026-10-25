@@ -36,7 +36,7 @@ import za.co.fynbos.branchbook.shared.config.BookingProperties;
 class HolidayCoverageCheckTest {
 
   private static final BookingProperties BOOKING =
-      new BookingProperties(Duration.ofHours(2), Period.ofDays(30));
+      new BookingProperties(Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1));
 
   private final CatalogueReadPort catalogue = mock(CatalogueReadPort.class);
 

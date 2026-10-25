@@ -2,6 +2,7 @@ package za.co.fynbos.branchbook.shared.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static za.co.fynbos.branchbook.support.Bookings.book;
+import static za.co.fynbos.branchbook.support.Bookings.lookup;
 
 import com.jayway.jsonpath.JsonPath;
 import java.io.IOException;
@@ -113,10 +114,40 @@ class OpenApiContractIT {
   }
 
   /**
+   * BR-13: the document tells a client that opening an appointment needs {@code X-Mobile-Last4},
+   * four digits, and that a {@code 429} says when to try again.
+   */
+  @Test
+  void specDeclaresTheMobileLast4HeaderAndRetryAfter() {
+    String lookupPath = "$.paths['/api/v1/appointments/{reference}'].get";
+
+    assertThat(mvc.get().uri("/v3/api-docs"))
+        .bodyJson()
+        .extractingPath(lookupPath + ".parameters[?(@.name == 'X-Mobile-Last4')]")
+        .asArray()
+        .singleElement()
+        .satisfies(
+            header ->
+                assertThat(header)
+                    .asInstanceOf(InstanceOfAssertFactories.MAP)
+                    .containsEntry("in", "header")
+                    .containsEntry("required", true)
+                    .extracting("schema")
+                    .asInstanceOf(InstanceOfAssertFactories.MAP)
+                    .containsEntry("pattern", "^[0-9]{4}$"));
+    assertThat(mvc.get().uri("/v3/api-docs"))
+        .bodyJson()
+        .extractingPath(lookupPath + ".responses['429'].headers")
+        .asInstanceOf(InstanceOfAssertFactories.MAP)
+        .containsKey("Retry-After");
+  }
+
+  /**
    * The document must describe what the API really sends, not only agree with itself. Each real
    * body below carries every property its schema requires and none the schema does not declare:
-   * successes, problems with a code, and the HTTP-level problems that have none. On the default
-   * test clock, Monday 26 October 2026, 27 October is bookable.
+   * successes, problems with a code (among them a lookup's 400, 404 and 429), and the HTTP-level
+   * problems that have none. On the default test clock, Monday 26 October 2026, 27 October is
+   * bookable.
    */
   @Test
   void realResponsesHaveExactlyThePropertiesTheirSchemasDeclare() {
@@ -155,6 +186,12 @@ class OpenApiContractIT {
     check(document, "AppointmentService", booked, "$.service", mismatches);
     check(document, "AppointmentCustomer", booked, "$.customer", mismatches);
     check(document, "Notification", booked, "$.notifications[0]", mismatches);
+    String reference = JsonPath.read(booked, "$.reference");
+    check(document, "Appointment", body(lookup(mvc, reference, "0195")), "$", mismatches);
+    List<MvcTestResult> wrongDigits = new ArrayList<>();
+    for (int attempt = 0; attempt < 6; attempt++) {
+      wrongDigits.add(lookup(mvc, reference, "9999"));
+    }
     Map<String, Object> unknownField =
         Bookings.body("SAN", "FICA", "2026-10-27T09:00:00+02:00", "082 555 0196");
     unknownField.put("endsAt", "2026-10-27T09:15:00+02:00");
@@ -168,6 +205,9 @@ class OpenApiContractIT {
             mvc.get()
                 .uri("/api/v1/branches/GQE/availability?service=HOME&date=2026-10-27")
                 .exchange(),
+            lookup(mvc, reference, "95"),
+            wrongDigits.getFirst(),
+            wrongDigits.getLast(),
             mvc.get().uri("/api/v1/no-such-path").exchange(),
             mvc.post().uri("/api/v1/branches").exchange(),
             mvc.get()

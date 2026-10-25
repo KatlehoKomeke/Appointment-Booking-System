@@ -103,6 +103,11 @@
       <artifactId>libphonenumber</artifactId>
       <version>${libphonenumber.version}</version>
     </dependency>
+    <!-- A bounded in-memory cache for the lookup limiter (BR-13); the version is managed by Spring Boot. -->
+    <dependency>
+      <groupId>com.github.ben-manes.caffeine</groupId>
+      <artifactId>caffeine</artifactId>
+    </dependency>
     <!-- The OpenAPI document and Swagger UI, generated from the controllers (ADR-0005). -->
     <dependency>
       <groupId>org.springdoc</groupId>

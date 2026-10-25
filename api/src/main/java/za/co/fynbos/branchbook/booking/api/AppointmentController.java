@@ -9,10 +9,13 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Pattern;
 import java.net.URI;
 import org.jspecify.annotations.Nullable;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -21,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 import za.co.fynbos.branchbook.booking.application.BookAppointmentHandler;
 import za.co.fynbos.branchbook.booking.application.BookingResult;
 import za.co.fynbos.branchbook.booking.application.IdempotencyKeyRequiredException;
+import za.co.fynbos.branchbook.booking.application.LookupAppointmentHandler;
 import za.co.fynbos.branchbook.booking.domain.IdempotencyKey;
 import za.co.fynbos.branchbook.shared.web.OpenApiConfig;
 
@@ -37,9 +41,11 @@ class AppointmentController {
       "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
 
   private final BookAppointmentHandler booking;
+  private final LookupAppointmentHandler lookups;
 
-  AppointmentController(BookAppointmentHandler booking) {
+  AppointmentController(BookAppointmentHandler booking, LookupAppointmentHandler lookups) {
     this.booking = booking;
+    this.lookups = lookups;
   }
 
   /**
@@ -130,5 +136,63 @@ class AppointmentController {
       response.header(IDEMPOTENT_REPLAYED, "true");
     }
     return response.body(body);
+  }
+
+  /**
+   * Opens an appointment with its reference and the last four digits of the mobile number.
+   *
+   * @param reference the reference; case and hyphens do not matter
+   * @param mobileLast4 the last four digits of the mobile number used to book
+   * @return the appointment
+   */
+  @Operation(
+      operationId = "getAppointment",
+      summary = "Open an appointment",
+      description =
+          "Needs the reference and the last four digits of the mobile number used to book. Any"
+              + " mismatch is 404, never 403, so the answer never confirms that a reference"
+              + " exists. Five wrong tries in an hour block the reference, even for the right"
+              + " digits, until an hour after the first.")
+  @ApiResponse(responseCode = "200", description = "The appointment")
+  @ApiResponse(
+      responseCode = "400",
+      description = "VALIDATION_FAILED: X-Mobile-Last4 is missing or not four digits",
+      content =
+          @Content(
+              mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+              schema = @Schema(ref = OpenApiConfig.PROBLEM)))
+  @ApiResponse(
+      responseCode = "404",
+      description = "APPOINTMENT_NOT_FOUND: the reference and the digits match no appointment",
+      content =
+          @Content(
+              mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+              schema = @Schema(ref = OpenApiConfig.PROBLEM)))
+  @ApiResponse(
+      responseCode = "429",
+      description = "LOOKUP_RATE_LIMITED: too many wrong tries for this reference",
+      headers =
+          @Header(
+              name = "Retry-After",
+              description = "Seconds until the reference can be looked up again",
+              schema = @Schema(type = "integer")),
+      content =
+          @Content(
+              mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+              schema = @Schema(ref = OpenApiConfig.PROBLEM)))
+  @GetMapping("/{reference}")
+  AppointmentResponse lookup(
+      @Parameter(
+              description = "The reference; case and hyphens do not matter",
+              example = "APT-7K3M-9Q2X")
+          @PathVariable
+          String reference,
+      @Parameter(
+              description = "The last four digits of the mobile number used to book",
+              example = "0101")
+          @RequestHeader("X-Mobile-Last4")
+          @Pattern(regexp = "^[0-9]{4}$", message = "must be 4 digits")
+          String mobileLast4) {
+    return AppointmentResponse.from(lookups.lookup(reference, mobileLast4));
   }
 }

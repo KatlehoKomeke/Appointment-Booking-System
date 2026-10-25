@@ -4,10 +4,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static za.co.fynbos.branchbook.support.Bookings.body;
 import static za.co.fynbos.branchbook.support.Bookings.book;
 import static za.co.fynbos.branchbook.support.Bookings.customer;
+import static za.co.fynbos.branchbook.support.Bookings.lookup;
 
 import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -24,11 +28,13 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import za.co.fynbos.branchbook.booking.domain.AppointmentReference;
 import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
+import za.co.fynbos.branchbook.support.MutableClock;
 
 /**
- * {@code POST /api/v1/appointments} through the whole application on a real database: what a
- * booking returns, every refusal and its code, and that no response leaks what it must not. The
- * clock stands at 08:00 on Monday 26 October 2026 in Johannesburg; the numbers are synthetic.
+ * {@code POST /api/v1/appointments} and {@code GET /api/v1/appointments/{reference}} through the
+ * whole application on a real database: what a booking and a lookup return, every refusal and its
+ * code, and that no response leaks what it must not. The clock stands at 08:00 on Monday 26 October
+ * 2026 in Johannesburg; the numbers are synthetic.
  */
 @IntegrationTest
 @ExtendWith(DatabaseReset.class)
@@ -39,6 +45,8 @@ class AppointmentApiIT {
   @Autowired private MockMvcTester mvc;
 
   @Autowired private JdbcTemplate jdbc;
+
+  @Autowired private MutableClock clock;
 
   /** BR-16, as evidence: the booking and its PENDING confirmation come back together. */
   @Test
@@ -274,11 +282,15 @@ class AppointmentApiIT {
     }
   }
 
-  /** BR-23: no refusal of a booking ever carries an appointment reference. */
+  /**
+   * BR-23: no refusal ever carries an appointment reference, not even a refused lookup of the
+   * reference itself.
+   */
   @Test
   void noProblemBodyEverContainsAnAppointmentReference() throws Exception {
-    assertThat(book(mvc, body("POL", "FICA", TUESDAY_0930, "082 555 0151")))
-        .hasStatus(HttpStatus.CREATED);
+    MvcTestResult booked = book(mvc, body("POL", "FICA", TUESDAY_0930, "082 555 0151"));
+    assertThat(booked).hasStatus(HttpStatus.CREATED);
+    String reference = string(booked, "$.reference");
     Map<String, Object> malformed = body("SAN", "FICA", TUESDAY_0930, "082 555 0151");
     malformed.put("endsAt", "x");
 
@@ -288,11 +300,18 @@ class AppointmentApiIT {
             book(mvc, body("POL", "FICA", "2026-10-28T09:00:00+02:00", "082 555 0151")),
             book(mvc, body("POL", "CARD", TUESDAY_0930, "082 555 0151")),
             book(mvc, body("POL", "FICA", TUESDAY_0930, "082 555 0152")),
-            book(mvc, body("SAN", "FICA", "2026-11-04T09:00:00+02:00", "082 555 0152")));
+            book(mvc, body("SAN", "FICA", "2026-11-04T09:00:00+02:00", "082 555 0152")),
+            lookup(mvc, reference, "12x4"),
+            lookup(mvc, reference, "9999"),
+            lookup(mvc, reference, "9999"),
+            lookup(mvc, reference, "9999"),
+            lookup(mvc, reference, "9999"),
+            lookup(mvc, reference, "9999"),
+            lookup(mvc, reference, "0151"));
 
     assertThat(problems)
         .extracting(result -> result.getResponse().getStatus())
-        .containsExactly(400, 409, 409, 409, 422);
+        .containsExactly(400, 409, 409, 409, 422, 400, 404, 404, 404, 404, 404, 429);
     for (MvcTestResult problem : problems) {
       assertThat(problem.getResponse().getContentAsString())
           .doesNotContainPattern("APT-?[A-HJKMNP-Z2-9]{4}-?[A-HJKMNP-Z2-9]{4}");
@@ -338,6 +357,128 @@ class AppointmentApiIT {
     MvcTestResult booked = book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0155"));
 
     assertThat(booked.getResponse().getHeader("Cache-Control")).contains("no-store");
+  }
+
+  /**
+   * BR-13, BR-16: the reference and the last four digits open the appointment, which shows the same
+   * as when it was booked, with its confirmation still PENDING. The reference may be typed in
+   * lowercase and without hyphens.
+   */
+  @Test
+  void getReturnsTheAppointmentWithItsPendingConfirmation() throws Exception {
+    MvcTestResult booked = book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0157"));
+    String reference = string(booked, "$.reference");
+
+    MvcTestResult opened = lookup(mvc, reference, "0157");
+    MvcTestResult typedLoosely =
+        lookup(mvc, reference.toLowerCase(Locale.ROOT).replace("-", ""), "0157");
+
+    assertThat(opened).hasStatus(HttpStatus.OK).hasContentType(MediaType.APPLICATION_JSON);
+    assertThat(opened).bodyJson().isStrictlyEqualTo(booked.getResponse().getContentAsString());
+    assertThat(opened)
+        .bodyJson()
+        .isLenientlyEqualTo(
+            """
+            {"status": "CONFIRMED", "startsAt": "2026-10-27T09:30:00+02:00",
+             "customer": {"mobileMasked": "082 *** 0157"},
+             "notifications": [{"kind": "CONFIRMATION", "status": "PENDING"}]}""");
+    assertThat(typedLoosely).hasStatus(HttpStatus.OK);
+    assertThat(string(typedLoosely, "$.reference")).isEqualTo(reference);
+    assertThat(opened.getResponse().getHeader("Cache-Control")).contains("no-store");
+  }
+
+  /**
+   * BR-13, ADR-0004: the right reference with the wrong digits is answered exactly as an unknown or
+   * malformed reference is: 404, never 403, so no answer confirms that a reference exists.
+   */
+  @Test
+  void getWithWrongLast4Returns404NotForbidden() {
+    String reference =
+        string(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0158")), "$.reference");
+
+    List<MvcTestResult> misses =
+        List.of(
+            lookup(mvc, reference, "0159"),
+            lookup(mvc, "APT-2222-3333", "0158"),
+            lookup(mvc, "not-a-reference", "0158"));
+
+    for (MvcTestResult miss : misses) {
+      assertThat(miss)
+          .hasStatus(HttpStatus.NOT_FOUND)
+          .hasContentType(MediaType.APPLICATION_PROBLEM_JSON);
+      assertThat(miss)
+          .bodyJson()
+          .isLenientlyEqualTo(
+              """
+              {"status": 404, "code": "APPOINTMENT_NOT_FOUND", "title": "Appointment not found",
+               "detail": "We couldn't find an appointment with those details.",
+               "correlationId": "test-lookup"}""");
+      assertThat(miss).bodyJson().doesNotHavePath("$.errors");
+    }
+  }
+
+  /**
+   * BR-13: digits that are missing or not four digits are a 400 naming the header, checked before
+   * the reference is touched, so they never count towards blocking it.
+   */
+  @Test
+  void malformedLast4Returns400AndIsNotCounted() {
+    String reference =
+        string(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0160")), "$.reference");
+
+    List<MvcTestResult> malformed = new ArrayList<>();
+    for (String last4 : List.of("016", "01600", "o160", "0 60", "+160", "٠١٦٠")) {
+      malformed.add(lookup(mvc, reference, last4));
+    }
+    MvcTestResult missing = lookup(mvc, reference, null);
+
+    for (MvcTestResult result : malformed) {
+      assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+      assertThat(result).bodyJson().extractingPath("$.code").isEqualTo("VALIDATION_FAILED");
+      assertThat(result)
+          .bodyJson()
+          .extractingPath("$.errors[*]['field','code']")
+          .asArray()
+          .containsExactly(Map.of("field", "X-Mobile-Last4", "code", "PATTERN"));
+    }
+    assertThat(missing).hasStatus(HttpStatus.BAD_REQUEST);
+    assertThat(missing)
+        .bodyJson()
+        .extractingPath("$.errors[*]['field','code']")
+        .asArray()
+        .containsExactly(Map.of("field", "X-Mobile-Last4", "code", "REQUIRED"));
+    assertThat(lookup(mvc, reference, "0160")).hasStatus(HttpStatus.OK);
+  }
+
+  /**
+   * BR-13: five wrong tries block the reference for an hour from the first, even for the right
+   * digits; once the hour has passed, the right digits open it again.
+   */
+  @Test
+  void sixthWrongLast4WithinHourReturns429() {
+    String reference =
+        string(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0161")), "$.reference");
+    for (int attempt = 1; attempt <= 5; attempt++) {
+      assertThat(lookup(mvc, reference, "9999")).hasStatus(HttpStatus.NOT_FOUND);
+      clock.advance(Duration.ofMinutes(1));
+    }
+
+    MvcTestResult wrong = lookup(mvc, reference, "9999");
+    MvcTestResult right = lookup(mvc, reference, "0161");
+
+    for (MvcTestResult blocked : List.of(wrong, right)) {
+      assertThat(blocked)
+          .hasStatus(HttpStatus.TOO_MANY_REQUESTS)
+          .hasContentType(MediaType.APPLICATION_PROBLEM_JSON)
+          .hasHeader("Retry-After", "3300");
+      assertThat(blocked).bodyJson().extractingPath("$.code").isEqualTo("LOOKUP_RATE_LIMITED");
+    }
+    clock.advance(Duration.ofMinutes(54).plusSeconds(59));
+    assertThat(lookup(mvc, reference, "0161"))
+        .hasStatus(HttpStatus.TOO_MANY_REQUESTS)
+        .hasHeader("Retry-After", "1");
+    clock.advance(Duration.ofSeconds(1));
+    assertThat(lookup(mvc, reference, "0161")).hasStatus(HttpStatus.OK);
   }
 
   private void assertRefusedAsNotASlot(String startsAt, String service, String code) {

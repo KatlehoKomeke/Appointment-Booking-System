@@ -24,6 +24,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/appointments/{reference}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Open an appointment
+         * @description Needs the reference and the last four digits of the mobile number used to book. Any mismatch is 404, never 403, so the answer never confirms that a reference exists. Five wrong tries in an hour block the reference, even for the right digits, until an hour after the first.
+         */
+        get: operations["getAppointment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/branches": {
         parameters: {
             query?: never;
@@ -419,6 +439,67 @@ export interface operations {
             /** @description SERVICE_NOT_OFFERED_AT_BRANCH; DATE_OUTSIDE_BOOKING_WINDOW, SLOT_ON_CLOSED_DAY, SLOT_OUTSIDE_HOURS, SLOT_OFF_GRID, SLOT_WITHIN_LEAD_TIME: the start is not a slot; MOBILE_NUMBER_REQUIRED: not a South African mobile; IDEMPOTENCY_KEY_REUSED: the key booked different details */
             422: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getAppointment: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description The last four digits of the mobile number used to book
+                 * @example 0101
+                 */
+                "X-Mobile-Last4": string;
+            };
+            path: {
+                /**
+                 * @description The reference; case and hyphens do not matter
+                 * @example APT-7K3M-9Q2X
+                 */
+                reference: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The appointment */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Appointment"];
+                };
+            };
+            /** @description VALIDATION_FAILED: X-Mobile-Last4 is missing or not four digits */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description APPOINTMENT_NOT_FOUND: the reference and the digits match no appointment */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description LOOKUP_RATE_LIMITED: too many wrong tries for this reference */
+            429: {
+                headers: {
+                    /** @description Seconds until the reference can be looked up again */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

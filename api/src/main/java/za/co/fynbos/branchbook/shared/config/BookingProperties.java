@@ -1,6 +1,7 @@
 package za.co.fynbos.branchbook.shared.config;
 
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Positive;
 import java.time.Duration;
 import java.time.Period;
 import org.springframework.boot.context.properties.ConfigurationProperties;
@@ -12,7 +13,14 @@ import org.springframework.validation.annotation.Validated;
  *
  * @param leadTime how far ahead of now the earliest bookable slot starts (BR-4)
  * @param horizon how many days are bookable, counted from today in the branch's time zone (BR-5)
+ * @param lookupMaxFailures how many wrong lookups of one reference are answered before it is
+ *     blocked (BR-13)
+ * @param lookupWindow how long a reference stays blocked, counted from its first wrong lookup
  */
 @Validated
 @ConfigurationProperties("branchbook.booking")
-public record BookingProperties(@NotNull Duration leadTime, @NotNull Period horizon) {}
+public record BookingProperties(
+    @NotNull Duration leadTime,
+    @NotNull Period horizon,
+    @Positive int lookupMaxFailures,
+    @NotNull Duration lookupWindow) {}
