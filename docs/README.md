@@ -4,6 +4,7 @@ Start with the [project README](../README.md). This folder holds everything that
 
 | Document | What it answers | Status |
 |---|---|---|
+| [Architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX) | The whole design on one page, including the parts not built yet: which sections are built, and where the build departs from the plan and why. | Living; checked against the code at the end of every milestone, and its header names the commit |
 | [architecture.md](architecture.md) | How the system is built and why: containers, modules, the booking transaction, the confirmation, the data model, time and personal information. | Written |
 | [adr/](adr/README.md) | Each significant decision, the alternatives rejected and the consequences accepted. | Seven records written |
 | [domain-rules.md](domain-rules.md) | Every business rule, where it is enforced and the test that proves it. | Written; each rule says whether it is proven or planned, and CI checks that every test a proven rule cites exists |

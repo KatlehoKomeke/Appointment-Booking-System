@@ -12,6 +12,7 @@ a simulated SMS confirmation that cannot be lost.
 | | |
 |---|---|
 | Stage | Milestone M1 complete: the schema with every constraint proven, the seeded catalogue, the public-holiday rule and the branch API. Slots and availability come next (M2). |
+| Design | The whole design is on one [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX), checked against the code at the end of every milestone |
 | Run locally | `make up`, then open http://localhost:8080 |
 | Hosted demo | Optional, in AWS Cape Town, defined in AWS CDK ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)) |
 | Deployment | Every push to `main` is tested and deployed to AWS Cape Town through OpenID Connect, with no stored keys ([ADR-0007](docs/adr/0007-continuous-deployment-from-main.md), [infra/README.md](infra/README.md)) |
@@ -52,6 +53,20 @@ This README grows with each milestone. Sections marked *planned* describe what i
 Every rule, with the test that proves it, is in [docs/domain-rules.md](docs/domain-rules.md).
 
 ## Architecture at a glance
+
+<a href="https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-page-dark.png">
+    <img src="docs/assets/architecture-page-light.png" width="100%"
+         alt="The BranchBook architecture page: the title, a one-paragraph summary of the design and the brief it answers">
+  </picture>
+</a>
+
+The whole design is on one page: **[BranchBook architecture](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX)**. It
+covers the booking transaction, the confirmation outbox, the data and domain models, the API, the South African
+rules, testing and the AWS deployment, with diagrams. It is checked against the code at the end of every milestone:
+each section is marked built, partly built or planned, and anything built differently from the plan is listed with
+its reason.
 
 ```mermaid
 flowchart LR
@@ -198,6 +213,7 @@ Each lists the documents to bring.
 
 | Document | Contents |
 |---|---|
+| [Architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX) | The whole design, including the parts not built yet, with the build status of every section and each departure from the plan |
 | [docs/architecture.md](docs/architecture.md) | How it is built: containers, modules, the booking transaction, the confirmation, the data model |
 | [docs/adr](docs/adr/README.md) | Architecture decision records |
 | [docs/domain-rules.md](docs/domain-rules.md) | Every business rule, where it is enforced and the test that proves it |

@@ -19,4 +19,5 @@ The part that deserves the closest look.
 - [ ] Tests cover the change, at the lowest layer that can prove it.
 - [ ] Javadoc or TSDoc is written for every new public type and exported function.
 - [ ] Project documents are updated: README, architecture, ADRs, domain rules and error catalogue, as applicable.
+- [ ] The architecture page still matches the code, or this change does not affect it.
 - [ ] No secrets, credentials, account IDs or real personal data are in the diff.
