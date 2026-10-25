@@ -5,11 +5,11 @@ import org.springframework.transaction.annotation.Transactional;
 import za.co.fynbos.branchbook.catalogue.domain.Branch;
 import za.co.fynbos.branchbook.catalogue.domain.BranchCalendar;
 import za.co.fynbos.branchbook.catalogue.domain.PublicHolidayCalendar;
+import za.co.fynbos.branchbook.catalogue.domain.ServiceOffer;
 
 /**
- * Builds a branch's {@link BranchCalendar}: its weekly hours together with the public holidays.
- * This is how scheduling and booking learn on which days, and between which hours, a branch takes
- * appointments.
+ * What scheduling and booking need to know about a branch: its {@link BranchCalendar} (weekly hours
+ * together with the public holidays), and how it offers each service ({@link ServiceOffer}).
  */
 @Service
 public class BranchCalendarProvider {
@@ -42,5 +42,21 @@ public class BranchCalendarProvider {
   public BranchCalendar calendarFor(Branch branch) {
     PublicHolidayCalendar holidays = new PublicHolidayCalendar(catalogue.publicHolidays());
     return new BranchCalendar(branch, catalogue.operatingHours(branch.id()), holidays);
+  }
+
+  /**
+   * Returns how a branch offers a service: the appointment's duration and the number of seats.
+   *
+   * @param branch the branch
+   * @param serviceCode the service code, in upper case
+   * @return the offer
+   * @throws ServiceNotOfferedAtBranchException if the branch does not offer it, or no active
+   *     service has that code (BR-6)
+   */
+  @Transactional(readOnly = true)
+  public ServiceOffer offerFor(Branch branch, String serviceCode) {
+    return catalogue
+        .serviceOffer(branch.id(), serviceCode)
+        .orElseThrow(ServiceNotOfferedAtBranchException::new);
   }
 }

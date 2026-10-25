@@ -22,6 +22,7 @@ import za.co.fynbos.branchbook.catalogue.domain.Branch;
 import za.co.fynbos.branchbook.catalogue.domain.OperatingHours;
 import za.co.fynbos.branchbook.catalogue.domain.Province;
 import za.co.fynbos.branchbook.catalogue.domain.PublicHoliday;
+import za.co.fynbos.branchbook.catalogue.domain.ServiceOffer;
 import za.co.fynbos.branchbook.catalogue.domain.ServiceType;
 
 /**
@@ -111,6 +112,25 @@ class JdbcCatalogue implements CatalogueReadPort {
                     rs.getInt("duration_minutes"),
                     textArray(rs.getArray("documents_needed"))))
         .list();
+  }
+
+  @Override
+  public Optional<ServiceOffer> serviceOffer(UUID branchId, String serviceCode) {
+    return jdbc.sql(
+            """
+            SELECT s.id, s.code, s.duration_minutes, bs.capacity
+            FROM branch_services bs JOIN services s ON s.id = bs.service_id
+            WHERE bs.branch_id = :branchId AND s.code = :serviceCode AND s.active""")
+        .param("branchId", branchId)
+        .param("serviceCode", serviceCode)
+        .query(
+            (rs, row) ->
+                new ServiceOffer(
+                    rs.getObject("id", UUID.class),
+                    rs.getString("code"),
+                    rs.getInt("duration_minutes"),
+                    rs.getInt("capacity")))
+        .optional();
   }
 
   @Override

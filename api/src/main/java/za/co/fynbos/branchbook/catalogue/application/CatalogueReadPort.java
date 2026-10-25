@@ -7,6 +7,7 @@ import java.util.UUID;
 import za.co.fynbos.branchbook.catalogue.domain.Branch;
 import za.co.fynbos.branchbook.catalogue.domain.OperatingHours;
 import za.co.fynbos.branchbook.catalogue.domain.PublicHoliday;
+import za.co.fynbos.branchbook.catalogue.domain.ServiceOffer;
 import za.co.fynbos.branchbook.catalogue.domain.ServiceType;
 
 /**
@@ -54,6 +55,15 @@ public interface CatalogueReadPort {
    * @return the services, in display order
    */
   List<ServiceType> servicesOfferedAt(UUID branchId);
+
+  /**
+   * Finds how a branch offers an active service.
+   *
+   * @param branchId the branch's id
+   * @param serviceCode the service code, in upper case
+   * @return the offer, or empty if the branch does not offer it or no active service has that code
+   */
+  Optional<ServiceOffer> serviceOffer(UUID branchId, String serviceCode);
 
   /**
    * Lists every stored public holiday. Observed Mondays are derived, not stored.

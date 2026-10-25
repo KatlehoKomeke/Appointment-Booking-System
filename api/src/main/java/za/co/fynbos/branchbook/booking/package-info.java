@@ -7,7 +7,8 @@
  * confirmation is written, and the notification module implements it (docs/architecture.md, section
  * 3).
  *
- * <p>Built so far: the appointment aggregate and its schema. The booking transaction follows in
- * milestone M3.
+ * <p>Built so far: the appointment aggregate and its schema, and the read that tells scheduling
+ * which seats active appointments hold ({@code infrastructure}, implementing scheduling's port).
+ * The booking transaction follows in milestone M3.
  */
 package za.co.fynbos.branchbook.booking;
