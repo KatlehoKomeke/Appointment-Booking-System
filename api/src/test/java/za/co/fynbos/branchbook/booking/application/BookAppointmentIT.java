@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -103,6 +104,82 @@ class BookAppointmentIT {
                 "SELECT seat_no FROM appointments WHERE status = 'CONFIRMED'", Integer.class))
         .as("Polokwane has one FICA seat, so the new appointment took the freed one")
         .isOne();
+  }
+
+  /**
+   * BR-16, ADR-0003: the confirmation SMS commits with the booking or not at all. Step 10 is made
+   * to fail after the SMS was written in step 9, and the whole booking is gone, its SMS included.
+   */
+  @Test
+  void failureAfterTheSmsIsWrittenRollsTheSmsBackWithTheBooking() {
+    jdbc.execute(
+        """
+        CREATE FUNCTION test_fail_key_completion() RETURNS trigger LANGUAGE plpgsql AS $$
+        BEGIN
+          RAISE EXCEPTION 'test: completing the idempotency key fails';
+        END $$""");
+    jdbc.execute(
+        """
+        CREATE TRIGGER test_fail_key_completion BEFORE UPDATE ON idempotency_keys
+        FOR EACH ROW EXECUTE FUNCTION test_fail_key_completion()""");
+    MvcTestResult failed;
+    try {
+      failed = book(mvc, body("SAN", "FICA", "2026-10-27T10:00:00+02:00", "082 555 0174"));
+    } finally {
+      jdbc.execute("DROP TRIGGER test_fail_key_completion ON idempotency_keys");
+      jdbc.execute("DROP FUNCTION test_fail_key_completion()");
+    }
+
+    assertThat(failed).hasStatus(HttpStatus.INTERNAL_SERVER_ERROR);
+    assertThat(count("appointments")).isZero();
+    assertThat(count("notification_messages")).isZero();
+    assertThat(count("idempotency_keys")).isZero();
+  }
+
+  /**
+   * BR-7: the lowest free seat is taken. Sandton has three FICA seats; once seats 1 and 2 are
+   * cancelled, the next booking takes seat 1 and the one after it seat 2, never seat 3 again or a
+   * seat past the capacity, and then the slot is full.
+   */
+  @Test
+  void lowestFreeSeatIsTakenFirst() {
+    for (String mobile : List.of("082 555 0175", "082 555 0176", "082 555 0177")) {
+      assertThat(book(mvc, body("SAN", "FICA", "2026-10-27T10:00:00+02:00", mobile)))
+          .hasStatus(HttpStatus.CREATED);
+    }
+    jdbc.update(
+        "UPDATE appointments SET status = 'CANCELLED', cancelled_at = ? WHERE seat_no IN (1, 2)",
+        clock.instant().atOffset(ZoneOffset.UTC));
+
+    assertThat(book(mvc, body("SAN", "FICA", "2026-10-27T10:00:00+02:00", "082 555 0178")))
+        .hasStatus(HttpStatus.CREATED);
+    assertThat(book(mvc, body("SAN", "FICA", "2026-10-27T10:00:00+02:00", "082 555 0179")))
+        .hasStatus(HttpStatus.CREATED);
+    MvcTestResult full =
+        book(mvc, body("SAN", "FICA", "2026-10-27T10:00:00+02:00", "082 555 0180"));
+
+    assertThat(seatOf("+27825550178")).isOne();
+    assertThat(seatOf("+27825550179")).isEqualTo(2);
+    assertThat(full).hasStatus(HttpStatus.CONFLICT);
+    assertThat(full).bodyJson().extractingPath("$.code").isEqualTo("SLOT_FULL");
+  }
+
+  /**
+   * BR-22: a request that overlaps the customer's own appointment at a slot that is also full is
+   * told about the overlap, which the customer can act on, not that the slot is full.
+   */
+  @Test
+  void overlapIsReportedBeforeSlotFull() {
+    assertThat(book(mvc, body("SAN", "CARD", "2026-10-27T09:00:00+02:00", "082 555 0181")))
+        .hasStatus(HttpStatus.CREATED);
+    assertThat(book(mvc, body("POL", "FICA", "2026-10-27T09:00:00+02:00", "082 555 0182")))
+        .hasStatus(HttpStatus.CREATED);
+
+    MvcTestResult both =
+        book(mvc, body("POL", "FICA", "2026-10-27T09:00:00+02:00", "082 555 0181"));
+
+    assertThat(both).hasStatus(HttpStatus.CONFLICT);
+    assertThat(both).bodyJson().extractingPath("$.code").isEqualTo("CUSTOMER_OVERLAP");
   }
 
   /** BR-10: one upcoming appointment per service; the refusal says nothing about the first. */
@@ -231,6 +308,15 @@ class BookAppointmentIT {
             CustomerName.parse("Dlamini").orElseThrow(),
             MobileNumber.parse("082 555 " + suffix).orElseThrow()),
         Instant.parse("2026-10-26T06:00:00Z"));
+  }
+
+  private int seatOf(String mobileE164) {
+    Integer seat =
+        jdbc.queryForObject(
+            "SELECT seat_no FROM appointments WHERE customer_mobile = ? AND status = 'CONFIRMED'",
+            Integer.class,
+            mobileE164);
+    return seat == null ? 0 : seat;
   }
 
   private int count(String table) {
