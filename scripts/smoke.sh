@@ -2,8 +2,11 @@
 #
 # scripts/smoke.sh: checks that a running BranchBook works end to end over HTTP. It checks the readiness probe, the
 # app and its assets, the app's routes, the branch and availability APIs and their error contract (including a request
-# rejected before Spring MVC), the OpenAPI document and Swagger UI, real 404s, closed operational endpoints and the
-# security headers.
+# rejected before Spring MVC), that the booking and lookup endpoints answer, the OpenAPI document and Swagger UI, real
+# 404s, closed operational endpoints and the security headers.
+#
+# It writes nothing, so it is safe against any instance: the booking and lookup checks use requests that are refused
+# before the database is touched, and a lookup of a reference that cannot exist, which is never counted.
 #
 # Usage: scripts/smoke.sh [base-url]        default: http://localhost:8080
 #
@@ -82,6 +85,22 @@ availability_is_served() {
     && grep --quiet -E '"startsAt":"[^"]+\+02:00"|"closedReason":"PUBLIC_HOLIDAY"' <<<"$body"
 }
 
+# Succeeds if a booking of Sandton's FICA update, sent with the given mobile number and Idempotency-Key (empty to leave
+# the header out), is refused with the given code. Both refusals come before the booking transaction, so nothing is
+# written. The number is from the published demo range.
+booking_refused_with() {
+  local mobile="$1" key="$2" code="$3" body
+  body="{\"branchCode\":\"SAN\",\"serviceCode\":\"FICA\",\"startsAt\":\"$(bookable_to SAN)T09:00:00+02:00\","
+  body+="\"customer\":{\"firstName\":\"Smoke\",\"lastName\":\"Test\",\"mobile\":\"$mobile\"}}"
+  curl --silent --request POST --header 'Content-Type: application/json' ${key:+--header "Idempotency-Key: $key"} \
+    --data "$body" "$base_url/api/v1/appointments" | grep --quiet --fixed-strings -- "\"code\":\"$code\""
+}
+
+# Succeeds if GET <path>, sent with the given X-Mobile-Last4 (empty to leave it out), answers with the given code.
+lookup_answers() {
+  curl --silent ${2:+--header "X-Mobile-Last4: $2"} "$base_url$1" | grep --quiet --fixed-strings -- "\"code\":\"$3\""
+}
+
 # Succeeds if the script that index.html loads is served, which proves the web build is inside the jar.
 app_script_is_served() {
   local script
@@ -103,6 +122,14 @@ check 'a date outside the window is refused' \
   problem_code_is '/api/v1/branches/SAN/availability?service=FICA&date=2000-01-01' DATE_OUTSIDE_BOOKING_WINDOW
 check 'a service the branch does not offer is refused' \
   problem_code_is "/api/v1/branches/GQE/availability?service=HOME&date=$(bookable_to GQE)" SERVICE_NOT_OFFERED_AT_BRANCH
+check 'a booking without an Idempotency-Key is refused' \
+  booking_refused_with '082 555 0199' '' IDEMPOTENCY_KEY_REQUIRED
+check 'a booking with a landline is refused' \
+  booking_refused_with '021 555 0199' 2f1c7a4e-3b5d-4c6e-8f9a-0b1c2d3e4f5a MOBILE_NUMBER_REQUIRED
+check 'a lookup without the last four digits is refused' \
+  lookup_answers /api/v1/appointments/APT-7K3M-9Q2X '' VALIDATION_FAILED
+check 'a lookup of a reference that cannot exist is a 404' \
+  lookup_answers /api/v1/appointments/not-a-reference 0199 APPOINTMENT_NOT_FOUND
 check 'the OpenAPI document is served' body_contains /v3/api-docs '"openapi":"3.1.0"'
 check 'Swagger UI is served' status_is /swagger-ui/index.html 200
 check 'an unknown branch is a 404 problem' status_is /api/v1/branches/XYZ 404
