@@ -25,6 +25,19 @@ public record CustomerDetails(
     @Column(name = "customer_email") @Nullable String email) {
 
   /**
+   * Builds the details of a new booking from parsed values, without an e-mail address.
+   *
+   * @param firstName the first name, already normalised
+   * @param lastName the last name, already normalised
+   * @param mobile the mobile number
+   * @return the details, with the number in E.164 form
+   */
+  public static CustomerDetails of(
+      CustomerName firstName, CustomerName lastName, MobileNumber mobile) {
+    return new CustomerDetails(firstName.value(), lastName.value(), mobile.e164(), null);
+  }
+
+  /**
    * Hides every value, so the details cannot reach a log through string concatenation.
    *
    * @return a fixed text without personal data
