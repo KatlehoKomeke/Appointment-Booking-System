@@ -4,7 +4,8 @@ The React app customers use to book, look up and cancel branch appointments. In 
 its own: the Dockerfile builds it and places the output inside the Spring Boot jar, which serves the app and the API
 from one origin (see [docs/architecture.md](../docs/architecture.md), section 2).
 
-**Status (M0):** a placeholder page showing the fictional-bank notice. The booking flow is built in later milestones.
+**Status (M2):** a placeholder page showing the fictional-bank notice, and the typed API client the booking flow
+will use. The booking flow is built in M4.
 
 ## Stack
 
@@ -24,9 +25,41 @@ Node 24 is required (the repository's [.nvmrc](../.nvmrc) selects it). Run these
 | `npm run typecheck` | Type-checks the app and its configuration |
 | `npm run format` | Formats with Prettier (`npm run format:check` only checks) |
 | `npm run build` | Type-checks, then writes the production build to `dist/` |
+| `npm run generate:api` | Regenerates `src/api/schema.d.ts` from [docs/openapi.yaml](../docs/openapi.yaml) |
+| `npm run check:api` | Fails if `src/api/schema.d.ts` is not what `generate:api` would write |
 
 The dev server forwards `/api`, `/actuator`, `/readyz` and `/livez` to the API on port 8080, so the app talks to
 one origin in development as in production. Start the API with `make dev-api` from the repository root.
+
+## Talking to the API
+
+[src/api/client.ts](src/api/client.ts) is the only way the app calls the API. It is
+[openapi-fetch](https://openapi-ts.dev/openapi-fetch/) typed by `src/api/schema.d.ts`, which
+[openapi-typescript](https://openapi-ts.dev/) generates from the committed contract
+([ADR-0005](../docs/adr/0005-committed-openapi-contract.md)). A path, parameter or field the API does not have is a
+type error:
+
+```ts
+const day = await unwrap(
+  api.GET('/api/v1/branches/{code}/availability', {
+    params: { path: { code: 'RUS' }, query: { service: 'HOME', date: '2026-10-31' } },
+  }),
+);
+day.slots[0]?.startsAt; // string, with the branch's +02:00 offset
+day.closedReason; // 'CLOSED_DAY' | 'PUBLIC_HOLIDAY' | null
+```
+
+`unwrap` returns the body of a success and throws an `ApiProblem` for an error response, carrying the status, the
+stable `code` and the `correlationId`. Screens choose their wording from `code`, never from the problem's `detail`.
+A network failure is not an `ApiProblem`, so a screen can tell "offline" from "refused".
+
+`schema.d.ts` is generated and committed, never edited by hand; ESLint and Prettier skip it, and `npm run
+check:api` (in CI and `make test`) fails if regenerating it would change anything. After an API change, `make contract` in the repository root refreshes the contract
+and this file together.
+
+openapi-typescript 7.13.0 declares TypeScript 5 as its peer, while the app uses TypeScript 6. The `overrides` entry
+in [package.json](package.json) makes it use the app's TypeScript. openapi-typescript only prints the file through
+the compiler's API, and the type check and the client's tests run against what it prints.
 
 ## Quality gates
 
@@ -54,6 +87,7 @@ web/
     ├── main.tsx       mounts the app
     ├── App.tsx        the app shell
     ├── index.css      global styles and the colour tokens
+    ├── api/           the typed API client; schema.d.ts is generated from docs/openapi.yaml
     └── test/setup.ts  test setup: DOM matchers and cleanup
 ```
 

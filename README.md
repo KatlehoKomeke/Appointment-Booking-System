@@ -11,7 +11,7 @@ a simulated SMS confirmation that cannot be lost.
 
 | | |
 |---|---|
-| Stage | Milestone M1 complete: the schema with every constraint proven, the seeded catalogue, the public-holiday rule and the branch API. Slots and availability come next (M2). |
+| Stage | Milestone M2 complete: the slot rules and the availability API, on top of M1's schema, catalogue and branch API. The API contract is committed and the web app's types are generated from it. Booking comes next (M3). |
 | Design | The whole design is on one [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX), checked against the code at the end of every milestone |
 | Run locally | `make up`, then open http://localhost:8080 |
 | Hosted demo | Optional, in AWS Cape Town, defined in AWS CDK ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)) |
@@ -87,6 +87,7 @@ with boundaries enforced by architecture tests. The full picture is in [docs/arc
 | Back end | Java 25 LTS, Spring Boot 4.1, Spring Data JPA, Flyway |
 | Database | PostgreSQL 17 with `btree_gist` |
 | Front end | React 19, TypeScript (strict), Vite, TanStack Query, react-hook-form with zod |
+| API contract | OpenAPI 3.1, generated from the controllers by springdoc and committed; the web app's types are generated from it ([ADR-0005](docs/adr/0005-committed-openapi-contract.md)) |
 | Tests | JUnit, Testcontainers on real PostgreSQL, ArchUnit, Vitest, Playwright |
 | Delivery | Docker Compose locally, GitHub Actions, AWS CDK for the optional hosted demo |
 
@@ -102,11 +103,13 @@ Recorded when the project was scaffolded (M0). Dependabot proposes updates weekl
 | PostgreSQL | 17.11; JDBC driver 42.7.13 | `compose.yaml`, `TestcontainersConfiguration` |
 | JUnit, Testcontainers | 6.0.3, 2.0.5 | managed by Spring Boot |
 | ArchUnit | 1.5.1 | `api/pom.xml` |
+| springdoc-openapi | 3.2.0 | `api/pom.xml` |
 | Maven | 3.10.0, checksum-verified by the wrapper | `api/.mvn/wrapper/maven-wrapper.properties` |
 | Node.js | 24; 24.22.1 in the build image | `.nvmrc`, `Dockerfile` |
 | React | 19.3.1 | `web/package-lock.json` |
 | TypeScript | 6.0.3 | `web/` and `infra/` lockfiles |
 | Vite, Vitest | 8.3.5, 5.0.5 | `web/package-lock.json` |
+| openapi-typescript, openapi-fetch | 7.13.0, 0.17.0 | `web/package-lock.json` |
 | ESLint | 10.13.0 | `web/` and `infra/` lockfiles |
 | AWS CDK | `aws-cdk-lib` 2.274.0, CLI 2.1146.1 | `infra/package.json` |
 
@@ -140,6 +143,38 @@ make down     # stop everything and delete the local database
 `make up` prints the address: http://localhost:8080 unless you change it. If port 8080 is taken, choose another
 with `APP_PORT=18080 make up`, or in a `.env` file copied from [.env.example](.env.example). Without make, run
 `docker compose up --build --wait`.
+
+### Try the API
+
+Swagger UI at http://localhost:8080/swagger-ui.html lists every operation and lets you call it. From a terminal,
+the slots for a home loan consultation at Rustenburg on a Saturday:
+
+```bash
+curl 'http://localhost:8080/api/v1/branches/RUS/availability?service=HOME&date=2026-10-31'
+```
+
+```json
+{
+  "branchCode": "RUS",
+  "serviceCode": "HOME",
+  "date": "2026-10-31",
+  "timezone": "Africa/Johannesburg",
+  "generatedAt": "2026-10-25T13:18:55+02:00",
+  "closedReason": null,
+  "holidayName": null,
+  "slots": [
+    { "startsAt": "2026-10-31T08:00:00+02:00", "endsAt": "2026-10-31T08:45:00+02:00", "seatsAvailable": 2 },
+    { "startsAt": "2026-10-31T08:45:00+02:00", "endsAt": "2026-10-31T09:30:00+02:00", "seatsAvailable": 2 },
+    { "startsAt": "2026-10-31T09:30:00+02:00", "endsAt": "2026-10-31T10:15:00+02:00", "seatsAvailable": 2 },
+    { "startsAt": "2026-10-31T10:15:00+02:00", "endsAt": "2026-10-31T11:00:00+02:00", "seatsAvailable": 2 },
+    { "startsAt": "2026-10-31T11:00:00+02:00", "endsAt": "2026-10-31T11:45:00+02:00", "seatsAvailable": 2 }
+  ]
+}
+```
+
+Rustenburg closes at 12:00 on Saturdays, so the last 45-minute slot starts at 11:00. Every time carries the
+branch's offset, `+02:00`. Pick a date in the next 30 days; any other is refused with
+`422 DATE_OUTSIDE_BOOKING_WINDOW`. The endpoints and their errors are listed in [api/README.md](api/README.md).
 
 ### Develop it
 
@@ -218,6 +253,7 @@ Each lists the documents to bring.
 | [docs/adr](docs/adr/README.md) | Architecture decision records |
 | [docs/domain-rules.md](docs/domain-rules.md) | Every business rule, where it is enforced and the test that proves it |
 | [docs/errors.md](docs/errors.md) | Every API error code, when it happens and what the customer sees |
+| [docs/openapi.yaml](docs/openapi.yaml) | The API contract, generated from the code and checked by a test |
 | [infra/README.md](infra/README.md) | The AWS CDK app: what exists in AWS, how GitHub connects without keys, first-time setup |
 | [SECURITY.md](SECURITY.md) | Secrets, personal information and vulnerability reporting |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Workflow, commit conventions and the documentation standard |

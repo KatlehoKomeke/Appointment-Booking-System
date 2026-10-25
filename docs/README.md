@@ -9,7 +9,7 @@ Start with the [project README](../README.md). This folder holds everything that
 | [adr/](adr/README.md) | Each significant decision, the alternatives rejected and the consequences accepted. | Seven records written |
 | [domain-rules.md](domain-rules.md) | Every business rule, where it is enforced and the test that proves it. | Written; each rule says whether it is proven or planned, and CI checks that every test a proven rule cites exists |
 | [errors.md](errors.md) | Every error code the API returns, when, and what the customer sees. | Written |
-| openapi.yaml | The API contract, generated from the code and pinned by a test. | Arrives in M2 |
+| [openapi.yaml](openapi.yaml) | The API contract: every path, parameter, response and error. Swagger UI shows it at `/swagger-ui.html` on a running instance. | Generated from the code; `OpenApiContractIT` fails when it is out of date, and `make contract` regenerates it |
 | runbook.md | Operating the system: health checks, replaying a failed message, tracing a request. | Arrives in M5 |
 | [../infra/README.md](../infra/README.md) | The AWS CDK app: what exists in AWS, how GitHub Actions connects without keys, and the first-time setup. | Written; grows with each stack |
 

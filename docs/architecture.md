@@ -4,10 +4,11 @@ This document explains how BranchBook is built and why. The decisions behind it 
 [docs/adr](adr/README.md); the business rules are in [domain-rules.md](domain-rules.md). The whole design,
 including the parts not built yet, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX).
 
-**Status: design complete; milestones M0 and M1 are built.** M0 is the skeleton: one jar that serves the app,
+**Status: design complete; milestones M0 to M2 are built.** M0 is the skeleton: one jar that serves the app,
 PostgreSQL 17 migrated by Flyway, health probes and security headers. M1 adds the whole schema, the seeded
-catalogue, the `catalogue` module with the public-holiday rule, and the shared error and correlation-id handling.
-The other modules arrive milestone by milestone. Diagrams use Mermaid, which GitHub renders in place.
+catalogue, the `catalogue` module with the public-holiday rule, and the shared error and correlation-id handling. M2
+adds the `scheduling` module (`SlotCalendar` and the availability API) and the committed OpenAPI contract that the
+web app's types are generated from. The other modules arrive milestone by milestone. Diagrams use Mermaid, which GitHub renders in place.
 
 ## 1. What the system does
 
@@ -63,7 +64,7 @@ flowchart LR
 | Module | Responsibility |
 |---|---|
 | `catalogue` | Branches, services, weekday trading hours, capacities and public holidays. Read-only at runtime; seeded by Flyway. |
-| `scheduling` | `SlotCalendar`, a pure function that computes and validates slots in the branch's time zone. |
+| `scheduling` | `SlotCalendar`, a pure function that computes and validates slots in the branch's time zone, and the availability query. It learns which seats are taken through the `BookedIntervalsPort`, which `booking` implements, so it never reads the appointments table itself. |
 | `booking` | The `Appointment` aggregate, the booking transaction, idempotency, lookup and cancellation. |
 | `notification` | The outbox, message templates, the dispatcher and the gateway port. |
 | `shared` | Problem responses, correlation ids, security headers, the clock and configuration. |
@@ -206,9 +207,11 @@ no customers table and no login.
 
 Every instant is stored as `timestamptz` (UTC). Trading hours are wall-clock times converted through the branch's
 IANA time zone (`Africa/Johannesburg`), never by adding two hours by hand. A `java.time.Clock` is injected
-everywhere, and SQL binds `:now` from it rather than calling `now()`, so tests control time. The API returns
-offsets explicitly, for example `2026-10-27T09:30:00+02:00`, and the web app formats times in South African
-Standard Time whatever the device's time zone.
+everywhere, and SQL binds `:now` from it rather than calling `now()`, so tests control time;
+`NativeSqlUsesBoundNowTest` fails if a SQL string reads the database's clock. The API returns offsets explicitly,
+for example `2026-10-27T09:30:00+02:00`, and the web app formats times in South African Standard Time whatever the
+device's time zone. The containers and CI run in UTC, and CI runs the API's unit and API tests again in
+`America/New_York` to prove the slots do not depend on the JVM's zone.
 
 ## 9. Personal information
 

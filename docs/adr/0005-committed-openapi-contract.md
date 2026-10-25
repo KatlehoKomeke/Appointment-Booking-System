@@ -11,9 +11,10 @@ read the API without running the code.
 ## Decision
 
 - springdoc generates the OpenAPI 3.1 document from the controllers. `docs/openapi.yaml` is committed, and
-  `OpenApiContractTest` fails when the generated document differs from the committed file.
+  `OpenApiContractIT` fails when the generated document differs from the committed file.
 - The web app's types come from that file through `openapi-typescript`, and requests go through `openapi-fetch`.
   CI fails when the generated client differs from the committed one.
+- After an intended API change, `make contract` regenerates both files, which are committed with the change.
 - Error codes are part of the contract and are catalogued in [errors.md](../errors.md).
 
 ## Alternatives considered

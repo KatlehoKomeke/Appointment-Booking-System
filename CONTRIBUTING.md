@@ -67,6 +67,7 @@ documentation is incomplete.
 |---|---|
 | Add or change a business rule | [docs/domain-rules.md](docs/domain-rules.md) and the proving test |
 | Add or change an error code | [docs/errors.md](docs/errors.md) and `ProblemCode` |
+| Change the API: a path, parameter or response | Run `make contract`, and commit [docs/openapi.yaml](docs/openapi.yaml) and `web/src/api/schema.d.ts` with the change |
 | Make a decision with a rejected alternative | A new record in [docs/adr](docs/adr/README.md) |
 | Change how the system is built or connected | [docs/architecture.md](docs/architecture.md) |
 | Change how to run, test or deploy it | [README.md](README.md) |

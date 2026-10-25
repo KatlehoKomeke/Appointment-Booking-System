@@ -50,11 +50,11 @@ How to read a rule:
 
 **Rule.** Slots start at opens_at + k x service.duration_minutes (15/30/45) in Branch.timezone; a startsAt off that grid is rejected with 422 SLOT_OFF_GRID.
 
-**Enforced in.** domain (SlotCalendar.validate; reused by availability and booking)
+**Enforced in.** domain (SlotCalendar.slotsOn lists the grid for availability; SlotCalendar.validate checks a requested start for booking; SlotCalendarTest proves the two agree)
 
-**Proven by.** `SlotCalendarTest.slotsStartAtOpeningAndStepByServiceDuration`
+**Proven by.** `SlotCalendarTest.slotsStartAtOpeningAndStepByServiceDuration`, `SlotCalendarTest.validateAgreesWithGeneratedSlotsForEverySeededHoursPatternAndDuration`, `AvailabilityApiIT.weekdayHasThirtySixFifteenMinuteSlotsWithTheBranchsCapacity`
 
-**Status.** Planned for M2.
+**Status.** Planned for M3, when booking rejects an off-grid start. Built in M2 and proven by the tests above: the grid in `SlotCalendar` and the availability API.
 
 <a id="br-2"></a>
 ## BR-2: Slots fit inside trading hours
@@ -63,20 +63,20 @@ How to read a rule:
 
 **Enforced in.** domain (SlotCalendar.validate) + database constraint (appointments_ends_after_starts: an appointment ends after it starts; trading hours are not known to the constraint)
 
-**Proven by.** `SlotCalendarTest.saturdayFortyFiveMinuteLastStartIs1145`, `SlotCalendarTest.rustenburgSaturdayFortyFiveMinuteLastStartIs1100`, `SlotCalendarTest.onGridStartEndingAfterCloseIsOutsideHours`
+**Proven by.** `SlotCalendarTest.saturdayFortyFiveMinuteLastStartIs1145`, `SlotCalendarTest.rustenburgSaturdayFortyFiveMinuteLastStartIs1100`, `SlotCalendarTest.onGridStartEndingAfterCloseIsOutsideHours`, `AvailabilityApiIT.rendersStartsAtWithJohannesburgOffset`
 
-**Status.** Planned for M2.
+**Status.** Planned for M3, when booking rejects a start outside the hours and computes `ends_at`. Built in M2 and proven by the tests above: the trading hours in `SlotCalendar` and the availability API.
 
 <a id="br-3"></a>
 ## BR-3: Closed days and public holidays have no slots
 
-**Rule.** No slots on a weekday without an operating-hours row, nor on a public holiday (Schedule 1 or proclaimed date, or the Monday derived after a Sunday holiday; Saturdays get no substitute) unless branch.open_on_public_holidays; a POST on such a day is 422 SLOT_ON_CLOSED_DAY and availability returns closedReason CLOSED_DAY | PUBLIC_HOLIDAY. Holiday coverage ends 31 Dec of the last seeded year and is reported (start-up WARN, health detail) before the window crosses it.
+**Rule.** No slots on a weekday without an operating-hours row, nor on a public holiday (Schedule 1 or proclaimed date, or the Monday derived after a Sunday holiday; Saturdays get no substitute) unless branch.open_on_public_holidays; a POST on such a day is 422 SLOT_ON_CLOSED_DAY and availability returns closedReason CLOSED_DAY | PUBLIC_HOLIDAY. Holiday coverage ends 31 Dec of the last seeded year. A WARN, logged at start-up and every day at 06:00 SAST, reports it from 60 days before the window crosses it, and again once the window has.
 
 **Enforced in.** domain (SlotCalendar + PublicHolidayCalendar pure function)
 
-**Proven by.** `PublicHolidayCalendarTest.sundayHoliday9Aug2026IsObservedOnMonday10Aug`, `BranchApiIT.detailListsClosedDatesWithHolidayNames`, `BranchApiIT.dayWithoutTradingHoursIsListedAsAClosedDay`
+**Proven by.** `PublicHolidayCalendarTest.sundayHoliday9Aug2026IsObservedOnMonday10Aug`, `SlotCalendarTest.publicHolidayHasNoSlots`, `SlotCalendarTest.mondayAfterASundayHolidayHasNoSlots`, `SlotCalendarTest.dayOfTheWeekWithoutHoursHasNoSlots`, `SlotCalendarTest.branchOpenOnPublicHolidaysHasItsUsualSlotsOnAHoliday`, `AvailabilityApiIT.publicHolidayReturnsTheHolidaysNameAndNoSlots`, `AvailabilityApiIT.dayWithoutTradingHoursReturnsClosedDayAndNoSlots`, `BranchApiIT.detailListsClosedDatesWithHolidayNames`, `BranchApiIT.dayWithoutTradingHoursIsListedAsAClosedDay`, `HolidayCoverageCheckTest.warnsSixtyDaysBeforeTheWindowPassesTheEndOfTheData`, `HolidayCoverageCheckTest.warnsOnceTheBookingWindowPassesTheLastSeededYear`, `ApplicationStartsIT.holidayCoverageIsCheckedEveryMorning`
 
-**Status.** Planned for M2. Built in M1: the holiday calendar and the closed days in `GET /api/v1/branches/{code}`; availability and booking apply them from M2.
+**Status.** Planned for M3, when booking rejects a start on a closed day. Built in M2 and proven by the tests above: closed days and holidays in `SlotCalendar` and the availability API, and the holiday-coverage warning. Built in M1: the holiday calendar and the closed days in `GET /api/v1/branches/{code}`.
 
 <a id="br-4"></a>
 ## BR-4: Two-hour lead time
@@ -85,31 +85,31 @@ How to read a rule:
 
 **Enforced in.** domain (SlotCalendar with injected Clock)
 
-**Proven by.** `SlotCalendarTest.excludesSlotsStartingWithinTwoHoursOfNow`
+**Proven by.** `SlotCalendarTest.excludesSlotsStartingWithinTwoHoursOfNow`, `SlotCalendarTest.slotStartingExactlyTwoHoursFromNowIsOffered`, `AvailabilityApiIT.todaysSlotsStartAfterTheLeadTime`
 
-**Status.** Planned for M2.
+**Status.** Planned for M3, when booking rejects a stale start. Built in M2 and proven by the tests above: the lead time in `SlotCalendar` and the availability API.
 
 <a id="br-5"></a>
 ## BR-5: Thirty-day booking horizon
 
 **Rule.** Horizon: the slot date must lie in the half-open window [today, today + P30D) in Branch.timezone, i.e. exactly 30 bookable dates (today through today + 29); availability dates or POST starts outside it return 422 DATE_OUTSIDE_BOOKING_WINDOW. The server publishes the window as bookableFrom/bookableTo on GET /branches/{code}, so the date strip never derives 'today' from the device.
 
-**Enforced in.** domain (SlotCalendar, BookingWindow) + application service (AvailabilityController date check)
+**Enforced in.** domain (SlotCalendar, BookingWindow) + application service (AvailabilityQueries date check)
 
-**Proven by.** `BookingWindowTest.thirtyDayHorizonGivesExactlyThirtyBookableDates`, `BranchApiIT.detailCarriesServerBookableWindow`, `BranchApiIT.windowStartsOnTheBranchsDateNotTheUtcDate`, `AvailabilityApiIT.dateOutsideWindowReturns422`
+**Proven by.** `BookingWindowTest.thirtyDayHorizonGivesExactlyThirtyBookableDates`, `SlotCalendarTest.onlyTheThirtyDatesFromTodayHaveSlots`, `BranchApiIT.detailCarriesServerBookableWindow`, `BranchApiIT.windowStartsOnTheBranchsDateNotTheUtcDate`, `AvailabilityApiIT.dateOutsideWindowReturns422`
 
-**Status.** Planned for M2. Built in M1: the window, published as `bookableFrom` and `bookableTo`.
+**Status.** Planned for M3, when booking rejects a start outside the window. Built in M2 and proven by the tests above: the window in `SlotCalendar`, published by `GET /api/v1/branches/{code}` and enforced by availability.
 
 <a id="br-6"></a>
 ## BR-6: Only services the branch offers
 
-**Rule.** A branch offers a service only if a branch_services row exists; otherwise availability is empty and booking returns 422 SERVICE_NOT_OFFERED_AT_BRANCH; the composite FK makes it a schema fact.
+**Rule.** A branch offers a service only if a branch_services row exists; otherwise availability and booking both return 422 SERVICE_NOT_OFFERED_AT_BRANCH, as they do for an unknown or inactive service code; the composite FK makes it a schema fact.
 
-**Enforced in.** database constraint (appointments_branch_service_fkey) + application service (BookAppointmentHandler step 2)
+**Enforced in.** database constraint (appointments_branch_service_fkey) + application service (BranchCalendarProvider.offerFor, used by AvailabilityQueries from M2 and by BookAppointmentHandler step 2 from M3)
 
 **Proven by.** `AvailabilityApiIT.serviceNotOfferedAtBranchReturns422`
 
-**Status.** Planned for M2. Built in M1: the composite foreign key, proven by `SchemaConstraintIT`.
+**Status.** Planned for M3, when booking refuses the pair before writing anything. Built in M2 and proven by the test above: availability refuses it. Built in M1: the composite foreign key, proven by `SchemaConstraintIT`.
 
 <a id="br-7"></a>
 ## BR-7: Capacity: lowest free seat under a row lock
@@ -261,9 +261,9 @@ How to read a rule:
 
 **Enforced in.** domain (SlotCalendar) + application service (explicit ISO_OFFSET_DATE_TIME rendering at Branch.timezone, independent of Jackson 2/3 time-zone features; :now bound in every native statement) + UI (lib/formatSast)
 
-**Proven by.** `AvailabilityApiIT.rendersStartsAtWithJohannesburgOffset`, `NativeSqlUsesBoundNowTest.noJavaSqlLiteralCallsNow`
+**Proven by.** `AvailabilityApiIT.rendersStartsAtWithJohannesburgOffset`, `SlotCalendarTest.producesSameSlotsUnderAnyJvmDefaultZone`, `NativeSqlUsesBoundNowTest.noJavaSqlLiteralCallsNow`
 
-**Status.** Planned for M2.
+**Status.** Planned for M4, when the web app formats times in SAST. Built in M2 and proven by the tests above: slots computed in the branch's zone from the injected clock, every native statement binding its instants, and the API writing every instant with the +02:00 offset. CI also runs the API's unit and API tests under `TZ=America/New_York`.
 
 <a id="br-21"></a>
 ## BR-21: One validation code, fixed precedence
@@ -274,7 +274,7 @@ How to read a rule:
 
 **Proven by.** `SlotCalendarTest.validatePrecedence`
 
-**Status.** Planned for M2.
+**Status.** Proven.
 
 <a id="br-22"></a>
 ## BR-22: Bookings by one mobile are serialised

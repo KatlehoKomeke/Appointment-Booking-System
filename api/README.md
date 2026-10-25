@@ -4,9 +4,9 @@ The Spring Boot application at the heart of BranchBook. It serves the booking AP
 dispatcher, and serves the React app from [web/](../web/README.md) on the same origin. How it is structured and why
 is in [docs/architecture.md](../docs/architecture.md).
 
-**Status (M1):** the schema, the seeded catalogue and the branch API. The application starts, migrates PostgreSQL,
-answers its health probes, serves the app and lists branches with their bookable dates. Slots and booking arrive in
-later milestones.
+**Status (M2):** the schema, the seeded catalogue, the branch API and availability. The application starts,
+migrates PostgreSQL, answers its health probes, serves the app, lists branches with their bookable dates and lists
+each day's slots with the seats left. It publishes its OpenAPI contract. Booking arrives in M3.
 
 ## Prerequisites
 
@@ -24,9 +24,10 @@ Run these from `api/`, or use the `make` targets in the repository root:
 | Command | What it does |
 |---|---|
 | `./mvnw test` | Compiles with every lint on, then runs the unit tests. No Docker needed. |
-| `./mvnw verify` | Adds the integration tests on PostgreSQL 17, the formatting check and the coverage report (`target/site/jacoco/index.html`). This is what CI runs. |
+| `./mvnw verify` | Adds the integration tests on PostgreSQL 17, the formatting check and the coverage report (`target/site/jacoco/index.html`). This is what CI runs; it then runs the unit and API tests again under `TZ=America/New_York`, as `make test-api` does. |
 | `./mvnw spotless:apply` | Formats every Java file with google-java-format. |
 | `./mvnw spring-boot:test-run` | Runs the API on port 8080 against a throwaway PostgreSQL in Docker (`make dev-api`). |
+| `make contract` (from the root) | After an intended API change: rewrites [docs/openapi.yaml](../docs/openapi.yaml) from the running API, then the web app's types from it. |
 
 ## What the build enforces
 
@@ -37,6 +38,8 @@ Run these from `api/`, or use the `make` targets in the repository root:
 | Package documentation | `PackageDocumentationTest` | A package has no `package-info.java`. |
 | Architecture | `ArchitectureTest` (ArchUnit) | A module cycle appears, a domain class imports Spring, a controller reaches the infrastructure layer, or a class outside the application layer declares a transaction. |
 | Error catalogue | `ProblemCodeCatalogueTest` | `ProblemCode` and [docs/errors.md](../docs/errors.md) disagree. |
+| API contract | `OpenApiContractIT` | The OpenAPI document the API generates differs from [docs/openapi.yaml](../docs/openapi.yaml), or a parameter pattern is not anchored. |
+| Database clock | `NativeSqlUsesBoundNowTest` | A SQL string in the main code reads the database's clock (`now()`, `CURRENT_TIMESTAMP` and the like) instead of binding the instant from the injected `Clock` (BR-20). |
 | Formatting | Spotless with google-java-format 1.36.0 | A file is not formatted. Version 1.37.0 fails inside Spotless 3.10.4, so 1.36.0 is pinned. |
 | JDK version | Maven Enforcer | The JDK is older than 25. |
 
@@ -84,6 +87,9 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 |---|---|
 | `GET /api/v1/branches` | The active branches, ordered by name |
 | `GET /api/v1/branches/{code}` | One branch: address, hours, services, the bookable window and the closed days in it |
+| `GET /api/v1/branches/{code}/availability?service=&date=` | One day's slots for one service at one branch, each with the seats left, or why the branch is closed that day |
+| `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml) |
+| `/swagger-ui.html` | Swagger UI, to read and try the API |
 | `/` and the app's routes (`/book`, `/manage`, `/messages`, `/privacy`, `/appointments/{reference}`) | The React app |
 | `/readyz` | Readiness: up once the app has started and PostgreSQL answers. Used by Docker and the load balancer. |
 | `/livez` | Liveness: up while the process is healthy. Deliberately ignores the database. |
@@ -91,7 +97,8 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 
 Every other actuator endpoint is closed. Every response carries the security headers described in
 [SecurityConfig](src/main/java/za/co/fynbos/branchbook/shared/security/SecurityConfig.java) and an
-`X-Correlation-Id`: the caller's, if it is up to 64 letters, digits and hyphens, otherwise a new one.
+`X-Correlation-Id`: the caller's, if it is up to 64 letters, digits and hyphens, otherwise a new one. Swagger UI's
+pages alone may use inline styles, which its rendering needs; inline scripts are refused everywhere.
 
 `GET /api/v1/branches/POL`, shortened, on 23 October 2026. The window is computed by the server in the branch's
 time zone. Sundays are closed at Polokwane, and 4 November is the election-day public holiday:
@@ -114,6 +121,34 @@ time zone. Sundays are closed at Polokwane, and 4 November is the election-day p
 }
 ```
 
+`GET /api/v1/branches/POL/availability?service=FICA&date=2026-11-04`. A closed day is an answer, not an error:
+
+```json
+{
+  "branchCode": "POL",
+  "serviceCode": "FICA",
+  "date": "2026-11-04",
+  "timezone": "Africa/Johannesburg",
+  "generatedAt": "2026-10-25T13:18:55+02:00",
+  "closedReason": "PUBLIC_HOLIDAY",
+  "holidayName": "Local Government Elections",
+  "slots": []
+}
+```
+
+How slots are made ([docs/domain-rules.md](../docs/domain-rules.md), BR-1 to BR-6):
+
+- They start at opening time and step by the service's duration (15, 30 or 45 minutes), and the last one ends by
+  closing time.
+- A slot starting less than two hours from now is left out, and only today and the next 29 days can be asked for.
+- `seatsAvailable` is the capacity minus the seats that confirmed or checked-in appointments hold during the slot.
+  A full slot stays in the list with 0, so the page can show it as taken.
+- Wall-clock hours are turned into instants only through the branch's time zone, and every instant is written with
+  its offset, so the answer is the same whatever zone the server runs in (BR-20).
+
+The checks run in a fixed order: the branch must exist (404), offer the service (422
+`SERVICE_NOT_OFFERED_AT_BRANCH`) and have the date in its window (422 `DATE_OUTSIDE_BOOKING_WINDOW`).
+
 Every error is an RFC 9457 problem with a stable `code` ([docs/errors.md](../docs/errors.md)). Its `instance` names
 the occurrence, never the request path, and an unexpected exception is logged with its type and stack frames but
 not its message, which could quote personal data:
@@ -130,6 +165,21 @@ not its message, which could quote personal data:
 }
 ```
 
+## The contract
+
+springdoc generates the OpenAPI document from the controllers and their annotations
+([OpenApiConfig](src/main/java/za/co/fynbos/branchbook/shared/web/OpenApiConfig.java) adds the shared `Problem`
+schema). The document is committed as [docs/openapi.yaml](../docs/openapi.yaml), and the web app's TypeScript types
+are generated from that file ([ADR-0005](../docs/adr/0005-committed-openapi-contract.md)). Two checks keep the three
+in step:
+
+1. `OpenApiContractIT` fails when the API no longer generates exactly the committed document.
+2. CI regenerates `web/src/api/schema.d.ts` from the document and fails if anything changed.
+
+So an API change shows up in review as a diff of the contract, and `make contract` refreshes both files after an
+intended one. In the document every response property is required, because the API always sends it; one that can be
+empty is nullable instead, so the generated types say exactly what arrives.
+
 ## Layout
 
 ```text
@@ -143,14 +193,20 @@ api/
     │   │   ├── application/             queries, each a read-only transaction
     │   │   ├── domain/                  plain Java: BranchCalendar, PublicHolidayCalendar
     │   │   └── infrastructure/          SQL reads through JdbcClient
-    │   ├── booking/domain/              the Appointment entity and its lifecycle
+    │   ├── scheduling/                  slots and availability
+    │   │   ├── api/                     the availability endpoint
+    │   │   ├── application/             the availability query; the port to read booked seats
+    │   │   └── domain/                  plain Java: SlotCalendar, Slot, BookedInterval
+    │   ├── booking/
+    │   │   ├── domain/                  the Appointment entity and its lifecycle
+    │   │   └── infrastructure/          SQL reads of the seats appointments hold, for scheduling
     │   └── shared/                      cross-cutting concerns
     │       ├── problem/                 RFC 9457 error responses
     │       ├── correlation/             correlation ids
-    │       ├── time/                    the injected Clock
+    │       ├── time/                    the injected Clock and the one format for instants
     │       ├── config/                  typed settings
     │       ├── security/                HTTP security and headers
-    │       └── web/                     serving the React app
+    │       └── web/                     serving the React app; the OpenAPI description
     ├── main/resources/
     │   ├── application.yml              configuration, one comment per property
     │   └── db/migration/                Flyway migrations V1 to V4, one header comment each
