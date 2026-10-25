@@ -86,10 +86,11 @@ logging:
     # request's lines can be found together, and matched with the id the caller received.
     correlation: "[%X{correlationId:-}] "
   level:
-    # Hibernate logs every failed SQL statement with the database's message, which can quote the values in a
-    # constraint violation. The booking module translates those failures itself and logs only the constraint name
-    # and SQLSTATE, so this logger stays silent (BR-19). Quoted, because a bare OFF is a YAML boolean.
-    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: "OFF"
+    # Hibernate logs every failed SQL statement with the database's message, which can quote a value (for example
+    # "invalid input syntax for type uuid"). The booking module translates those failures itself and logs only the
+    # constraint name and SQLSTATE, so this logger stays silent (BR-19); LogRedactionIT proves it. Hibernate 7 logs
+    # them under this category, not SqlExceptionHelper's class name. Quoted, because a bare OFF is a YAML boolean.
+    org.hibernate.orm.jdbc.error: "OFF"
 
 server:
   # The HTTP port. A hosting platform can set PORT; otherwise 8080.
