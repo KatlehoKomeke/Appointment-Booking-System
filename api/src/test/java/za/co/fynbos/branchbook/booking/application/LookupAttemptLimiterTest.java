@@ -7,11 +7,20 @@ import static org.assertj.core.api.Assertions.assertThatNoException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.Period;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
 import za.co.fynbos.branchbook.booking.domain.AppointmentReference;
 import za.co.fynbos.branchbook.shared.config.BookingProperties;
 
-/** BR-13: five wrong lookups of a reference block it until an hour after the first. */
+/**
+ * BR-13: five wrong lookups of a reference block it until an hour after the first, and lookups that
+ * arrive together cannot slip past that limit.
+ */
 class LookupAttemptLimiterTest {
 
   private static final AppointmentReference REFERENCE = new AppointmentReference("APT-7K3M-9Q2X");
@@ -23,39 +32,149 @@ class LookupAttemptLimiterTest {
 
   @Test
   void fifthFailureBlocksTheReferenceUntilAnHourAfterTheFirst() {
-    for (int failure = 0; failure < 4; failure++) {
-      limiter.recordFailure(REFERENCE, FIRST.plusSeconds(failure));
-      assertThatNoException().isThrownBy(() -> limiter.checkNotBlocked(REFERENCE, FIRST));
+    for (int failure = 0; failure < 5; failure++) {
+      wrongLookup(REFERENCE, FIRST.plusSeconds(failure));
     }
-    limiter.recordFailure(REFERENCE, FIRST.plusSeconds(4));
+
+    Instant tenMinutesLater = FIRST.plusSeconds(600);
+    Instant anHourLater = FIRST.plus(Duration.ofHours(1));
 
     assertThatExceptionOfType(LookupRateLimitedException.class)
-        .isThrownBy(() -> limiter.checkNotBlocked(REFERENCE, FIRST.plusSeconds(600)))
+        .isThrownBy(() -> limiter.begin(REFERENCE, tenMinutesLater))
         .satisfies(limited -> assertThat(limited.retryAfter()).contains(Duration.ofSeconds(3000)));
-    assertThatNoException()
-        .isThrownBy(() -> limiter.checkNotBlocked(REFERENCE, FIRST.plus(Duration.ofHours(1))));
+    assertThatNoException().isThrownBy(() -> limiter.begin(REFERENCE, anHourLater));
   }
 
   /** Failures spread over more than an hour never add up: the window never slides forward. */
   @Test
   void windowOpensAtTheFirstFailureAndDoesNotSlide() {
     for (int failure = 0; failure < 4; failure++) {
-      limiter.recordFailure(REFERENCE, FIRST.plus(Duration.ofMinutes(10L * failure)));
+      wrongLookup(REFERENCE, FIRST.plus(Duration.ofMinutes(10L * failure)));
     }
     Instant afterTheWindow = FIRST.plus(Duration.ofMinutes(61));
-    limiter.recordFailure(REFERENCE, afterTheWindow);
+    wrongLookup(REFERENCE, afterTheWindow);
 
-    assertThatNoException().isThrownBy(() -> limiter.checkNotBlocked(REFERENCE, afterTheWindow));
+    assertThatNoException().isThrownBy(() -> limiter.begin(REFERENCE, afterTheWindow));
   }
 
   @Test
   void otherReferencesAreNotAffected() {
     for (int failure = 0; failure < 5; failure++) {
-      limiter.recordFailure(REFERENCE, FIRST);
+      wrongLookup(REFERENCE, FIRST);
     }
 
-    assertThatNoException()
-        .isThrownBy(
-            () -> limiter.checkNotBlocked(new AppointmentReference("APT-2222-3333"), FIRST));
+    AppointmentReference other = new AppointmentReference("APT-2222-3333");
+
+    assertThatNoException().isThrownBy(() -> limiter.begin(other, FIRST));
+  }
+
+  /** A customer who keeps their appointment page open is never blocked by their own lookups. */
+  @Test
+  void lookupsWithTheRightDigitsAreNeverCounted() {
+    for (int failure = 0; failure < 4; failure++) {
+      wrongLookup(REFERENCE, FIRST);
+    }
+    for (int refresh = 0; refresh < 20; refresh++) {
+      limiter.end(limiter.begin(REFERENCE, FIRST), false);
+    }
+
+    assertThatNoException().isThrownBy(() -> wrongLookup(REFERENCE, FIRST));
+    assertThatExceptionOfType(LookupRateLimitedException.class)
+        .isThrownBy(() -> limiter.begin(REFERENCE, FIRST));
+  }
+
+  /**
+   * A lookup still being checked counts as if it were wrong, so with four failures only one more
+   * may be in flight. The others are told to retry after a second, not after the hour, because they
+   * were refused only while it was in flight.
+   */
+  @Test
+  void lookupsInFlightCountTowardsTheLimit() {
+    for (int failure = 0; failure < 4; failure++) {
+      wrongLookup(REFERENCE, FIRST);
+    }
+    LookupAttemptLimiter.Attempt inFlight = limiter.begin(REFERENCE, FIRST);
+
+    assertThatExceptionOfType(LookupRateLimitedException.class)
+        .isThrownBy(() -> limiter.begin(REFERENCE, FIRST))
+        .satisfies(limited -> assertThat(limited.retryAfter()).contains(Duration.ofSeconds(1)));
+
+    limiter.end(inFlight, false);
+    assertThatNoException().isThrownBy(() -> limiter.begin(REFERENCE, FIRST));
+  }
+
+  /**
+   * The race the limit must survive: with four failures counted, many lookups arrive at the same
+   * moment. Exactly one is admitted, so at most one more guess reaches the database.
+   */
+  @Test
+  void lookupsArrivingTogetherAdmitOnlyAsManyAsTheLimitLeaves() throws Exception {
+    for (int failure = 0; failure < 4; failure++) {
+      wrongLookup(REFERENCE, FIRST);
+    }
+    int racers = 32;
+    CountDownLatch start = new CountDownLatch(1);
+    List<Future<Boolean>> admitted = new ArrayList<>();
+    try (ExecutorService threads = Executors.newFixedThreadPool(racers)) {
+      for (int racer = 0; racer < racers; racer++) {
+        admitted.add(
+            threads.submit(
+                () -> {
+                  start.await();
+                  try {
+                    limiter.begin(REFERENCE, FIRST);
+                    return true;
+                  } catch (LookupRateLimitedException _) {
+                    return false;
+                  }
+                }));
+      }
+      start.countDown();
+    }
+
+    long passed = 0;
+    for (Future<Boolean> racer : admitted) {
+      passed += racer.get() ? 1 : 0;
+    }
+    assertThat(passed).isOne();
+  }
+
+  /** A lookup that fails for another reason, such as the database, is not the caller's guess. */
+  @Test
+  void lookupThatFailsForAnotherReasonIsNotCounted() {
+    for (int lookup = 0; lookup < 10; lookup++) {
+      limiter.end(limiter.begin(REFERENCE, FIRST), false);
+    }
+
+    for (int failure = 0; failure < 4; failure++) {
+      wrongLookup(REFERENCE, FIRST);
+    }
+    assertThatNoException().isThrownBy(() -> limiter.begin(REFERENCE, FIRST));
+  }
+
+  /**
+   * A lookup admitted in a window that has since closed changes nothing when it ends: it was
+   * counted in that window, not in the one that replaced it.
+   */
+  @Test
+  void lookupFromAnEarlierWindowDoesNotCountInTheNext() {
+    LookupAttemptLimiter.Attempt slow = limiter.begin(REFERENCE, FIRST);
+    Instant nextWindow = FIRST.plus(Duration.ofHours(1));
+    for (int failure = 0; failure < 4; failure++) {
+      wrongLookup(REFERENCE, nextWindow);
+    }
+
+    limiter.end(slow, true);
+
+    assertThatNoException().isThrownBy(() -> limiter.begin(REFERENCE, nextWindow));
+  }
+
+  @Test
+  void attemptNeverShowsTheReference() {
+    assertThat(limiter.begin(REFERENCE, FIRST)).hasToString("Attempt[redacted]");
+  }
+
+  private void wrongLookup(AppointmentReference reference, Instant at) {
+    limiter.end(limiter.begin(reference, at), true);
   }
 }

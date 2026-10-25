@@ -53,16 +53,20 @@ public class LookupAppointmentHandler {
     AppointmentReference parsed =
         AppointmentReference.parse(reference).orElseThrow(AppointmentNotFoundException::new);
     Instant now = clock.instant();
-    limiter.checkNotBlocked(parsed, now);
-    Optional<Appointment> match =
-        appointments
-            .findByReference(parsed)
-            .filter(appointment -> sameDigits(appointment.mobile().last4(), mobileLast4));
-    if (match.isEmpty()) {
-      limiter.recordFailure(parsed, now);
-      throw new AppointmentNotFoundException();
+    LookupAttemptLimiter.Attempt attempt = limiter.begin(parsed, now);
+    Optional<Appointment> match = Optional.empty();
+    boolean compared = false;
+    try {
+      match =
+          appointments
+              .findByReference(parsed)
+              .filter(appointment -> sameDigits(appointment.mobile().last4(), mobileLast4));
+      compared = true;
+    } finally {
+      // Counted before the read, so lookups that arrive together cannot all slip past the limit.
+      limiter.end(attempt, compared && match.isEmpty());
     }
-    return views.of(match.get(), now);
+    return views.of(match.orElseThrow(AppointmentNotFoundException::new), now);
   }
 
   /** Compares in constant time, so the response time does not leak how many digits matched. */
