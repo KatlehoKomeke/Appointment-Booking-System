@@ -405,7 +405,8 @@ components:
           description: A plain-language explanation; never quotes the request
         errors:
           type: array
-          description: "For VALIDATION_FAILED: what is wrong with each field"
+          description: "For VALIDATION_FAILED, MOBILE_NUMBER_REQUIRED and the slot\
+            \ codes: what is wrong with each field"
           items:
             type: object
             properties:

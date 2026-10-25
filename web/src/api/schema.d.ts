@@ -198,7 +198,7 @@ export interface components {
             correlationId: string;
             /** @description A plain-language explanation; never quotes the request */
             detail?: string;
-            /** @description For VALIDATION_FAILED: what is wrong with each field */
+            /** @description For VALIDATION_FAILED, MOBILE_NUMBER_REQUIRED and the slot codes: what is wrong with each field */
             errors?: {
                 /** @description The rule it broke, for example PATTERN */
                 code: string;

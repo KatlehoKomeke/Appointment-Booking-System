@@ -2,6 +2,9 @@ package za.co.fynbos.branchbook.shared.problem;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import jakarta.validation.constraints.Pattern;
+import java.sql.SQLException;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -137,6 +140,59 @@ class ProblemDetailHandlerTest {
                 Map.of("field", "X-Mobile-Last4", "code", "REQUIRED", "message", "is required")));
   }
 
+  /** A problem that names its own wait, such as a lookup limit, sends it in whole seconds. */
+  @Test
+  void problemExceptionCarriesItsOwnRetryAfter() {
+    MvcTestResult result = mvc.get().uri("/rate-limited").exchange();
+
+    assertThat(result).hasStatus(HttpStatus.TOO_MANY_REQUESTS);
+    assertThat(result).headers().hasValue("Retry-After", "2");
+    assertThat(result).bodyJson().extractingPath("$.code").isEqualTo("LOOKUP_RATE_LIMITED");
+  }
+
+  /**
+   * A lock or statement timeout, a deadlock or a serialization failure, wherever it happens, is a
+   * 503 the caller can retry soon. The log names the SQLSTATE and never the message.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"55P03", "57014", "40P01", "40001"})
+  void transientDatabaseFailureBecomes503WithRetryAfterTwo(String sqlState, CapturedOutput output)
+      throws Exception {
+    MvcTestResult result = mvc.get().uri("/transient/" + sqlState).exchange();
+
+    assertThat(result).hasStatus(HttpStatus.SERVICE_UNAVAILABLE);
+    assertThat(result).headers().hasValue("Retry-After", "2");
+    assertThat(result).bodyJson().extractingPath("$.code").isEqualTo("TRY_AGAIN");
+    assertThat(result.getResponse().getContentAsString()).doesNotContain("825550101");
+    assertThat(output)
+        .contains("Temporary database failure (SQLSTATE " + sqlState + ")")
+        .doesNotContain("825550101");
+  }
+
+  /** Another SQLSTATE, such as a broken constraint, is still a bug: 500, logged without data. */
+  @Test
+  void otherDatabaseFailureStaysAnInternalError() {
+    MvcTestResult result = mvc.get().uri("/transient/23514").exchange();
+
+    assertThat(result).hasStatus(HttpStatus.INTERNAL_SERVER_ERROR);
+    assertThat(result).bodyJson().extractingPath("$.code").isEqualTo("INTERNAL_ERROR");
+  }
+
+  /** A malformed header is named by its header name, the name the caller sent. */
+  @Test
+  void malformedHeaderIsNamedByTheHeader() {
+    MvcTestResult result = mvc.get().uri("/last4").header("X-Mobile-Last4", "12a4").exchange();
+
+    assertThat(result).hasStatus(HttpStatus.BAD_REQUEST);
+    assertThat(result)
+        .bodyJson()
+        .extractingPath("$.errors")
+        .isEqualTo(
+            List.of(
+                Map.of(
+                    "field", "X-Mobile-Last4", "code", "PATTERN", "message", "must be 4 digits")));
+  }
+
   @Test
   void unknownPathKeepsSpringsStatusButCarriesNoCodeAndNoDetail() {
     MvcTestResult result = mvc.get().uri("/no-such-path/" + MOBILE).exchange();
@@ -160,6 +216,29 @@ class ProblemDetailHandlerTest {
     @GetMapping("/try-again")
     void tryAgain() {
       throw new ProblemException(ProblemCode.TRY_AGAIN, "Please try again.");
+    }
+
+    @GetMapping("/rate-limited")
+    void rateLimited() {
+      throw new ProblemException(
+          ProblemCode.LOOKUP_RATE_LIMITED,
+          "Too many attempts. Try again later.",
+          Map.of(),
+          Duration.ofMillis(1_500));
+    }
+
+    @GetMapping("/transient/{sqlState}")
+    void transientFailure(@PathVariable("sqlState") String sqlState) {
+      throw new IllegalStateException(
+          "Booking failed", new SQLException("Timed out waiting for " + MOBILE, sqlState));
+    }
+
+    @GetMapping("/last4")
+    void last4(
+        @RequestHeader("X-Mobile-Last4")
+            @Pattern(regexp = "^[0-9]{4}$", message = "must be 4 digits")
+            String last4) {
+      throw new AssertionError("Not reached: the header is malformed");
     }
 
     @GetMapping("/database-down")

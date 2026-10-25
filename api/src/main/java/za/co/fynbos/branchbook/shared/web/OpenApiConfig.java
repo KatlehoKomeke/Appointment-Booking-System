@@ -156,7 +156,9 @@ public class OpenApiConfig {
                     new Schema()
                         .types(Set.of("array"))
                         .items(fieldProblem)
-                        .description("For VALIDATION_FAILED: what is wrong with each field"),
+                        .description(
+                            "For VALIDATION_FAILED, MOBILE_NUMBER_REQUIRED and the slot codes:"
+                                + " what is wrong with each field"),
                 "alternatives",
                     new Schema()
                         .types(Set.of("array"))
