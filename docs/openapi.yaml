@@ -17,7 +17,86 @@ tags:
   name: Branches
 - description: The slots a service can be booked in at a branch.
   name: Availability
+- description: "Book an appointment, and open it again."
+  name: Appointments
 paths:
+  /api/v1/appointments:
+    post:
+      description: "Books the slot, or answers why not. The confirmation SMS is written\
+        \ in the same transaction and shows as PENDING in notifications. Retrying\
+        \ with the same Idempotency-Key and the same details returns the same appointment."
+      operationId: bookAppointment
+      parameters:
+      - description: A UUID that identifies this booking; send it again on a retry
+        example: 8c4f1a2e-1b3d-4e5f-9a6b-7c8d9e0f1a2b
+        in: header
+        name: Idempotency-Key
+        required: true
+        schema:
+          type: string
+          format: uuid
+          pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BookingRequest"
+        required: true
+      responses:
+        "201":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+          description: "Booked, or replayed"
+          headers:
+            Idempotent-Replayed:
+              description: true when an earlier request with this key booked it; absent
+                otherwise
+              schema:
+                type: string
+                enum:
+                - "true"
+              style: simple
+            Location:
+              description: Where the appointment can be opened again
+              schema:
+                type: string
+              style: simple
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "VALIDATION_FAILED: a field is missing or malformed, or not\
+            \ a field of this request; IDEMPOTENCY_KEY_REQUIRED: the header is missing\
+            \ or not a UUID"
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "BRANCH_NOT_FOUND: no active branch has that code"
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "DUPLICATE_APPOINTMENT: an upcoming appointment for this service\
+            \ exists; CUSTOMER_OVERLAP: another appointment at that time exists; SLOT_FULL:\
+            \ every seat was just taken, with up to three alternatives"
+        "422":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "SERVICE_NOT_OFFERED_AT_BRANCH; DATE_OUTSIDE_BOOKING_WINDOW,\
+            \ SLOT_ON_CLOSED_DAY, SLOT_OUTSIDE_HOURS, SLOT_OFF_GRID, SLOT_WITHIN_LEAD_TIME:\
+            \ the start is not a slot; MOBILE_NUMBER_REQUIRED: not a South African\
+            \ mobile; IDEMPOTENCY_KEY_REUSED: the key booked different details"
+      summary: Book an appointment
+      tags:
+      - Appointments
   /api/v1/branches:
     get:
       description: Ordered by name.
@@ -152,6 +231,112 @@ components:
       - postalCode
       - province
       - suburb
+    Appointment:
+      type: object
+      properties:
+        branch:
+          $ref: "#/components/schemas/AppointmentBranch"
+        canCancel:
+          type: boolean
+          description: True while the appointment is confirmed and has not started
+        cancelledAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+        customer:
+          $ref: "#/components/schemas/AppointmentCustomer"
+        endsAt:
+          type: string
+          format: date-time
+          example: 2026-10-27T09:45:00+02:00
+        notifications:
+          type: array
+          items:
+            $ref: "#/components/schemas/Notification"
+        reference:
+          type: string
+          example: APT-7K3M-9Q2X
+          pattern: "^APT-[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$"
+        service:
+          $ref: "#/components/schemas/AppointmentService"
+        startsAt:
+          type: string
+          format: date-time
+          example: 2026-10-27T09:30:00+02:00
+        status:
+          type: string
+          enum:
+          - CONFIRMED
+          - CHECKED_IN
+          - COMPLETED
+          - CANCELLED
+          - NO_SHOW
+      required:
+      - branch
+      - canCancel
+      - cancelledAt
+      - customer
+      - endsAt
+      - notifications
+      - reference
+      - service
+      - startsAt
+      - status
+    AppointmentBranch:
+      type: object
+      properties:
+        address:
+          type: string
+          example: "Shop 4, 1 Protea Lane, Sandton, Johannesburg, 2196"
+        code:
+          type: string
+          example: SAN
+        name:
+          type: string
+          example: Sandton Summit Mall
+      required:
+      - address
+      - code
+      - name
+    AppointmentCustomer:
+      type: object
+      properties:
+        firstName:
+          type: string
+          example: Nomvula
+        lastName:
+          type: string
+          example: Dlamini
+        mobileMasked:
+          type: string
+          example: 082 *** 0101
+      required:
+      - firstName
+      - lastName
+      - mobileMasked
+    AppointmentService:
+      type: object
+      properties:
+        code:
+          type: string
+          example: FICA
+        documentsNeeded:
+          type: array
+          items:
+            type: string
+        durationMinutes:
+          type: integer
+          format: int32
+          example: 15
+        name:
+          type: string
+          example: Update personal details (FICA)
+      required:
+      - code
+      - documentsNeeded
+      - durationMinutes
+      - name
     Availability:
       type: object
       properties:
@@ -206,6 +391,48 @@ components:
       - serviceCode
       - slots
       - timezone
+    BookingCustomer:
+      type: object
+      properties:
+        firstName:
+          type: string
+          example: Nomvula
+          minLength: 1
+        lastName:
+          type: string
+          example: Dlamini
+          minLength: 1
+        mobile:
+          type: string
+          description: "A South African mobile number, such as 082 555 0101 or +27\
+            \ 82 555 0101"
+          example: 082 555 0101
+      required:
+      - firstName
+      - lastName
+      - mobile
+    BookingRequest:
+      type: object
+      properties:
+        branchCode:
+          type: string
+          example: SAN
+          pattern: "^[A-Za-z]{2,8}$"
+        customer:
+          $ref: "#/components/schemas/BookingCustomer"
+        serviceCode:
+          type: string
+          example: FICA
+          pattern: "^[A-Za-z]{2,12}$"
+        startsAt:
+          type: string
+          format: date-time
+          example: 2026-10-27T09:30:00+02:00
+      required:
+      - branchCode
+      - customer
+      - serviceCode
+      - startsAt
     BranchDetail:
       type: object
       properties:
@@ -328,6 +555,63 @@ components:
       - date
       - name
       - reason
+    Notification:
+      type: object
+      properties:
+        attempts:
+          type: integer
+          format: int32
+          maximum: 5
+          minimum: 0
+        body:
+          type: string
+        channel:
+          type: string
+          enum:
+          - SMS
+          - EMAIL
+        failureReason:
+          type:
+          - string
+          - "null"
+          enum:
+          - DELIVERY_FAILED
+          - SUPERSEDED_BY_CANCELLATION
+          - RECIPIENT_DAILY_CAP
+          - DISPATCH_ERROR
+          - null
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+          - CONFIRMATION
+          - CANCELLATION
+        recipientMasked:
+          type: string
+          example: 082 *** 0101
+        sentAt:
+          type:
+          - string
+          - "null"
+          format: date-time
+        status:
+          type: string
+          enum:
+          - PENDING
+          - SENT
+          - FAILED
+      required:
+      - attempts
+      - body
+      - channel
+      - failureReason
+      - id
+      - kind
+      - recipientMasked
+      - sentAt
+      - status
     OperatingHours:
       type: object
       properties:

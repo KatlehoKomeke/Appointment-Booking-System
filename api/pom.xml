@@ -94,7 +94,8 @@
     <dependency>
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
-      <scope>runtime</scope>
+      <!-- Compile scope only so booking.infrastructure can read a failed statement's SQLSTATE and constraint name
+           from the driver's own exception (ConstraintViolationTranslator); nothing else imports it. -->
     </dependency>
     <!-- South African mobile numbers: the six documented input formats, and the MOBILE type check (BR-19). -->
     <dependency>

@@ -4,6 +4,26 @@
  */
 
 export interface paths {
+    "/api/v1/appointments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Book an appointment
+         * @description Books the slot, or answers why not. The confirmation SMS is written in the same transaction and shows as PENDING in notifications. Retrying with the same Idempotency-Key and the same details returns the same appointment.
+         */
+        post: operations["bookAppointment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/branches": {
         parameters: {
             query?: never;
@@ -75,6 +95,58 @@ export interface components {
             province: string;
             suburb: string;
         };
+        Appointment: {
+            branch: components["schemas"]["AppointmentBranch"];
+            /** @description True while the appointment is confirmed and has not started */
+            canCancel: boolean;
+            /** Format: date-time */
+            cancelledAt: string | null;
+            customer: components["schemas"]["AppointmentCustomer"];
+            /**
+             * Format: date-time
+             * @example 2026-10-27T09:45:00+02:00
+             */
+            endsAt: string;
+            notifications: components["schemas"]["Notification"][];
+            /** @example APT-7K3M-9Q2X */
+            reference: string;
+            service: components["schemas"]["AppointmentService"];
+            /**
+             * Format: date-time
+             * @example 2026-10-27T09:30:00+02:00
+             */
+            startsAt: string;
+            /** @enum {string} */
+            status: "CONFIRMED" | "CHECKED_IN" | "COMPLETED" | "CANCELLED" | "NO_SHOW";
+        };
+        AppointmentBranch: {
+            /** @example Shop 4, 1 Protea Lane, Sandton, Johannesburg, 2196 */
+            address: string;
+            /** @example SAN */
+            code: string;
+            /** @example Sandton Summit Mall */
+            name: string;
+        };
+        AppointmentCustomer: {
+            /** @example Nomvula */
+            firstName: string;
+            /** @example Dlamini */
+            lastName: string;
+            /** @example 082 *** 0101 */
+            mobileMasked: string;
+        };
+        AppointmentService: {
+            /** @example FICA */
+            code: string;
+            documentsNeeded: string[];
+            /**
+             * Format: int32
+             * @example 15
+             */
+            durationMinutes: number;
+            /** @example Update personal details (FICA) */
+            name: string;
+        };
         Availability: {
             /** @example SAN */
             branchCode: string;
@@ -108,6 +180,29 @@ export interface components {
              * @example Africa/Johannesburg
              */
             timezone: string;
+        };
+        BookingCustomer: {
+            /** @example Nomvula */
+            firstName: string;
+            /** @example Dlamini */
+            lastName: string;
+            /**
+             * @description A South African mobile number, such as 082 555 0101 or +27 82 555 0101
+             * @example 082 555 0101
+             */
+            mobile: string;
+        };
+        BookingRequest: {
+            /** @example SAN */
+            branchCode: string;
+            customer: components["schemas"]["BookingCustomer"];
+            /** @example FICA */
+            serviceCode: string;
+            /**
+             * Format: date-time
+             * @example 2026-10-27T09:30:00+02:00
+             */
+            startsAt: string;
         };
         BranchDetail: {
             address: components["schemas"]["Address"];
@@ -162,6 +257,25 @@ export interface components {
             name: string | null;
             /** @enum {string} */
             reason: "CLOSED_DAY" | "PUBLIC_HOLIDAY";
+        };
+        Notification: {
+            /** Format: int32 */
+            attempts: number;
+            body: string;
+            /** @enum {string} */
+            channel: "SMS" | "EMAIL";
+            /** @enum {string|null} */
+            failureReason: "DELIVERY_FAILED" | "SUPERSEDED_BY_CANCELLATION" | "RECIPIENT_DAILY_CAP" | "DISPATCH_ERROR" | null;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "CONFIRMATION" | "CANCELLATION";
+            /** @example 082 *** 0101 */
+            recipientMasked: string;
+            /** Format: date-time */
+            sentAt: string | null;
+            /** @enum {string} */
+            status: "PENDING" | "SENT" | "FAILED";
         };
         OperatingHours: {
             /** @example 17:00 */
@@ -243,6 +357,76 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    bookAppointment: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description A UUID that identifies this booking; send it again on a retry
+                 * @example 8c4f1a2e-1b3d-4e5f-9a6b-7c8d9e0f1a2b
+                 */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BookingRequest"];
+            };
+        };
+        responses: {
+            /** @description Booked, or replayed */
+            201: {
+                headers: {
+                    /** @description true when an earlier request with this key booked it; absent otherwise */
+                    "Idempotent-Replayed"?: "true";
+                    /** @description Where the appointment can be opened again */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Appointment"];
+                };
+            };
+            /** @description VALIDATION_FAILED: a field is missing or malformed, or not a field of this request; IDEMPOTENCY_KEY_REQUIRED: the header is missing or not a UUID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description BRANCH_NOT_FOUND: no active branch has that code */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description DUPLICATE_APPOINTMENT: an upcoming appointment for this service exists; CUSTOMER_OVERLAP: another appointment at that time exists; SLOT_FULL: every seat was just taken, with up to three alternatives */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description SERVICE_NOT_OFFERED_AT_BRANCH; DATE_OUTSIDE_BOOKING_WINDOW, SLOT_ON_CLOSED_DAY, SLOT_OUTSIDE_HOURS, SLOT_OFF_GRID, SLOT_WITHIN_LEAD_TIME: the start is not a slot; MOBILE_NUMBER_REQUIRED: not a South African mobile; IDEMPOTENCY_KEY_REUSED: the key booked different details */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     listBranches: {
         parameters: {
             query?: never;

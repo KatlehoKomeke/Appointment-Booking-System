@@ -53,6 +53,12 @@ spring:
           # Reads and writes timestamps in UTC whatever the JVM's time zone (docs/architecture.md, section 8).
           time_zone: UTC
 
+  jackson:
+    deserialization:
+      # A request property the API does not declare is refused with 400 VALIDATION_FAILED (UNKNOWN_FIELD), instead
+      # of being ignored. A client that sends endsAt, for example, learns that the end is the server's to compute.
+      fail-on-unknown-properties: true
+
   lifecycle:
     # On shutdown, in-flight requests get up to 20 seconds to finish. Shorter than the 30 seconds docker
     # compose and Amazon ECS wait before they force-stop the container.

@@ -1,6 +1,7 @@
 package za.co.fynbos.branchbook.shared.web;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static za.co.fynbos.branchbook.support.Bookings.book;
 
 import com.jayway.jsonpath.JsonPath;
 import java.io.IOException;
@@ -12,12 +13,16 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import za.co.fynbos.branchbook.shared.problem.ProblemCode;
+import za.co.fynbos.branchbook.support.Bookings;
+import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
 
 /**
@@ -30,6 +35,7 @@ import za.co.fynbos.branchbook.support.IntegrationTest;
  * change.
  */
 @IntegrationTest
+@ExtendWith(DatabaseReset.class)
 class OpenApiContractIT {
 
   /** The committed contract, relative to the api module, where Maven runs the tests. */
@@ -84,6 +90,29 @@ class OpenApiContractIT {
   }
 
   /**
+   * BR-12: the document tells a client that a booking needs an {@code Idempotency-Key} holding a
+   * UUID, so a generated client cannot leave it out.
+   */
+  @Test
+  void specDeclaresTheIdempotencyKeyHeader() {
+    assertThat(mvc.get().uri("/v3/api-docs"))
+        .bodyJson()
+        .extractingPath(
+            "$.paths['/api/v1/appointments'].post.parameters[?(@.name == 'Idempotency-Key')]")
+        .asArray()
+        .singleElement()
+        .satisfies(
+            header ->
+                assertThat(header)
+                    .asInstanceOf(InstanceOfAssertFactories.MAP)
+                    .containsEntry("in", "header")
+                    .containsEntry("required", true)
+                    .extracting("schema")
+                    .asInstanceOf(InstanceOfAssertFactories.MAP)
+                    .containsEntry("format", "uuid"));
+  }
+
+  /**
    * The document must describe what the API really sends, not only agree with itself. Each real
    * body below carries every property its schema requires and none the schema does not declare:
    * successes, problems with a code, and the HTTP-level problems that have none. On the default
@@ -119,8 +148,21 @@ class OpenApiContractIT {
         body(mvc.get().uri("/api/v1/branches/SAN").exchange()),
         "$",
         mismatches);
+    String booked =
+        body(book(mvc, Bookings.body("POL", "FICA", "2026-10-27T09:00:00+02:00", "082 555 0195")));
+    check(document, "Appointment", booked, "$", mismatches);
+    check(document, "AppointmentBranch", booked, "$.branch", mismatches);
+    check(document, "AppointmentService", booked, "$.service", mismatches);
+    check(document, "AppointmentCustomer", booked, "$.customer", mismatches);
+    check(document, "Notification", booked, "$.notifications[0]", mismatches);
+    Map<String, Object> unknownField =
+        Bookings.body("SAN", "FICA", "2026-10-27T09:00:00+02:00", "082 555 0196");
+    unknownField.put("endsAt", "2026-10-27T09:15:00+02:00");
     for (MvcTestResult problem :
         List.of(
+            book(mvc, unknownField),
+            book(mvc, Bookings.body("SAN", "FICA", "2026-10-27T09:00:00+02:00", "021 555 0196")),
+            book(mvc, Bookings.body("POL", "FICA", "2026-10-27T09:00:00+02:00", "082 555 0197")),
             mvc.get().uri("/api/v1/branches/12").exchange(),
             mvc.get().uri("/api/v1/branches/XYZ").exchange(),
             mvc.get()

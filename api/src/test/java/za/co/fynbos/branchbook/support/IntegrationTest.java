@@ -17,6 +17,9 @@ import org.springframework.context.annotation.Import;
  * <p>Every integration test uses exactly this configuration, so Spring builds the context once and
  * one database container serves the whole run. Before every test the clock is back at {@link
  * TestClockConfiguration#DEFAULT_INSTANT}, so no test depends on the order tests run in.
+ *
+ * <p>References come from a {@link ScriptedReferenceGenerator}, which hands out random ones unless
+ * a test scripts them. Classes that book through the API add {@link DatabaseReset}.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
@@ -24,5 +27,9 @@ import org.springframework.context.annotation.Import;
 @SpringBootTest
 @ExtendWith(ResetClockExtension.class)
 @AutoConfigureMockMvc
-@Import({TestcontainersConfiguration.class, TestClockConfiguration.class})
+@Import({
+  TestcontainersConfiguration.class,
+  TestClockConfiguration.class,
+  TestReferenceConfiguration.class
+})
 public @interface IntegrationTest {}
