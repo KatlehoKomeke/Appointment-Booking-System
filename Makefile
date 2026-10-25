@@ -65,10 +65,10 @@ web/node_modules: web/package.json web/package-lock.json
 
 # --- Repository safety -----------------------------------------------------------------------------------------------
 
-hooks: ## Enable the repository's git hooks (secret scan before every commit). Run once per clone.
+hooks: ## Enable the repository's git hooks (secret scan before every commit, architecture-page reminder after a major one). Run once per clone.
 	git config core.hooksPath .githooks
 	chmod +x .githooks/*
-	@echo "Git hooks enabled: every commit is now scanned for secrets."
+	@echo "Git hooks enabled: every commit is now scanned for secrets, and a major one reminds you to re-check the architecture page."
 
 secrets-scan: ## Scan the working tree for secrets (tracked and untracked files)
 	docker run --rm -v "$(CURDIR):/repo:ro" $(GITLEAKS_IMAGE) \

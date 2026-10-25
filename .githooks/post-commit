@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# .githooks/post-commit
+#
+# After a major commit, reminds you to re-check the architecture page against the code
+# (CONTRIBUTING.md, "The architecture page"). scripts/major-commits.sh decides what is major.
+# Enable it once per clone with `make hooks`. It only prints: it never fails, and the commit always stands.
+# It stays quiet while a rebase replays commits, which were judged when they were first made.
+
+repo_root="$(git rev-parse --show-toplevel)" || exit 0
+for state in rebase-merge rebase-apply; do
+  if [[ -d "$(git rev-parse --git-path "${state}")" ]]; then
+    exit 0
+  fi
+done
+
+major="$("${repo_root}/scripts/major-commits.sh" 2>/dev/null)" || exit 0
+if [[ -n "${major}" ]]; then
+  cat >&2 <<EOF
+post-commit: major commit ${major}
+  Re-check the architecture page against the code (CONTRIBUTING.md, "The architecture page"):
+  https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX
+EOF
+fi
+exit 0

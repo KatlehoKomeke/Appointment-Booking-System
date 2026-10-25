@@ -6,7 +6,7 @@ information ever enters the repository**, and **every change is documented as we
 ## Set up once per clone
 
 ```bash
-make hooks   # every commit is scanned for secrets before it is created
+make hooks   # every commit is scanned for secrets, and a major one reminds you to re-check the architecture page
 ```
 
 ## Workflow
@@ -84,6 +84,8 @@ never fall behind the code. Re-check it after every major commit and at the end 
   planned), adding a row to "Where the build departs from the plan" for anything built differently, then stamping the
   commit in the page header and adding an entry to "Changes to this page".
 - **When nothing on the page is affected,** no section changes. The next re-check still stamps the newer commit.
+- **You are reminded.** `scripts/major-commits.sh [<range>]` lists the major commits in a range, and the post-commit
+  hook that `make hooks` enables runs it after every commit and prints a reminder when the commit is major.
 
 ## Security rules
 

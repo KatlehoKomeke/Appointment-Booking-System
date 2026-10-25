@@ -146,7 +146,7 @@ with `APP_PORT=18080 make up`, or in a `.env` file copied from [.env.example](.e
 Development also needs JDK 25 and Node 24.
 
 ```bash
-make hooks     # once per clone: scan every commit for secrets before it is created
+make hooks     # once per clone: scan every commit for secrets, and flag major ones for an architecture-page check
 make dev-api   # the API on port 8080, with a throwaway PostgreSQL in Docker
 make dev-web   # the web app on port 5173 with hot reload, calling the API
 make test      # every check CI runs on the API and the web app
