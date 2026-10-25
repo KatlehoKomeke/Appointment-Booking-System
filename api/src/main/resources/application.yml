@@ -31,6 +31,10 @@ spring:
         # conflicting values, such as a mobile number, which must never reach a log (BR-19). The constraint name,
         # which the application relies on, is still reported.
         logServerErrorDetail: false
+        # Every session gives up waiting for a lock after 2 seconds and on any statement after 5. A booking stuck
+        # behind a busy seat then answers 503 TRY_AGAIN with Retry-After: 2 instead of holding a connection
+        # (docs/errors.md). Flyway uses the same pool, so a future migration that needs longer must say so itself.
+        options: "-c lock_timeout=2000 -c statement_timeout=5000"
 
   flyway:
     # Migrations in src/main/resources/db/migration create and change the schema at startup. A missing folder is
@@ -66,6 +70,11 @@ logging:
     # Prefixes every log line written during a request with its correlation id (shared.correlation), so one
     # request's lines can be found together, and matched with the id the caller received.
     correlation: "[%X{correlationId:-}] "
+  level:
+    # Hibernate logs every failed SQL statement with the database's message, which can quote the values in a
+    # constraint violation. The booking module translates those failures itself and logs only the constraint name
+    # and SQLSTATE, so this logger stays silent (BR-19). Quoted, because a bare OFF is a YAML boolean.
+    org.hibernate.engine.jdbc.spi.SqlExceptionHelper: "OFF"
 
 server:
   # The HTTP port. A hosting platform can set PORT; otherwise 8080.

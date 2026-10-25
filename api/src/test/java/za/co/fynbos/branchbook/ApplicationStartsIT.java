@@ -60,6 +60,16 @@ class ApplicationStartsIT {
     assertThat(installed).isEqualTo(1);
   }
 
+  /**
+   * Every database session gives up on a lock after 2 seconds and on a statement after 5, so a
+   * booking stuck behind a busy seat answers 503 instead of holding a connection.
+   */
+  @Test
+  void databaseSessionsGiveUpOnSlowLocksAndStatements() {
+    assertThat(jdbc.queryForObject("SHOW lock_timeout", String.class)).isEqualTo("2s");
+    assertThat(jdbc.queryForObject("SHOW statement_timeout", String.class)).isEqualTo("5s");
+  }
+
   @Test
   void readinessProbeIsUpWhenTheDatabaseAnswers() {
     assertThat(mvc.get().uri("/readyz"))
