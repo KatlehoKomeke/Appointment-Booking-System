@@ -93,7 +93,10 @@ never fall behind the code. Re-check it after every major commit and at the end 
 - **Never commit** credentials, tokens, keys, `.env` files, real personal data, AWS account IDs or personal tool
   settings. The hook and CI block the common cases; review your staged diff for the rest.
 - **Use synthetic data only:** made-up names and the published demo numbers. Never a real person's details.
-- **Never log personal data.** Log the correlation id and the booking reference instead.
+- **Never log personal data or a reference.** Log the correlation id and the appointment's id instead: a
+  reference and the last four digits open an appointment, so a reference in a log is half a credential (BR-19).
+  `MobileNumber`, `CustomerName` and `AppointmentReference` print a redacted form if logged by mistake, and
+  `LogRedactionIT` fails if a name, number or reference reaches the application's or the database's log.
 - **If a secret is ever committed,** follow [SECURITY.md](SECURITY.md): rotate first, then clean the history.
 
 ## Definition of done

@@ -56,6 +56,15 @@ class AppointmentReferenceTest {
     assertThat(AppointmentReference.parse(typed)).isEmpty();
   }
 
+  /** BR-19: a reference passed to a logger by mistake shows nothing; value() is the stored form. */
+  @Test
+  void toStringNeverShowsTheReference() {
+    AppointmentReference reference = new AppointmentReference("APT-7K3M-9Q2X");
+
+    assertThat(reference).hasToString("APT-****-****");
+    assertThat(reference.value()).isEqualTo("APT-7K3M-9Q2X");
+  }
+
   @Test
   void storedFormIsRequired() {
     assertThatIllegalArgumentException().isThrownBy(() -> new AppointmentReference("apt7k3m9q2x"));

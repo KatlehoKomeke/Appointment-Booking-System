@@ -84,12 +84,13 @@ public record AppointmentReference(String value) {
   }
 
   /**
-   * Returns the stored form.
+   * Hides the reference, which is half of what opens an appointment, so one passed to a logger or
+   * put in a message by mistake shows nothing (BR-19). {@link #value()} is the stored form.
    *
-   * @return for example {@code APT-7K3M-9Q2X}
+   * @return {@code APT-****-****}
    */
   @Override
   public String toString() {
-    return value;
+    return "APT-****-****";
   }
 }
