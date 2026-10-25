@@ -7,6 +7,7 @@ import io.swagger.v3.oas.models.info.License;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.servers.Server;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +15,7 @@ import java.util.Set;
 import org.springdoc.core.customizers.GlobalOpenApiCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import za.co.fynbos.branchbook.shared.problem.ProblemCode;
 
 /**
  * Describes the API for springdoc, which generates the OpenAPI document that is committed as
@@ -23,7 +25,8 @@ import org.springframework.context.annotation.Configuration;
  *   <li>The document is the stable contract {@code v1}, not the build version, so it changes only
  *       when the API does.
  *   <li>Every error is the hand-written {@code Problem} schema, which operations reference through
- *       {@link #PROBLEM}.
+ *       {@link #PROBLEM}. Its {@code code} lists every {@link ProblemCode}, so the web app's type
+ *       for it is the exact set of codes.
  *   <li>Every property of a response is marked required, because the API always sends every field;
  *       a field that can be empty is declared as nullable instead, and a nullable enum lists {@code
  *       null} among its values. The generated TypeScript types are therefore exact.
@@ -144,9 +147,10 @@ public class OpenApiConfig {
                 "instance", string("urn:branchbook:request: followed by the correlation id"),
                 "code",
                     string(
-                        "The stable error code. Absent only on HTTP-level failures the API never"
-                            + " returns on purpose: 404 for a path it does not serve, 405, 406 and"
-                            + " 415"),
+                            "The stable error code, one of those in docs/errors.md. Absent only on"
+                                + " HTTP-level failures the API never returns on purpose: 404 for a"
+                                + " path it does not serve, 405, 406 and 415")
+                        ._enum(Arrays.stream(ProblemCode.values()).map(ProblemCode::name).toList()),
                 "correlationId", string("Matches the X-Correlation-Id header and the server logs"),
                 "errors",
                     new Schema()

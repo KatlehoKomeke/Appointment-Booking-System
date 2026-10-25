@@ -50,7 +50,7 @@ day.closedReason; // 'CLOSED_DAY' | 'PUBLIC_HOLIDAY' | null
 ```
 
 `unwrap` returns the body of a success and throws an `ApiProblem` for an error response, carrying the status, the
-stable `code` and the `correlationId`. Screens choose their wording from `code`, never from the problem's `detail`.
+stable `code` (typed as the union of the codes the contract lists) and the `correlationId`. Screens choose their wording from `code`, never from the problem's `detail`.
 A network failure is not an `ApiProblem`, so a screen can tell "offline" from "refused".
 
 `schema.d.ts` is generated and committed, never edited by hand; ESLint and Prettier skip it, and `npm run

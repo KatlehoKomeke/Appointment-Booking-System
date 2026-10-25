@@ -51,8 +51,11 @@ export class ApiProblem extends Error {
   /** The HTTP status, such as 422. */
   readonly status: number;
 
-  /** The stable error code, such as `SLOT_FULL`; absent when the response was not one of the API's problems. */
-  readonly code: string | undefined;
+  /**
+   * The stable error code, such as `SLOT_FULL`: one of the codes the contract lists, so a screen can switch on it
+   * exhaustively. Absent when the response was not one of the API's problems, or was an HTTP-level failure.
+   */
+  readonly code: Problem['code'];
 
   /** The id the server logged the request under, from the problem or else from the response header. */
   readonly correlationId: string | undefined;

@@ -178,7 +178,8 @@ in step:
 
 So an API change shows up in review as a diff of the contract, and `make contract` refreshes both files after an
 intended one. In the document every response property is required, because the API always sends it; one that can be
-empty is nullable instead, so the generated types say exactly what arrives.
+empty is nullable instead, so the generated types say exactly what arrives. The `Problem` schema's `code` lists every
+`ProblemCode`, so the web app's type for it is the exact set of codes in [docs/errors.md](../docs/errors.md).
 
 ## Layout
 

@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -16,6 +17,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
+import za.co.fynbos.branchbook.shared.problem.ProblemCode;
 import za.co.fynbos.branchbook.support.IntegrationTest;
 
 /**
@@ -66,6 +68,19 @@ class OpenApiContractIT {
         .asArray()
         .isNotEmpty()
         .allSatisfy(pattern -> assertThat((String) pattern).startsWith("^").endsWith("$"));
+  }
+
+  /**
+   * The Problem schema's {@code code} lists exactly the codes in {@link ProblemCode}, the catalogue
+   * that ProblemCodeCatalogueTest keeps in step with docs/errors.md.
+   */
+  @Test
+  void problemCodeListsEveryProblemCode() {
+    assertThat(mvc.get().uri("/v3/api-docs"))
+        .bodyJson()
+        .extractingPath("$.components.schemas.Problem.properties.code.enum")
+        .asArray()
+        .containsExactly(Arrays.stream(ProblemCode.values()).map(ProblemCode::name).toArray());
   }
 
   /**
