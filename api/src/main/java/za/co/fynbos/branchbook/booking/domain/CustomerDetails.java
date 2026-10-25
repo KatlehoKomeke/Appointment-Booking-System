@@ -9,8 +9,10 @@ import org.jspecify.annotations.Nullable;
  * mobile number, and an e-mail address only if the optional e-mail channel is added (POPIA section
  * 10; ADR-0004). There is no customer table; the details live on the appointment.
  *
- * <p>These are personal data. They are never logged, never put in an error body, and shown only
- * masked; {@link #toString()} therefore reveals nothing.
+ * <p>These are personal data. They are never logged and never put in an error body. The name is
+ * returned only to the caller who booked the appointment or proved the last four digits of its
+ * number; the number is shown to that caller only masked ({@code 082 *** 0101}) and redacted
+ * everywhere else. {@link #toString()} reveals nothing.
  *
  * @param firstName the customer's first name, trimmed
  * @param lastName the customer's last name, trimmed

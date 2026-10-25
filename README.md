@@ -152,11 +152,15 @@ with `APP_PORT=18080 make up`, or in a `.env` file copied from [.env.example](.e
 ### Try the API
 
 Swagger UI at http://localhost:8080/swagger-ui.html lists every operation and lets you call it. From a terminal,
-the slots for a home loan consultation at Rustenburg on a Saturday:
+take the last bookable date from the server, so the examples work whatever day you run them, and list the slots
+for a home loan consultation at Rustenburg on that date:
 
 ```bash
-curl 'http://localhost:8080/api/v1/branches/RUS/availability?service=HOME&date=2026-10-31'
+date=$(curl -s http://localhost:8080/api/v1/branches/SAN | grep -o '"bookableTo":"[0-9-]*"' | cut -d'"' -f4)
+curl "http://localhost:8080/api/v1/branches/RUS/availability?service=HOME&date=$date"
 ```
+
+On a Saturday, such as 31 October 2026, the answer is:
 
 ```json
 {
@@ -173,17 +177,18 @@ curl 'http://localhost:8080/api/v1/branches/RUS/availability?service=HOME&date=2
 
 The answer is shortened. Rustenburg closes at 12:00 on Saturdays, so the last 45-minute slot starts at 11:00. Every
 time carries the branch's offset, `+02:00`, and a date outside the next 30 days is `422 DATE_OUTSIDE_BOOKING_WINDOW`.
-Book a slot with any new UUID as the `Idempotency-Key`, which makes a retry return the same appointment, and one of
-the published demo numbers:
+Book 09:30 at Sandton, which also trades on Sundays, with any new UUID as the `Idempotency-Key`, which makes a retry
+return the same appointment, and one of the published demo numbers:
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/appointments \
   -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" \
-  -d '{"branchCode": "SAN", "serviceCode": "FICA", "startsAt": "2026-10-27T09:30:00+02:00",
+  -d '{"branchCode": "SAN", "serviceCode": "FICA", "startsAt": "'"$date"'T09:30:00+02:00",
        "customer": {"firstName": "Nomvula", "lastName": "Dlamini", "mobile": "082 555 0101"}}'
 ```
 
-The answer is `201 Created`, with `Location: /api/v1/appointments/APT-VY4A-WNB7` and, shortened:
+Run on 25 October 2026 for 27 October, the answer was `201 Created`, with
+`Location: /api/v1/appointments/APT-VY4A-WNB7` and, shortened:
 
 ```json
 {
@@ -201,7 +206,7 @@ The SMS was written in the same transaction as the booking and fits one segment.
 its reference and the last four digits of the number:
 
 ```bash
-curl http://localhost:8080/api/v1/appointments/APT-VY4A-WNB7 -H 'X-Mobile-Last4: 0101'
+curl http://localhost:8080/api/v1/appointments/APT-VY4A-WNB7 -H 'X-Mobile-Last4: 0101'   # your reference
 ```
 
 The same body comes back. Other digits get the same `404` as a reference that does not exist, and five wrong tries

@@ -248,7 +248,8 @@ public class Appointment {
   }
 
   /**
-   * Returns the customer's details. They are personal data: mask them before showing them.
+   * Returns the customer's details. They are personal data: show the name only to a caller who
+   * booked or proved the appointment, and the mobile number only masked or redacted.
    *
    * @return the customer's name and mobile number
    */

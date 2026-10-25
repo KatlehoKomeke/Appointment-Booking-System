@@ -54,8 +54,9 @@ One request yields exactly one code:
   (`422 DATE_OUTSIDE_BOOKING_WINDOW`). A closed day is not an error: it is a `200` with `closedReason` and no slots.
 - **Booking** (`POST /api/v1/appointments`), in this order, so a request that is wrong in several ways gets the
   first:
-  1. `400 VALIDATION_FAILED`: the body is malformed, has a field the request does not define, or breaks a field
-     rule. Every field problem is listed in `errors[]` at once.
+  1. `400 VALIDATION_FAILED`: the body cannot be read, has a field the request does not define, or breaks a
+     field rule. Field-rule problems are listed in `errors[]` together. A body that cannot be read, or has an
+     unknown field, stops before the rules are checked, so it reports only that one problem.
   2. `400 IDEMPOTENCY_KEY_REQUIRED`: the `Idempotency-Key` header is missing or not a UUID.
   3. `422 MOBILE_NUMBER_REQUIRED`: the number is missing or not a South African mobile number.
   4. `422 IDEMPOTENCY_KEY_REUSED`, or a replay of the key's booking. Nothing after this step runs for a replay.
@@ -69,19 +70,22 @@ One request yields exactly one code:
 - **Lookup** (`GET /api/v1/appointments/{reference}`): a missing or malformed `X-Mobile-Last4` is
   `400 VALIDATION_FAILED` and is not counted; then a blocked reference is `429 LOOKUP_RATE_LIMITED`, even with the
   right digits; then any mismatch is `404 APPOINTMENT_NOT_FOUND` and is counted. A reference that cannot be a
-  reference at all is a `404` and is not counted, because it can never become a match.
+  reference at all is a `404` and is not counted, because it can never become a match. A lookup is counted before
+  the database is read and released if its digits were right, so while one lookup is being checked, a reference
+  with four failures already refuses the next with `429` and `Retry-After: 1`.
 
 ## Field codes
 
-Each item of `errors[]` names the field as the client sent it: a JSON path such as `customer.firstName`, or a header
-name such as `X-Mobile-Last4`. Its `code` is one of these:
+Each item of `errors[]` names the field as the client sent it: a JSON path such as `customer.firstName`, a header
+name such as `X-Mobile-Last4`, or the name of a path or query parameter such as `code`, `service` or `date`. Its
+`code` is one of these:
 
 | Code | Field | Meaning |
 |---|---|---|
 | `REQUIRED` | a header or query parameter | It is missing. |
 | `NOT_NULL` | a body field | It is missing or `null`. |
 | `NOT_BLANK` | `customer.firstName`, `customer.lastName` | It is missing or only spaces. |
-| `PATTERN` | `branchCode`, `serviceCode`, `X-Mobile-Last4` | It has the wrong shape: 2 to 8 letters, 2 to 12 letters, four digits. |
+| `PATTERN` | `branchCode` and `serviceCode` in a body; `code` in a path; `service` in a query; `X-Mobile-Last4` | It has the wrong shape: 2 to 8 letters for a branch code, 2 to 12 letters for a service code, four digits for the header. |
 | `NAME_INVALID` | `customer.firstName`, `customer.lastName` | Not a name: 1 to 60 characters that start with a letter and hold only letters, spaces, hyphens and apostrophes. |
 | `OFFSET_REQUIRED` | `startsAt` | Not an ISO-8601 date and time with an offset, such as `2026-10-27T09:30:00+02:00`. |
 | `UNKNOWN_FIELD` | the unknown field, or `(body)` | The request does not define it, such as `endsAt`, which the server computes. Only the first is reported. |
@@ -96,6 +100,7 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 | Status | Seconds | When |
 |---|---|---|
 | `429 LOOKUP_RATE_LIMITED` | Up to 3600 | The seconds left until an hour after the reference's first wrong lookup, rounded up. |
+| `429 LOOKUP_RATE_LIMITED` | 1 | The reference has four failures and another lookup of it is still being checked. |
 | `503 TRY_AGAIN` | 2 | A lock not granted within 2 s, a statement over 5 s, or a deadlock or serialisation failure that happened again after the one automatic re-run. |
 | `503 TRY_AGAIN` | 5 | No database connection within 3 s, or any other temporary failure. |
 

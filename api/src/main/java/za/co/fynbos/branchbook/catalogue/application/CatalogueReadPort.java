@@ -14,7 +14,9 @@ import za.co.fynbos.branchbook.catalogue.domain.ServiceType;
  * Reads the catalogue's reference data. The infrastructure layer implements it with SQL, so the
  * application layer never depends on how the data is stored.
  *
- * <p>Inactive branches and services are invisible through this port.
+ * <p>The reads that list or look up by code see only active branches and services. {@link
+ * #branchById} and {@link #serviceById} find a row whether or not it is active, so an appointment
+ * booked before a branch closed or a service was withdrawn can still be shown.
  */
 public interface CatalogueReadPort {
 

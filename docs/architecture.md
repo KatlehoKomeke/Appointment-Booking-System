@@ -126,8 +126,11 @@ sequenceDiagram
 `GET /api/v1/appointments/{reference}` with `X-Mobile-Last4` opens an appointment again
 ([BR-13](domain-rules.md#br-13)). An unknown reference, a malformed one and a right one with the wrong digits all
 get the same `404`, and the digits are compared in constant time. `LookupAttemptLimiter` counts wrong lookups per
-reference in a window that opens at the first and lasts an hour; the fifth blocks the reference, right digits
-included, until the window closes. Blocking logs one warning that names no reference.
+reference in a window that opens with the first wrong lookup and lasts an hour; the fifth blocks the reference, right digits
+included, until the window closes. A lookup is admitted and counted as in flight in one atomic step before the
+database is read, then released if its digits were right or kept as a failure if not. Lookups that arrive together
+therefore cannot all pass a check made before any of them was counted, and a customer who keeps their page open is
+never blocked by their own lookups. Blocking logs one warning that names no reference.
 
 The counts live in memory, in a Caffeine cache bounded to 100,000 references. That is a deliberate trade-off for
 one instance, with three consequences:

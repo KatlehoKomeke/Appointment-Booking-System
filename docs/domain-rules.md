@@ -96,7 +96,7 @@ How to read a rule:
 
 **Enforced in.** domain (SlotCalendar, BookingWindow) + application service (AvailabilityQueries date check; BookAppointmentHandler step 3)
 
-**Proven by.** `BookingWindowTest.thirtyDayHorizonGivesExactlyThirtyBookableDates`, `SlotCalendarTest.onlyTheThirtyDatesFromTodayHaveSlots`, `BranchApiIT.detailCarriesServerBookableWindow`, `BranchApiIT.windowStartsOnTheBranchsDateNotTheUtcDate`, `AvailabilityApiIT.dateOutsideWindowReturns422`, `AppointmentApiIT.postOutsideWindowReturns422DateOutsideBookingWindow`
+**Proven by.** `BookingWindowTest.thirtyDayHorizonGivesExactlyThirtyBookableDates`, `SlotCalendarTest.onlyTheThirtyDatesFromTodayHaveSlots`, `BranchApiIT.detailCarriesServerBookableWindow`, `BranchApiIT.windowStartsOnTheBranchsDateNotTheUtcDate`, `AvailabilityApiIT.dateOutsideWindowReturns422`, `AppointmentApiIT.postOutsideWindowReturns422DateOutsideBookingWindow`, `SlotCalendarTest.startOutsideTheWindowIsRefusedRightUpToTheLimitsOfTime`, `AppointmentApiIT.postAtTheLimitOfTimeReturns422DateOutsideBookingWindow`
 
 **Status.** Proven. The window in `SlotCalendar`, published by `GET /api/v1/branches/{code}` and enforced by availability from M2; booking refuses a start outside it from M3.
 
@@ -109,7 +109,7 @@ How to read a rule:
 
 **Proven by.** `AvailabilityApiIT.serviceNotOfferedAtBranchReturns422`, `AppointmentApiIT.postForServiceNotOfferedReturns422`, `SchemaConstraintIT.rawInsertViolatingEachNamedConstraintIsRejected`
 
-**Status.** Proven. The composite foreign key from M1; availability refuses the pair from M2; booking refuses it before writing anything, not even the idempotency key, from M3.
+**Status.** Proven. The composite foreign key from M1; availability refuses the pair from M2; from M3 booking refuses it at step 2, just after claiming the idempotency key, and the refusal rolls the whole transaction back, the key's row included, so nothing is left behind ([errors.md](errors.md#precedence)).
 
 <a id="br-7"></a>
 ## BR-7: Capacity: lowest free seat under a row lock
@@ -120,7 +120,7 @@ How to read a rule:
 
 **Proven by.** `ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201`
 
-**Status.** Planned for M5, when twenty concurrent requests race for one seat. Built in M1: the exclusion constraint (BR-8). Built in M3: the row lock, the lowest free seat and the three alternatives, which `AppointmentApiIT.postWhenSlotFullReturns409WithThreeAlternatives` proves for requests that arrive one after another.
+**Status.** Planned for M5, when twenty concurrent requests race for one seat and prove the row lock. Built in M1: the exclusion constraint (BR-8). Built in M3 and proven for requests that arrive one after another: the lowest free seat is taken (`BookAppointmentIT.lowestFreeSeatIsTakenFirst`), and a full slot is 409 SLOT_FULL with three alternatives (`AppointmentApiIT.postWhenSlotFullReturns409WithThreeAlternatives`).
 
 <a id="br-8"></a>
 ## BR-8: The database rejects a double booking from any code path
@@ -169,22 +169,22 @@ How to read a rule:
 <a id="br-12"></a>
 ## BR-12: Idempotent booking
 
-**Rule.** POST /api/v1/appointments requires Idempotency-Key (UUID); the key row is the first statement of the transaction; same key + same hash replays 201 with Idempotent-Replayed: true and a body re-rendered from the current appointment; same key + different hash is 422 IDEMPOTENCY_KEY_REUSED; a failed booking leaves no key row; keys are honoured for 24 h and until the hourly purge (at most 25 h).
+**Rule.** POST /api/v1/appointments requires Idempotency-Key (UUID); the key row is the first statement of the transaction; same key + same hash replays 201 with Idempotent-Replayed: true and a body re-rendered from the current appointment; same key + different hash is 422 IDEMPOTENCY_KEY_REUSED; a failed booking leaves no key row; a key is honoured for exactly 24 h, after which it books anew whether or not the hourly purge has removed it.
 
 **Enforced in.** database constraint (idempotency_keys_pkey via ON CONFLICT DO NOTHING) + application service (BookAppointmentHandler step 1)
 
 **Proven by.** `IdempotencyIT.concurrentSameKey_bookOnceAndBothReceiveSameReference`
 
-**Status.** Planned for M5, when two requests with one key arrive together. Built in M3 and proven for requests that arrive one after another: a missing or malformed key is 400 IDEMPOTENCY_KEY_REQUIRED (`AppointmentApiIT.postWithoutIdempotencyKeyReturns400IdempotencyKeyRequired`), a replay (`IdempotencyIT.sameKeySamePayloadReplaysOriginal201`, `IdempotencyIT.sameKeyWithTheNumberAndTimeTypedAnotherWayReplays`), a reused key (`IdempotencyIT.sameKeyDifferentPayloadReturns422`), no key row after a failure (`IdempotencyIT.failedBookingLeavesNoKeyRow`) and the purge (`IdempotencyKeyPurgeJobIT.keyIsHonouredUntilPurgedAfterTwentyFourHoursThenFreeAgain`). The hash is over the parsed request, so the same details typed another way are the same request.
+**Status.** Planned for M5, when two requests with one key arrive together. Built in M3 and proven for requests that arrive one after another: a missing or malformed key is 400 IDEMPOTENCY_KEY_REQUIRED (`AppointmentApiIT.postWithoutIdempotencyKeyReturns400IdempotencyKeyRequired`), a replay (`IdempotencyIT.sameKeySamePayloadReplaysOriginal201`, `IdempotencyIT.sameKeyWithTheNumberAndTimeTypedAnotherWayReplays`), a reused key (`IdempotencyIT.sameKeyDifferentPayloadReturns422`), no key row after a failure (`IdempotencyIT.failedBookingLeavesNoKeyRow`) the 24 hours (`IdempotencyKeyPurgeJobIT.keyIsHonouredForTwentyFourHoursThenBooksAnewEvenBeforeThePurge`) and the purge (`IdempotencyKeyPurgeJobIT.purgeRemovesOnlyKeysThatHaveExpired`). The hash is over the parsed request, so the same details typed another way are the same request.
 
 <a id="br-13"></a>
 ## BR-13: Lookup needs the reference and the last four digits
 
-**Rule.** Viewing or cancelling requires the reference plus X-Mobile-Last4; the reference may be typed in lowercase and without hyphens; any mismatch, including an unknown or malformed reference, is 404 APPOINTMENT_NOT_FOUND (never 403), and the digits are compared in constant time; a missing or malformed header is 400 VALIDATION_FAILED and not counted; five wrong lookups of a reference block it, even for the right digits, with 429 LOOKUP_RATE_LIMITED and Retry-After until an hour after the first. The window opens at the first failure and does not slide.
+**Rule.** Viewing or cancelling requires the reference plus X-Mobile-Last4; the reference may be typed in lowercase and without hyphens; any mismatch, including an unknown or malformed reference, is 404 APPOINTMENT_NOT_FOUND (never 403), and the digits are compared in constant time; a missing or malformed header is 400 VALIDATION_FAILED and not counted; five wrong lookups of a reference block it, even for the right digits, with 429 LOOKUP_RATE_LIMITED and Retry-After until an hour after the first. The window opens with the first wrong lookup and does not slide. A lookup is counted before the database is read and released if its digits were right, so lookups that arrive together cannot pass the limit, and a customer's own lookups never block them.
 
 **Enforced in.** application service (LookupAppointmentHandler + LookupAttemptLimiter: in memory, per instance, bounded to 100,000 references; docs/architecture.md, section 4)
 
-**Proven by.** `AppointmentApiIT.getWithWrongLast4Returns404NotForbidden`, `AppointmentApiIT.getReturnsTheAppointmentWithItsPendingConfirmation`, `AppointmentApiIT.malformedLast4Returns400AndIsNotCounted`, `AppointmentApiIT.sixthWrongLast4WithinHourReturns429`, `LookupAttemptLimiterTest.fifthFailureBlocksTheReferenceUntilAnHourAfterTheFirst`, `LookupAttemptLimiterTest.windowOpensAtTheFirstFailureAndDoesNotSlide`, `LookupAttemptLimiterTest.otherReferencesAreNotAffected`
+**Proven by.** `AppointmentApiIT.getWithWrongLast4Returns404NotForbidden`, `AppointmentApiIT.getReturnsTheAppointmentWithItsPendingConfirmation`, `AppointmentApiIT.malformedLast4Returns400AndIsNotCounted`, `AppointmentApiIT.sixthWrongLast4WithinHourReturns429`, `LookupAttemptLimiterTest.fifthFailureBlocksTheReferenceUntilAnHourAfterTheFirst`, `LookupAttemptLimiterTest.windowOpensAtTheFirstFailureAndDoesNotSlide`, `LookupAttemptLimiterTest.otherReferencesAreNotAffected`, `LookupAttemptLimiterTest.lookupsArrivingTogetherAdmitOnlyAsManyAsTheLimitLeaves`, `LookupAttemptLimiterTest.lookupsInFlightCountTowardsTheLimit`, `LookupAttemptLimiterTest.lookupsWithTheRightDigitsAreNeverCounted`
 
 **Status.** Proven for viewing, from M3. Cancelling, which needs the same proof, is BR-14 (Tier 2).
 
@@ -219,7 +219,7 @@ How to read a rule:
 
 **Proven by.** `ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically`
 
-**Status.** Planned for M5, when the dispatcher shows that delivery never changes an appointment. Built in M3: the PENDING SMS is written in the booking transaction through a port that refuses to run outside one (`NotificationOutboxIT.refusesToWriteOutsideATransaction`), comes back with the booking (`AppointmentApiIT.postReturns201WithLocationReferenceAndPendingNotifications`), and is gone with a booking that fails (`BookAppointmentIT.secondReferenceCollisionReturns500AndLeavesNothing`).
+**Status.** Planned for M5, when the dispatcher shows that delivery never changes an appointment. Built in M3: the PENDING SMS is written in the booking transaction through a port that refuses to run outside one (`NotificationOutboxIT.refusesToWriteOutsideATransaction`), comes back with the booking (`AppointmentApiIT.postReturns201WithLocationReferenceAndPendingNotifications`), and is rolled back with a booking that fails after writing it (`BookAppointmentIT.failureAfterTheSmsIsWrittenRollsTheSmsBackWithTheBooking`).
 
 <a id="br-17"></a>
 ## BR-17: Delivery with retries and a final FAILED state
@@ -248,9 +248,9 @@ How to read a rule:
 
 **Rule.** A South African mobile number is mandatory, accepted in the six documented formats, parsed only when libphonenumber reports MOBILE and the E.164 form matches the schema CHECK pattern, stored only as E.164, displayed 082 555 0101, masked 082 *** 0101 only to a caller who proved the number, redacted 082 *** **** in the inbox and every other surface; logs, MDC, the PostgreSQL log and exception messages carry no name, email, number or masked last four digits, and log lines name an appointment by its id, never its reference.
 
-**Enforced in.** domain (MobileNumber, CustomerName; MobileNumber.toString is the redacted form) + database constraint (customer_mobile CHECK; log_error_verbosity=terse, log_min_error_statement=panic) + driver (pgjdbc logServerErrorDetail=false) + configuration (Hibernate's SQL error log off) + application service (ProblemDetailHandler never echoes input and logs failures without their messages; log lines carry appointment ids, codes and constraint names only)
+**Enforced in.** domain (MobileNumber, CustomerName, AppointmentReference: each toString is redacted) + database constraint (customer_mobile CHECK; log_error_verbosity=terse, log_min_error_statement=panic) + driver (pgjdbc logServerErrorDetail=false) + configuration (Hibernate's SQL error log off) + application service (ProblemDetailHandler never echoes input and logs failures without their messages; log lines carry appointment ids, codes and constraint names only)
 
-**Proven by.** `MobileNumberTest.sixInputFormatsNormaliseToPlus27825550101`, `MobileNumberTest.rejectsLandline021Voip087AndTollFree080`, `MobileNumberTest.rendersDisplayMaskedRedactedAndLastFour`, `MobileNumberTest.toStringNeverShowsTheDigits`, `SchemaConstraintIT.mobileCheckMatchesMobileNumberPattern`, `AppointmentApiIT.postWithLandlineReturns422MobileNumberRequiredFieldError`, `AppointmentApiIT.responsesNeverContainUnmaskedMobile`, `NotificationOutboxIT.summariesMaskTheRecipient`, `LogRedactionIT.bookingLogsContainNoCustomerNameOrMobile`
+**Proven by.** `MobileNumberTest.sixInputFormatsNormaliseToPlus27825550101`, `MobileNumberTest.rejectsLandline021Voip087AndTollFree080`, `MobileNumberTest.rendersDisplayMaskedRedactedAndLastFour`, `MobileNumberTest.toStringNeverShowsTheDigits`, `SchemaConstraintIT.mobileCheckMatchesMobileNumberPattern`, `AppointmentApiIT.postWithLandlineReturns422MobileNumberRequiredFieldError`, `AppointmentApiIT.responsesNeverContainUnmaskedMobile`, `NotificationOutboxIT.summariesMaskTheRecipient`, `AppointmentReferenceTest.toStringNeverShowsTheReference`, `LookupAttemptLimiterTest.attemptNeverShowsTheReference`, `LogRedactionIT.bookingLogsContainNoCustomerNameOrMobile`
 
 **Status.** Proven for every surface that exists. The mobile number CHECK and the database and driver settings from M1; parsing, masking and the log proof from M3. The inbox, which shows only the redacted form, arrives in M5.
 
@@ -285,7 +285,7 @@ How to read a rule:
 
 **Proven by.** `ConcurrentBookingIT.sameMobileTwoBranchesOverlappingConcurrentlyGivesOne201AndOne409CustomerOverlap`
 
-**Status.** Planned for M5, with the concurrent tests. Built in M3: the advisory lock, the fixed lock order and the one re-run on 40P01 or 40001. The order of the conflicts is proven by `BookAppointmentIT.duplicateIsReportedBeforeOverlap`, and the 503 with `Retry-After: 2` for a lock or statement timeout by `ProblemDetailHandlerTest.transientDatabaseFailureBecomes503WithRetryAfterTwo`.
+**Status.** Planned for M5, with the concurrent tests. Built in M3: the advisory lock, the fixed lock order and the one re-run on 40P01 or 40001. The order of the conflicts is proven by `BookAppointmentIT.duplicateIsReportedBeforeOverlap` and `BookAppointmentIT.overlapIsReportedBeforeSlotFull`, and the 503 with `Retry-After: 2` for a lock or statement timeout by `ProblemDetailHandlerTest.transientDatabaseFailureBecomes503WithRetryAfterTwo`.
 
 <a id="br-23"></a>
 ## BR-23: Error bodies never reveal another booking
