@@ -54,6 +54,9 @@
     <google-java-format.version>1.36.0</google-java-format.version>
     <!-- Generates the OpenAPI document (docs/openapi.yaml) and Swagger UI; the Spring Boot 4 line. -->
     <springdoc.version>3.2.0</springdoc.version>
+    <!-- Parses and checks South African mobile numbers (BR-19). Not managed by Spring Boot; Dependabot bumps it, and
+         MobileNumberTest asserts the number types the rules depend on, so a metadata change cannot slip through. -->
+    <libphonenumber.version>9.0.41</libphonenumber.version>
     <!-- Test libraries that the Spring Boot parent does not manage. -->
     <archunit.version>1.5.1</archunit.version>
   </properties>
@@ -92,6 +95,12 @@
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
       <scope>runtime</scope>
+    </dependency>
+    <!-- South African mobile numbers: the six documented input formats, and the MOBILE type check (BR-19). -->
+    <dependency>
+      <groupId>com.googlecode.libphonenumber</groupId>
+      <artifactId>libphonenumber</artifactId>
+      <version>${libphonenumber.version}</version>
     </dependency>
     <!-- The OpenAPI document and Swagger UI, generated from the controllers (ADR-0005). -->
     <dependency>

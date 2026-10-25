@@ -23,7 +23,9 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.postgresql.util.PSQLException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import za.co.fynbos.branchbook.booking.domain.AppointmentReference;
 import za.co.fynbos.branchbook.booking.domain.AppointmentStatus;
+import za.co.fynbos.branchbook.booking.domain.MobileNumber;
 import za.co.fynbos.branchbook.support.IntegrationTest;
 import za.co.fynbos.branchbook.support.SeedData;
 
@@ -91,6 +93,23 @@ class SchemaConstraintIT {
     assertThat(statusesIn(definition))
         .containsExactlyInAnyOrderElementsOf(
             Stream.of(AppointmentStatus.values()).map(Enum::name).toList());
+  }
+
+  /**
+   * BR-19: the mobile CHECK uses exactly {@link MobileNumber#E164_PATTERN}, so every number the
+   * application accepts can be stored, and nothing else can.
+   */
+  @Test
+  void mobileCheckMatchesMobileNumberPattern() {
+    assertThat(regexIn("appointments_customer_mobile_e164", "customer_mobile"))
+        .isEqualTo(MobileNumber.E164_PATTERN);
+  }
+
+  /** BR-11: the reference CHECK uses exactly {@link AppointmentReference#PATTERN}. */
+  @Test
+  void referenceCheckMatchesAppointmentReferencePattern() {
+    assertThat(regexIn("appointments_reference_format", "reference"))
+        .isEqualTo(AppointmentReference.PATTERN);
   }
 
   /** BR-8: the seat rule holds against any code path, with no application lock involved. */
@@ -778,6 +797,22 @@ class SchemaConstraintIT {
   }
 
   /** A FICA appointment at Sandton, seat 1, 09:00 to 09:15 on Tuesday 27 October 2026. */
+  /**
+   * Returns the regular expression a CHECK constraint applies to one column, as PostgreSQL stores
+   * it: the literal in {@code ((column)::text ~ '...'::text)}.
+   */
+  private String regexIn(String constraint, String column) {
+    String definition =
+        jdbc.queryForObject(
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = ?",
+            String.class,
+            constraint);
+    Matcher regex =
+        Pattern.compile("\\(" + column + "\\)::text ~ '(.*?)'::text").matcher(definition);
+    assertThat(regex.find()).as("a regular expression on %s in %s", column, definition).isTrue();
+    return regex.group(1);
+  }
+
   private static Row appointment(String reference) {
     return Row.of("appointments")
         .column("id", "gen_random_uuid()")
