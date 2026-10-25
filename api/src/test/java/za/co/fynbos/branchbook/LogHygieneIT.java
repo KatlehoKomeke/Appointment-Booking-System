@@ -12,9 +12,9 @@ import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import za.co.fynbos.branchbook.support.IntegrationTest;
 
 /**
- * BR-19, for what M1 serves: a mobile number a caller puts in a URL or a header reaches neither the
- * response nor the log, with the application's real logging configuration. The booking flow adds
- * LogRedactionTest in M3.
+ * BR-19, for input outside the booking flow: a mobile number a caller puts in a URL or a header
+ * reaches neither the response nor the log, with the application's real logging configuration.
+ * LogRedactionIT covers every outcome of a booking and a lookup.
  */
 @IntegrationTest
 @ExtendWith(OutputCaptureExtension.class)

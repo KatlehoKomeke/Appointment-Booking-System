@@ -50,7 +50,13 @@ BranchBook is designed around the Protection of Personal Information Act, even t
     `SchemaConstraintIT.violationMessagesNeverQuoteTheConflictingValues` checks this.
   - Unexpected exceptions are logged with their types and stack frames but never their messages;
     `ProblemDetailHandlerTest` and `ErrorDispatchControllerTest` check this.
-  - `LogRedactionTest`, which inspects every log of a real booking, arrives with the booking flow (M3).
+  - Hibernate's own SQL error log, which repeats the database's message, is switched off; the booking module logs
+    only the constraint name and SQLSTATE.
+  - `LogRedactionIT.bookingLogsContainNoCustomerNameOrMobile` takes one synthetic customer through every outcome
+    of a booking and a lookup, then checks the application's log and PostgreSQL's for their name, their number in
+    any form, masked or not, and the appointment's reference.
+- **Log lines name appointments by id.** A reference and the last four digits open an appointment, so log lines
+  carry the appointment's id and never its reference.
 - **Synthetic test data only.** Tests and demos use made-up names and the published demo numbers (`082 555 01xx`).
   Never use a real person's details, including your own.
 - **A hosted demo cannot collect real data.** It accepts only the published demo numbers, each locked to a
