@@ -38,6 +38,7 @@ Run these from `api/`, or use the `make` targets in the repository root:
 | Compiler lint | `-Xlint:all -Werror` in [pom.xml](pom.xml) | Any compiler warning appears in production code. |
 | Javadoc lint | `-Xdoclint:all/protected` | A public or protected type or member has no Javadoc, or its Javadoc is broken. |
 | Package documentation | `PackageDocumentationTest` | A package has no `package-info.java`. |
+| Docker-free unit run | `SurefireSuiteIsDockerFreeTest` (ArchUnit) | A `*Test` starts the application or uses Testcontainers, or a test that starts the application is not named `*IT`, so `./mvnw test` would need Docker. |
 | Architecture | `ArchitectureTest` (ArchUnit) | A module cycle appears, a domain class imports Spring, a controller reaches the infrastructure layer, or a class outside the application layer declares a transaction. |
 | Error catalogue | `ProblemCodeCatalogueTest` | `ProblemCode` and [docs/errors.md](../docs/errors.md) disagree. |
 | API contract | `OpenApiContractIT` | The OpenAPI document the API generates differs from [docs/openapi.yaml](../docs/openapi.yaml), or a parameter pattern is not anchored. |
