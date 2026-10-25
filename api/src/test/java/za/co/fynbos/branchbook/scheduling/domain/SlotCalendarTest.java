@@ -12,6 +12,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.OffsetDateTime;
 import java.time.Period;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -143,6 +144,32 @@ class SlotCalendarTest {
     // Today, on the grid: only the lead time is broken.
     assertThat(calendar.validate(at(MONDAY, "10:30"))).contains(SLOT_WITHIN_LEAD_TIME);
     assertThat(calendar.validate(at(MONDAY, "11:00"))).isEmpty();
+  }
+
+  /**
+   * BR-5: the window's edges are the first and last dates in the branch's zone, and a start at the
+   * far ends of time, which has no local date there, is refused as outside the window rather than
+   * failing.
+   */
+  @Test
+  void startOutsideTheWindowIsRefusedRightUpToTheLimitsOfTime() {
+    SlotCalendar calendar = calendar(standardBranch(), 15);
+    LocalDate lastDate = MONDAY.plusDays(29);
+
+    // The first and the last minute of the window are inside it, though outside the hours.
+    assertThat(calendar.validate(at(MONDAY, "00:00"))).contains(SLOT_OUTSIDE_HOURS);
+    assertThat(calendar.validate(at(lastDate, "23:45"))).contains(SLOT_OUTSIDE_HOURS);
+    assertThat(calendar.validate(at(MONDAY.minusDays(1), "23:45")))
+        .contains(DATE_OUTSIDE_BOOKING_WINDOW);
+    assertThat(calendar.validate(at(lastDate.plusDays(1), "00:00")))
+        .contains(DATE_OUTSIDE_BOOKING_WINDOW);
+    assertThat(calendar.validate(Instant.parse("+999999999-12-31T23:00:00Z")))
+        .contains(DATE_OUTSIDE_BOOKING_WINDOW);
+    assertThat(
+            calendar.validate(OffsetDateTime.parse("-999999999-01-01T00:00:00+18:00").toInstant()))
+        .contains(DATE_OUTSIDE_BOOKING_WINDOW);
+    assertThat(calendar.validate(Instant.MAX)).contains(DATE_OUTSIDE_BOOKING_WINDOW);
+    assertThat(calendar.validate(Instant.MIN)).contains(DATE_OUTSIDE_BOOKING_WINDOW);
   }
 
   /** BR-4: at 09:10 the earliest start is 11:10, so the first 15-minute slot is 11:15. */

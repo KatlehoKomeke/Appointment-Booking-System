@@ -127,11 +127,14 @@ public final class SlotCalendar {
    * @return empty if it is a slot; otherwise the one problem that applies first (BR-21)
    */
   public Optional<SlotProblem> validate(Instant startsAt) {
-    LocalDateTime local = LocalDateTime.ofInstant(startsAt, zone);
-    LocalDate date = local.toLocalDate();
-    if (!window.contains(date)) {
+    // Compared as instants first: a start near the limits of java.time, such as the year
+    // 999999999, has no local date in the branch's zone, and must be refused, not fail.
+    if (startsAt.isBefore(window.firstDate().atStartOfDay(zone).toInstant())
+        || !startsAt.isBefore(window.lastDate().plusDays(1).atStartOfDay(zone).toInstant())) {
       return Optional.of(SlotProblem.DATE_OUTSIDE_BOOKING_WINDOW);
     }
+    LocalDateTime local = LocalDateTime.ofInstant(startsAt, zone);
+    LocalDate date = local.toLocalDate();
     Optional<OperatingHours> hours = branch.hoursOn(date);
     if (hours.isEmpty()) {
       return Optional.of(SlotProblem.SLOT_ON_CLOSED_DAY);

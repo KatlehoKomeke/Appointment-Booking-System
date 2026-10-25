@@ -225,6 +225,12 @@ class AppointmentApiIT {
     assertRefusedAsNotASlot("2026-11-25T09:00:00+02:00", "FICA", "DATE_OUTSIDE_BOOKING_WINDOW");
   }
 
+  /** BR-5: a start at the far end of time is outside the window, not an unexpected failure. */
+  @Test
+  void postAtTheLimitOfTimeReturns422DateOutsideBookingWindow() {
+    assertRefusedAsNotASlot("+999999999-12-31T23:00:00Z", "FICA", "DATE_OUTSIDE_BOOKING_WINDOW");
+  }
+
   /**
    * BR-7, sequentially: Polokwane has one seat for FICA updates. Once 09:00 is taken, the next
    * customer is offered the three slots after it.
