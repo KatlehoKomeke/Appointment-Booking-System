@@ -11,8 +11,8 @@ import com.tngtech.archunit.lang.ArchRule;
 /**
  * The structure of the modular monolith, enforced on every build (docs/architecture.md, section 3).
  *
- * <p>Modules are the top-level packages ({@code catalogue}, {@code booking}, {@code shared}, and
- * later {@code scheduling} and {@code notification}). Inside each, {@code api} handles HTTP, {@code
+ * <p>Modules are the top-level packages ({@code catalogue}, {@code scheduling}, {@code booking},
+ * {@code shared}, and later {@code notification}). Inside each, {@code api} handles HTTP, {@code
  * application} holds the use cases, {@code domain} the business rules, and {@code infrastructure}
  * the adapters to the database and the outside world.
  */
