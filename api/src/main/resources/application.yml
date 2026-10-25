@@ -74,6 +74,24 @@ server:
   # default, stated because the shutdown timeout above depends on it.
   shutdown: graceful
 
+springdoc:
+  api-docs:
+    # The OpenAPI document at /v3/api-docs, committed as docs/openapi.yaml (ADR-0005), in OpenAPI 3.1. On in every
+    # environment on purpose: the API is public and describes nothing that is not already in this repository.
+    enabled: true
+    version: openapi_3_1
+  swagger-ui:
+    # Swagger UI at /swagger-ui.html, also on purpose, so the API can be read and tried. SecurityConfig gives its pages
+    # alone a policy that allows inline styles.
+    enabled: true
+  # Only the API is the contract; the app's pages, the probes and /error are not.
+  paths-to-match: /api/**
+  # Keys in a fixed order, so the generated document is the same on every run and diffs cleanly.
+  writer-with-order-by-keys: true
+  # Each operation lists the errors it can return. Without this, springdoc would add every error handler's
+  # response to every operation.
+  override-with-generic-response: false
+
 management:
   endpoints:
     web:

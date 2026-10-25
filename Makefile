@@ -12,7 +12,7 @@ GITLEAKS_IMAGE := ghcr.io/gitleaks/gitleaks:$(GITLEAKS_VERSION)
 GIT_SAFE_DIR := -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs psql smoke dev-api dev-web test test-api test-web test-docs fmt hooks secrets-scan secrets-scan-history
+.PHONY: help up down logs psql smoke dev-api dev-web test test-api test-web test-docs contract fmt hooks secrets-scan secrets-scan-history
 
 help: ## List the available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-22s %s\n", $$1, $$2}'
@@ -53,6 +53,12 @@ test-web: web/node_modules ## Lint, type-check, format-check, test and build the
 
 test-docs: ## Check that the tests the README and the proven domain rules cite exist
 	scripts/check-test-refs.sh
+
+# After an intended API change: rewrites docs/openapi.yaml from the running API (OpenApiContractIT only), then the
+# web app's types from it. Commit both files with the change (ADR-0005).
+contract: web/node_modules ## Regenerate docs/openapi.yaml and the web app's API types after an API change (JDK 25, Docker, Node 24)
+	cd api && ./mvnw -B -ntp verify -Dtest=none -Dsurefire.failIfNoSpecifiedTests=false -Dit.test=OpenApiContractIT -Dopenapi.update=true -Djacoco.skip=true
+	cd web && npm run generate:api
 
 fmt: web/node_modules ## Format the Java and TypeScript code
 	cd api && ./mvnw -B -q spotless:apply

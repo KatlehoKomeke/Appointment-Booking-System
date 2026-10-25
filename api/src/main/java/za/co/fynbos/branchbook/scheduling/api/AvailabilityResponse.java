@@ -1,5 +1,6 @@
 package za.co.fynbos.branchbook.scheduling.api;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.ZoneId;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -23,15 +24,35 @@ import za.co.fynbos.branchbook.shared.time.TimeFormat;
  * @param holidayName the public holiday's name when the reason is {@code PUBLIC_HOLIDAY}
  * @param slots the day's slots in time order; empty on a closed day
  */
+@Schema(name = "Availability")
 public record AvailabilityResponse(
-    String branchCode,
-    String serviceCode,
-    String date,
-    String timezone,
-    String generatedAt,
-    @Nullable String closedReason,
-    @Nullable String holidayName,
-    List<SlotResponse> slots) {
+    @Schema(example = "SAN") String branchCode,
+    @Schema(example = "FICA") String serviceCode,
+    @Schema(format = "date", example = "2026-10-27") String date,
+    @Schema(
+            example = "Africa/Johannesburg",
+            description = "The branch's IANA time zone, whose offset every instant carries")
+        String timezone,
+    @Schema(
+            format = "date-time",
+            example = "2026-10-26T10:05:12+02:00",
+            description = "When the answer was computed, so a page can tell how fresh it is")
+        String generatedAt,
+    @Schema(
+            types = {"string", "null"},
+            allowableValues = {"CLOSED_DAY", "PUBLIC_HOLIDAY"},
+            description = "Why the branch is closed that day; null if it trades")
+        @Nullable String closedReason,
+    @Schema(
+            types = {"string", "null"},
+            example = "Day of Reconciliation",
+            description = "The holiday's name when closedReason is PUBLIC_HOLIDAY; otherwise null")
+        @Nullable String holidayName,
+    @Schema(
+            description =
+                "The day's slots in time order. Empty on a closed day, and once every slot left"
+                    + " today starts within the lead time.")
+        List<SlotResponse> slots) {
 
   static AvailabilityResponse from(DayAvailability day) {
     ZoneId zone = day.branch().timezone();
@@ -54,7 +75,15 @@ public record AvailabilityResponse(
    * @param endsAt when it would end
    * @param seatsAvailable the seats still free; 0 means the slot is full
    */
-  public record SlotResponse(String startsAt, String endsAt, int seatsAvailable) {
+  @Schema(name = "Slot")
+  public record SlotResponse(
+      @Schema(format = "date-time", example = "2026-10-27T09:30:00+02:00") String startsAt,
+      @Schema(format = "date-time", example = "2026-10-27T09:45:00+02:00") String endsAt,
+      @Schema(
+              minimum = "0",
+              example = "2",
+              description = "The seats still free; 0 means full, and the slot is still listed")
+          int seatsAvailable) {
 
     static SlotResponse from(Slot slot, ZoneId zone) {
       return new SlotResponse(

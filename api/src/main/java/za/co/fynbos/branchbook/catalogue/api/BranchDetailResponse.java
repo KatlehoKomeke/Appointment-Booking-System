@@ -1,5 +1,6 @@
 package za.co.fynbos.branchbook.catalogue.api;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import org.jspecify.annotations.Nullable;
@@ -27,14 +28,15 @@ import za.co.fynbos.branchbook.catalogue.domain.ServiceType;
  * @param closedDates the dates between {@code bookableFrom} and {@code bookableTo} on which the
  *     branch takes no appointments
  */
+@Schema(name = "BranchDetail")
 public record BranchDetailResponse(
-    String code,
-    String name,
-    String smsName,
+    @Schema(example = "SAN") String code,
+    @Schema(example = "Sandton Summit Mall") String name,
+    @Schema(example = "Sandton Summit") String smsName,
     Address address,
-    String timezone,
-    String bookableFrom,
-    String bookableTo,
+    @Schema(example = "Africa/Johannesburg") String timezone,
+    @Schema(format = "date", example = "2026-10-26") String bookableFrom,
+    @Schema(format = "date", example = "2026-11-24") String bookableTo,
     List<Hours> operatingHours,
     List<Service> services,
     List<ClosedDate> closedDates) {
@@ -71,6 +73,7 @@ public record BranchDetailResponse(
    * @param province the province
    * @param postalCode the four-digit postal code
    */
+  @Schema(name = "Address")
   public record Address(
       String line1, String suburb, String city, String province, String postalCode) {}
 
@@ -81,7 +84,11 @@ public record BranchDetailResponse(
    * @param opensAt the opening time, for example {@code 08:00}
    * @param closesAt the closing time, for example {@code 17:00}
    */
-  public record Hours(int weekday, String opensAt, String closesAt) {
+  @Schema(name = "OperatingHours")
+  public record Hours(
+      @Schema(minimum = "1", maximum = "7", example = "1") int weekday,
+      @Schema(pattern = "^[0-2][0-9]:[0-5][0-9]$", example = "08:00") String opensAt,
+      @Schema(pattern = "^[0-2][0-9]:[0-5][0-9]$", example = "17:00") String closesAt) {
 
     static Hours from(OperatingHours hours) {
       return new Hours(
@@ -98,6 +105,7 @@ public record BranchDetailResponse(
    * @param durationMinutes how long the appointment lasts
    * @param documentsNeeded what the customer must bring
    */
+  @Schema(name = "BranchService")
   public record Service(
       String code,
       String name,
@@ -122,7 +130,14 @@ public record BranchDetailResponse(
    * @param reason {@code CLOSED_DAY} or {@code PUBLIC_HOLIDAY}
    * @param name the holiday's name, or {@code null} for a closed day of the week
    */
-  public record ClosedDate(String date, String reason, @Nullable String name) {
+  @Schema(name = "ClosedDate")
+  public record ClosedDate(
+      @Schema(format = "date", example = "2026-12-16") String date,
+      @Schema(allowableValues = {"CLOSED_DAY", "PUBLIC_HOLIDAY"}) String reason,
+      @Schema(
+              types = {"string", "null"},
+              example = "Day of Reconciliation")
+          @Nullable String name) {
 
     static ClosedDate from(ClosedDay closed) {
       return new ClosedDate(closed.date().toString(), closed.reason().name(), closed.holidayName());

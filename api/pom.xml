@@ -52,6 +52,8 @@
     <spotless-maven-plugin.version>3.10.4</spotless-maven-plugin.version>
     <!-- 1.37.0 fails inside Spotless 3.10.4 (its Markdown Javadoc support cannot load), so 1.36.0 is pinned. -->
     <google-java-format.version>1.36.0</google-java-format.version>
+    <!-- Generates the OpenAPI document (docs/openapi.yaml) and Swagger UI; the Spring Boot 4 line. -->
+    <springdoc.version>3.2.0</springdoc.version>
     <!-- Test libraries that the Spring Boot parent does not manage. -->
     <archunit.version>1.5.1</archunit.version>
   </properties>
@@ -90,6 +92,12 @@
       <groupId>org.postgresql</groupId>
       <artifactId>postgresql</artifactId>
       <scope>runtime</scope>
+    </dependency>
+    <!-- The OpenAPI document and Swagger UI, generated from the controllers (ADR-0005). -->
+    <dependency>
+      <groupId>org.springdoc</groupId>
+      <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+      <version>${springdoc.version}</version>
     </dependency>
 
     <!-- Tests -->

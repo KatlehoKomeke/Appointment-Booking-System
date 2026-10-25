@@ -4,3 +4,5 @@ coverage
 package-lock.json
 # Markdown follows the repository-wide documentation style, which Prettier does not apply anywhere else.
 *.md
+# Generated from docs/openapi.yaml by `npm run generate:api`; CI checks it is exactly what the generator writes.
+src/api/schema.d.ts

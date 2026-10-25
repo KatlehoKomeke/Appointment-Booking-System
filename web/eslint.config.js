@@ -21,7 +21,8 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default defineConfig([
-  globalIgnores(['dist', 'coverage']),
+  // schema.d.ts is generated from docs/openapi.yaml (`npm run generate:api`) and never edited by hand.
+  globalIgnores(['dist', 'coverage', 'src/api/schema.d.ts']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [

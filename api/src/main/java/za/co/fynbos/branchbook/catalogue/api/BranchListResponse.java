@@ -1,5 +1,6 @@
 package za.co.fynbos.branchbook.catalogue.api;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 import za.co.fynbos.branchbook.catalogue.application.BranchQueries.BranchSummary;
 
@@ -8,6 +9,7 @@ import za.co.fynbos.branchbook.catalogue.application.BranchQueries.BranchSummary
  *
  * @param branches the active branches, ordered by name
  */
+@Schema(name = "BranchList")
 public record BranchListResponse(List<Branch> branches) {
 
   static BranchListResponse from(List<BranchSummary> summaries) {
@@ -24,6 +26,7 @@ public record BranchListResponse(List<Branch> branches) {
    * @param province the province
    * @param opensSunday whether the branch trades on Sundays
    */
+  @Schema(name = "BranchSummary")
   public record Branch(
       String code, String name, String suburb, String city, String province, boolean opensSunday) {
 
