@@ -4,8 +4,8 @@ The React app customers use to book, look up and cancel branch appointments. In 
 its own: the Dockerfile builds it and places the output inside the Spring Boot jar, which serves the app and the API
 from one origin (see [docs/architecture.md](../docs/architecture.md), section 2).
 
-**Status (M2):** a placeholder page showing the fictional-bank notice, and the typed API client the booking flow
-will use. The booking flow is built in M4.
+**Status (M3):** a placeholder page showing the fictional-bank notice, and the typed API client the booking flow
+will use, which now covers booking and lookup. The booking flow is built in M4.
 
 ## Stack
 

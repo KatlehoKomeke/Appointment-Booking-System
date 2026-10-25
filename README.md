@@ -11,7 +11,7 @@ a simulated SMS confirmation that cannot be lost.
 
 | | |
 |---|---|
-| Stage | Milestone M2 complete: the slot rules and the availability API, on top of M1's schema, catalogue and branch API. The API contract is committed and the web app's types are generated from it. Booking comes next (M3). |
+| Stage | Milestone M3 complete: booking in one transaction that also writes the confirmation SMS, and lookup with the reference and the last four digits, on top of M2's slot rules and availability API. The web app's screens come next (M4), then the dispatcher that delivers the SMS and the race tests (M5). |
 | Design | The whole design is on one [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX), checked against the code at the end of every milestone |
 | Run locally | `make up`, then open http://localhost:8080 |
 | Hosted demo | Optional, in AWS Cape Town, defined in AWS CDK ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)) |
@@ -26,12 +26,12 @@ This README grows with each milestone. Sections marked *planned* describe what i
 
 ## How the brief maps to the system
 
-| Brief | What BranchBook does | Where | Proven by (*planned*) |
+| Brief | What BranchBook does | Where | Proven by (*planned* where marked) |
 |---|---|---|---|
-| for customers | No login. A customer opens an appointment with its reference and the last four digits of the mobile number used to book. | `/manage`, `GET /api/v1/appointments/{reference}` | `AppointmentApiIT.getWithWrongLast4Returns404NotForbidden` |
-| to schedule | A four-step booking flow: branch, service, date, slot. Slots respect trading hours, public holidays, a two-hour lead time, a 30-day horizon and each service's capacity. | `/book`, `POST /api/v1/appointments` | `SlotCalendarTest.excludesSlotsStartingWithinTwoHoursOfNow`, `ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201` |
+| for customers | No login. A customer opens an appointment with its reference and the last four digits of the mobile number used to book. | `/manage`, `GET /api/v1/appointments/{reference}` | `AppointmentApiIT.getWithWrongLast4Returns404NotForbidden`, `AppointmentApiIT.sixthWrongLast4WithinHourReturns429` |
+| to schedule | A four-step booking flow: branch, service, date, slot. Slots respect trading hours, public holidays, a two-hour lead time, a 30-day horizon and each service's capacity. | `/book`, `POST /api/v1/appointments` | `SlotCalendarTest.excludesSlotsStartingWithinTwoHoursOfNow`, `AppointmentApiIT.postWhenSlotFullReturns409WithThreeAlternatives`, `ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201` (*planned*, M5) |
 | branch appointments | Six fictional branches in six provinces, each with its own trading hours and per-service capacity. | Flyway reference data | `SlotCalendarTest.saturdayFortyFiveMinuteLastStartIs1145`, `PublicHolidayCalendarTest.sundayHoliday9Aug2026IsObservedOnMonday10Aug` |
-| communicates a simulated confirmation | The booking transaction writes the SMS to an outbox table. A dispatcher delivers it through a simulated gateway with retries, and the confirmation page shows its status live. | `/appointments/:reference` | `ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically` |
+| communicates a simulated confirmation | The booking transaction writes the SMS to an outbox table. A dispatcher delivers it through a simulated gateway with retries, and the confirmation page shows its status live. | `/appointments/:reference` | `AppointmentApiIT.postReturns201WithLocationReferenceAndPendingNotifications`, `ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically` (*planned*, M5) |
 | front end and back end | A React 19 app served by one Spring Boot jar, over PostgreSQL 17. | `make up` | `book-appointment.spec.ts` (*planned*, M6) |
 
 ## What makes it correct
@@ -41,14 +41,17 @@ This README grows with each milestone. Sections marked *planned* describe what i
   deterministic; a 20-thread test that proves exactly one booking wins is planned for M5
   ([ADR-0002](docs/adr/0002-double-booking-prevention.md)).
 - **Retries are safe.** An `Idempotency-Key` is the first thing the booking transaction records, so a double-click
-  or a mobile-network retry returns the same booking.
-- **The confirmation cannot be lost.** It commits with the booking and is delivered by a background dispatcher
-  with retries. A cancellation supersedes a confirmation that has not been sent
+  or a mobile-network retry returns the same booking, and the same key with other details is refused.
+- **The confirmation cannot be lost.** It commits with the booking, or not at all. A background dispatcher will
+  deliver it with retries (M5), and a cancellation will supersede one that has not been sent
   ([ADR-0003](docs/adr/0003-transactional-outbox-for-confirmations.md)).
+- **A reference cannot be guessed or fished for.** It is eight random characters from an alphabet without
+  look-alikes. Opening an appointment also needs the last four digits of its mobile number, every mismatch is the
+  same 404, and five wrong tries block the reference for an hour.
 - **It is built for South Africa.** It knows public holidays, including the rule that a Sunday holiday moves to
   Monday. Times are stored in UTC and shown in South African Standard Time, and mobile numbers are normalised.
 - **It collects as little as possible.** A name and a mobile number. Logs and error bodies contain no personal
-  data ([SECURITY.md](SECURITY.md)).
+  data, which a test checks against both the application's log and PostgreSQL's ([SECURITY.md](SECURITY.md)).
 
 Every rule, with the test that proves it, is in [docs/domain-rules.md](docs/domain-rules.md).
 
@@ -100,6 +103,8 @@ Recorded when the project was scaffolded (M0). Dependabot proposes updates weekl
 | Java | 25 LTS; Eclipse Temurin 25.0.4.1 in the image | `api/pom.xml`, `Dockerfile` |
 | Spring Boot | 4.1.1, with Spring Framework 7.0.9 and Spring Security 7.1.1 | `api/pom.xml` |
 | Hibernate ORM, Flyway | 7.4.5, 12.4.0 | managed by Spring Boot |
+| libphonenumber | 9.0.41, to tell a mobile number from a landline | `api/pom.xml` |
+| Caffeine | 3.2.4, the bounded cache behind the lookup limit | managed by Spring Boot |
 | PostgreSQL | 17.11; JDBC driver 42.7.13 | `compose.yaml`, `TestcontainersConfiguration` |
 | JUnit, Testcontainers | 6.0.3, 2.0.5 | managed by Spring Boot |
 | ArchUnit | 1.5.1 | `api/pom.xml` |
@@ -155,13 +160,7 @@ curl 'http://localhost:8080/api/v1/branches/RUS/availability?service=HOME&date=2
 
 ```json
 {
-  "branchCode": "RUS",
-  "serviceCode": "HOME",
-  "date": "2026-10-31",
-  "timezone": "Africa/Johannesburg",
-  "generatedAt": "2026-10-25T13:18:55+02:00",
-  "closedReason": null,
-  "holidayName": null,
+  "branchCode": "RUS", "serviceCode": "HOME", "date": "2026-10-31", "closedReason": null,
   "slots": [
     { "startsAt": "2026-10-31T08:00:00+02:00", "endsAt": "2026-10-31T08:45:00+02:00", "seatsAvailable": 2 },
     { "startsAt": "2026-10-31T08:45:00+02:00", "endsAt": "2026-10-31T09:30:00+02:00", "seatsAvailable": 2 },
@@ -172,9 +171,42 @@ curl 'http://localhost:8080/api/v1/branches/RUS/availability?service=HOME&date=2
 }
 ```
 
-Rustenburg closes at 12:00 on Saturdays, so the last 45-minute slot starts at 11:00. Every time carries the
-branch's offset, `+02:00`. Pick a date in the next 30 days; any other is refused with
-`422 DATE_OUTSIDE_BOOKING_WINDOW`. The endpoints and their errors are listed in [api/README.md](api/README.md).
+The answer is shortened. Rustenburg closes at 12:00 on Saturdays, so the last 45-minute slot starts at 11:00. Every
+time carries the branch's offset, `+02:00`, and a date outside the next 30 days is `422 DATE_OUTSIDE_BOOKING_WINDOW`.
+Book a slot with any new UUID as the `Idempotency-Key`, which makes a retry return the same appointment, and one of
+the published demo numbers:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/appointments \
+  -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" \
+  -d '{"branchCode": "SAN", "serviceCode": "FICA", "startsAt": "2026-10-27T09:30:00+02:00",
+       "customer": {"firstName": "Nomvula", "lastName": "Dlamini", "mobile": "082 555 0101"}}'
+```
+
+The answer is `201 Created`, with `Location: /api/v1/appointments/APT-VY4A-WNB7` and, shortened:
+
+```json
+{
+  "reference": "APT-VY4A-WNB7", "status": "CONFIRMED",
+  "startsAt": "2026-10-27T09:30:00+02:00", "endsAt": "2026-10-27T09:45:00+02:00",
+  "customer": { "firstName": "Nomvula", "lastName": "Dlamini", "mobileMasked": "082 *** 0101" },
+  "notifications": [{
+    "channel": "SMS", "kind": "CONFIRMATION", "status": "PENDING", "recipientMasked": "082 *** 0101",
+    "body": "Appt confirmed: FICA update, Sandton Summit, Tue 27 Oct 09:30 SAST. Ref APT-VY4A-WNB7. Bring ID + docs. Manage: http://localhost:8080/manage"
+  }]
+}
+```
+
+The SMS was written in the same transaction as the booking and fits one segment. Open the appointment again with
+its reference and the last four digits of the number:
+
+```bash
+curl http://localhost:8080/api/v1/appointments/APT-VY4A-WNB7 -H 'X-Mobile-Last4: 0101'
+```
+
+The same body comes back. Other digits get the same `404` as a reference that does not exist, and five wrong tries
+block the reference for an hour. Every endpoint and error is in [api/README.md](api/README.md) and
+[docs/errors.md](docs/errors.md).
 
 ### Develop it
 
@@ -233,16 +265,12 @@ the table says otherwise. The six services are a FICA update and a card replacem
 account, a credit consultation and deceased-estate help (30 minutes), and a home loan consultation (45 minutes).
 Each lists the documents to bring.
 
-**Public holidays.** Every branch closes on public holidays.
-
-- The dates in law are seeded for 2026 and 2027
-  ([V4__public_holidays_2026_2027.sql](api/src/main/resources/db/migration/V4__public_holidays_2026_2027.sql)):
-  Schedule 1 of the Public Holidays Act, and 4 November 2026, which the President declared a public holiday for the
-  local government elections.
-- When a holiday falls on a Sunday, the Monday after it is a holiday too (section 2(1) of the Act). These Mondays
-  are derived in code, not stored: 10 August 2026, 22 March 2027 and 27 December 2027. A holiday on a Saturday
-  moves nowhere.
-- Coverage ends on 31 December 2027. Adding 2028 is one new migration, not a code change.
+**Public holidays.** Every branch closes on public holidays. The dates in law for 2026 and 2027 are seeded
+([V4__public_holidays_2026_2027.sql](api/src/main/resources/db/migration/V4__public_holidays_2026_2027.sql)):
+Schedule 1 of the Public Holidays Act, and 4 November 2026, declared for the local government elections. A Sunday
+holiday also closes the Monday after it (section 2(1) of the Act); those Mondays are derived in code: 10 August 2026,
+22 March 2027 and 27 December 2027. A Saturday holiday moves nowhere. Coverage ends on 31 December 2027, and adding
+2028 is one new migration, not a code change.
 
 ## Documentation
 

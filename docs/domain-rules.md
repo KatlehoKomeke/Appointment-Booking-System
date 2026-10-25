@@ -52,9 +52,9 @@ How to read a rule:
 
 **Enforced in.** domain (SlotCalendar.slotsOn lists the grid for availability; SlotCalendar.validate checks a requested start for booking; SlotCalendarTest proves the two agree)
 
-**Proven by.** `SlotCalendarTest.slotsStartAtOpeningAndStepByServiceDuration`, `SlotCalendarTest.validateAgreesWithGeneratedSlotsForEverySeededHoursPatternAndDuration`, `AvailabilityApiIT.weekdayHasThirtySixFifteenMinuteSlotsWithTheBranchsCapacity`
+**Proven by.** `SlotCalendarTest.slotsStartAtOpeningAndStepByServiceDuration`, `SlotCalendarTest.validateAgreesWithGeneratedSlotsForEverySeededHoursPatternAndDuration`, `AvailabilityApiIT.weekdayHasThirtySixFifteenMinuteSlotsWithTheBranchsCapacity`, `AppointmentApiIT.postOffGridStartReturns422SlotOffGrid`
 
-**Status.** Planned for M3, when booking rejects an off-grid start. Built in M2 and proven by the tests above: the grid in `SlotCalendar` and the availability API.
+**Status.** Proven. The grid and availability from M2; booking refuses an off-grid start from M3.
 
 <a id="br-2"></a>
 ## BR-2: Slots fit inside trading hours
@@ -63,9 +63,9 @@ How to read a rule:
 
 **Enforced in.** domain (SlotCalendar.validate) + database constraint (appointments_ends_after_starts: an appointment ends after it starts; trading hours are not known to the constraint)
 
-**Proven by.** `SlotCalendarTest.saturdayFortyFiveMinuteLastStartIs1145`, `SlotCalendarTest.rustenburgSaturdayFortyFiveMinuteLastStartIs1100`, `SlotCalendarTest.onGridStartEndingAfterCloseIsOutsideHours`, `AvailabilityApiIT.rendersStartsAtWithJohannesburgOffset`
+**Proven by.** `SlotCalendarTest.saturdayFortyFiveMinuteLastStartIs1145`, `SlotCalendarTest.rustenburgSaturdayFortyFiveMinuteLastStartIs1100`, `SlotCalendarTest.onGridStartEndingAfterCloseIsOutsideHours`, `AvailabilityApiIT.rendersStartsAtWithJohannesburgOffset`, `AppointmentApiIT.postEndingAfterCloseReturns422SlotOutsideHours`, `AppointmentTest.endsAtIsStartPlusServiceDuration`, `AppointmentApiIT.postWithUnknownJsonFieldReturns400ValidationFailed`
 
-**Status.** Planned for M3, when booking rejects a start outside the hours and computes `ends_at`. Built in M2 and proven by the tests above: the trading hours in `SlotCalendar` and the availability API.
+**Status.** Proven. The hours and availability from M2; from M3, booking refuses a start that ends after closing, computes `ends_at` from the service's duration, and refuses a body that sends one.
 
 <a id="br-3"></a>
 ## BR-3: Closed days and public holidays have no slots
@@ -74,9 +74,9 @@ How to read a rule:
 
 **Enforced in.** domain (SlotCalendar + PublicHolidayCalendar pure function)
 
-**Proven by.** `PublicHolidayCalendarTest.sundayHoliday9Aug2026IsObservedOnMonday10Aug`, `SlotCalendarTest.publicHolidayHasNoSlots`, `SlotCalendarTest.mondayAfterASundayHolidayHasNoSlots`, `SlotCalendarTest.dayOfTheWeekWithoutHoursHasNoSlots`, `SlotCalendarTest.branchOpenOnPublicHolidaysHasItsUsualSlotsOnAHoliday`, `AvailabilityApiIT.publicHolidayReturnsTheHolidaysNameAndNoSlots`, `AvailabilityApiIT.dayWithoutTradingHoursReturnsClosedDayAndNoSlots`, `BranchApiIT.detailListsClosedDatesWithHolidayNames`, `BranchApiIT.dayWithoutTradingHoursIsListedAsAClosedDay`, `HolidayCoverageCheckTest.warnsSixtyDaysBeforeTheWindowPassesTheEndOfTheData`, `HolidayCoverageCheckTest.warnsOnceTheBookingWindowPassesTheLastSeededYear`, `ApplicationStartsIT.holidayCoverageIsCheckedEveryMorning`
+**Proven by.** `PublicHolidayCalendarTest.sundayHoliday9Aug2026IsObservedOnMonday10Aug`, `SlotCalendarTest.publicHolidayHasNoSlots`, `SlotCalendarTest.mondayAfterASundayHolidayHasNoSlots`, `SlotCalendarTest.dayOfTheWeekWithoutHoursHasNoSlots`, `SlotCalendarTest.branchOpenOnPublicHolidaysHasItsUsualSlotsOnAHoliday`, `AvailabilityApiIT.publicHolidayReturnsTheHolidaysNameAndNoSlots`, `AvailabilityApiIT.dayWithoutTradingHoursReturnsClosedDayAndNoSlots`, `BranchApiIT.detailListsClosedDatesWithHolidayNames`, `BranchApiIT.dayWithoutTradingHoursIsListedAsAClosedDay`, `HolidayCoverageCheckTest.warnsSixtyDaysBeforeTheWindowPassesTheEndOfTheData`, `HolidayCoverageCheckTest.warnsOnceTheBookingWindowPassesTheLastSeededYear`, `ApplicationStartsIT.holidayCoverageIsCheckedEveryMorning`, `AppointmentApiIT.postForPublicHolidayReturns422SlotOnClosedDay`
 
-**Status.** Planned for M3, when booking rejects a start on a closed day. Built in M2 and proven by the tests above: closed days and holidays in `SlotCalendar` and the availability API, and the holiday-coverage warning. Built in M1: the holiday calendar and the closed days in `GET /api/v1/branches/{code}`.
+**Status.** Proven. The holiday calendar and the closed days in `GET /api/v1/branches/{code}` from M1; `SlotCalendar`, availability and the holiday-coverage warning from M2; booking refuses a closed day from M3.
 
 <a id="br-4"></a>
 ## BR-4: Two-hour lead time
@@ -85,20 +85,20 @@ How to read a rule:
 
 **Enforced in.** domain (SlotCalendar with injected Clock)
 
-**Proven by.** `SlotCalendarTest.excludesSlotsStartingWithinTwoHoursOfNow`, `SlotCalendarTest.slotStartingExactlyTwoHoursFromNowIsOffered`, `AvailabilityApiIT.todaysSlotsStartAfterTheLeadTime`
+**Proven by.** `SlotCalendarTest.excludesSlotsStartingWithinTwoHoursOfNow`, `SlotCalendarTest.slotStartingExactlyTwoHoursFromNowIsOffered`, `AvailabilityApiIT.todaysSlotsStartAfterTheLeadTime`, `AppointmentApiIT.postWithinLeadTimeReturns422SlotWithinLeadTime`
 
-**Status.** Planned for M3, when booking rejects a stale start. Built in M2 and proven by the tests above: the lead time in `SlotCalendar` and the availability API.
+**Status.** Proven. The lead time in `SlotCalendar` and availability from M2; booking refuses a stale start from M3.
 
 <a id="br-5"></a>
 ## BR-5: Thirty-day booking horizon
 
 **Rule.** Horizon: the slot date must lie in the half-open window [today, today + P30D) in Branch.timezone, i.e. exactly 30 bookable dates (today through today + 29); availability dates or POST starts outside it return 422 DATE_OUTSIDE_BOOKING_WINDOW. The server publishes the window as bookableFrom/bookableTo on GET /branches/{code}, so the date strip never derives 'today' from the device.
 
-**Enforced in.** domain (SlotCalendar, BookingWindow) + application service (AvailabilityQueries date check)
+**Enforced in.** domain (SlotCalendar, BookingWindow) + application service (AvailabilityQueries date check; BookAppointmentHandler step 3)
 
-**Proven by.** `BookingWindowTest.thirtyDayHorizonGivesExactlyThirtyBookableDates`, `SlotCalendarTest.onlyTheThirtyDatesFromTodayHaveSlots`, `BranchApiIT.detailCarriesServerBookableWindow`, `BranchApiIT.windowStartsOnTheBranchsDateNotTheUtcDate`, `AvailabilityApiIT.dateOutsideWindowReturns422`
+**Proven by.** `BookingWindowTest.thirtyDayHorizonGivesExactlyThirtyBookableDates`, `SlotCalendarTest.onlyTheThirtyDatesFromTodayHaveSlots`, `BranchApiIT.detailCarriesServerBookableWindow`, `BranchApiIT.windowStartsOnTheBranchsDateNotTheUtcDate`, `AvailabilityApiIT.dateOutsideWindowReturns422`, `AppointmentApiIT.postOutsideWindowReturns422DateOutsideBookingWindow`
 
-**Status.** Planned for M3, when booking rejects a start outside the window. Built in M2 and proven by the tests above: the window in `SlotCalendar`, published by `GET /api/v1/branches/{code}` and enforced by availability.
+**Status.** Proven. The window in `SlotCalendar`, published by `GET /api/v1/branches/{code}` and enforced by availability from M2; booking refuses a start outside it from M3.
 
 <a id="br-6"></a>
 ## BR-6: Only services the branch offers
@@ -107,9 +107,9 @@ How to read a rule:
 
 **Enforced in.** database constraint (appointments_branch_service_fkey) + application service (BranchCalendarProvider.offerFor, used by AvailabilityQueries from M2 and by BookAppointmentHandler step 2 from M3)
 
-**Proven by.** `AvailabilityApiIT.serviceNotOfferedAtBranchReturns422`
+**Proven by.** `AvailabilityApiIT.serviceNotOfferedAtBranchReturns422`, `AppointmentApiIT.postForServiceNotOfferedReturns422`, `SchemaConstraintIT.rawInsertViolatingEachNamedConstraintIsRejected`
 
-**Status.** Planned for M3, when booking refuses the pair before writing anything. Built in M2 and proven by the test above: availability refuses it. Built in M1: the composite foreign key, proven by `SchemaConstraintIT`.
+**Status.** Proven. The composite foreign key from M1; availability refuses the pair from M2; booking refuses it before writing anything, not even the idempotency key, from M3.
 
 <a id="br-7"></a>
 ## BR-7: Capacity: lowest free seat under a row lock
@@ -120,7 +120,7 @@ How to read a rule:
 
 **Proven by.** `ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201`
 
-**Status.** Planned for M5. Built in M1: the exclusion constraint (BR-8).
+**Status.** Planned for M5, when twenty concurrent requests race for one seat. Built in M1: the exclusion constraint (BR-8). Built in M3: the row lock, the lowest free seat and the three alternatives, which `AppointmentApiIT.postWhenSlotFullReturns409WithThreeAlternatives` proves for requests that arrive one after another.
 
 <a id="br-8"></a>
 ## BR-8: The database rejects a double booking from any code path
@@ -140,9 +140,9 @@ How to read a rule:
 
 **Enforced in.** application service (BookAppointmentHandler steps 4-5) + database constraint (appointments_customer_no_overlap) mapped by ConstraintViolationTranslator
 
-**Proven by.** `BookAppointmentIT.overlappingAppointmentAtAnotherBranchReturns409CustomerOverlap`
+**Proven by.** `BookAppointmentIT.overlappingAppointmentAtAnotherBranchReturns409CustomerOverlap`, `BookAppointmentIT.cancelledCompletedOrNoShowAppointmentBlocksNothing`, `SchemaConstraintIT.rawInsertViolatingEachNamedConstraintIsRejected`, `ConstraintNamesIT.translatorReadsConstraintNameWithServerDetailLoggingOff`
 
-**Status.** Planned for M3. Built in M1: the database backstop, `appointments_customer_no_overlap`, proven by `SchemaConstraintIT`.
+**Status.** Proven. The backstop from M1; the check and the mapping of the backstop to 409 from M3. That the lock makes two simultaneous requests queue is BR-22.
 
 <a id="br-10"></a>
 ## BR-10: One upcoming appointment per service
@@ -151,20 +151,20 @@ How to read a rule:
 
 **Enforced in.** application service (BookAppointmentHandler step 5, under the step 4 pg_advisory_xact_lock)
 
-**Proven by.** `BookAppointmentIT.sameMobileSameServiceSecondBookingReturns409WithoutRevealingReference`
+**Proven by.** `BookAppointmentIT.sameMobileSameServiceSecondBookingReturns409WithoutRevealingReference`, `BookAppointmentIT.cancelledCompletedOrNoShowAppointmentBlocksNothing`, `BookAppointmentIT.pastConfirmedAppointmentDoesNotBlockSameServiceBooking`
 
-**Status.** Planned for M3.
+**Status.** Proven.
 
 <a id="br-11"></a>
 ## BR-11: Unambiguous, unguessable references
 
 **Rule.** Every appointment gets APT-XXXX-XXXX from the 31-character alphabet via SecureRandom, stored uppercase and unique; lookup input is normalised; a collision re-runs the booking transaction once.
 
-**Enforced in.** domain (AppointmentReference) + database constraint (appointments_reference_key)
+**Enforced in.** domain (AppointmentReference, SecureReferenceGenerator) + database constraint (appointments_reference_format, appointments_reference_key) + application service (BookAppointmentHandler re-run)
 
-**Proven by.** `AppointmentReferenceTest.usesOnlyUnambiguousAlphabet`
+**Proven by.** `AppointmentReferenceTest.usesOnlyUnambiguousAlphabet`, `AppointmentReferenceTest.normalisesLowercaseAndMissingHyphensOnLookup`, `SchemaConstraintIT.referenceCheckMatchesAppointmentReferencePattern`, `BookAppointmentIT.referenceCollisionRerunsTransactionOnce`, `BookAppointmentIT.secondReferenceCollisionReturns500AndLeavesNothing`
 
-**Status.** Planned for M3. Built in M1: the reference format and uniqueness constraints.
+**Status.** Proven. A second collision in one booking means the random source is broken, so it is a 500 that writes nothing rather than another re-run.
 
 <a id="br-12"></a>
 ## BR-12: Idempotent booking
@@ -175,18 +175,18 @@ How to read a rule:
 
 **Proven by.** `IdempotencyIT.concurrentSameKey_bookOnceAndBothReceiveSameReference`
 
-**Status.** Planned for M5.
+**Status.** Planned for M5, when two requests with one key arrive together. Built in M3 and proven for requests that arrive one after another: a missing or malformed key is 400 IDEMPOTENCY_KEY_REQUIRED (`AppointmentApiIT.postWithoutIdempotencyKeyReturns400IdempotencyKeyRequired`), a replay (`IdempotencyIT.sameKeySamePayloadReplaysOriginal201`, `IdempotencyIT.sameKeyWithTheNumberAndTimeTypedAnotherWayReplays`), a reused key (`IdempotencyIT.sameKeyDifferentPayloadReturns422`), no key row after a failure (`IdempotencyIT.failedBookingLeavesNoKeyRow`) and the purge (`IdempotencyKeyPurgeJobIT.keyIsHonouredUntilPurgedAfterTwentyFourHoursThenFreeAgain`). The hash is over the parsed request, so the same details typed another way are the same request.
 
 <a id="br-13"></a>
 ## BR-13: Lookup needs the reference and the last four digits
 
-**Rule.** Viewing or cancelling requires the reference plus X-Mobile-Last4; any mismatch, including an unknown reference, is 404 APPOINTMENT_NOT_FOUND (never 403); a missing or malformed header is 400 VALIDATION_FAILED and not counted; five failures per reference per hour give 429 LOOKUP_RATE_LIMITED with Retry-After.
+**Rule.** Viewing or cancelling requires the reference plus X-Mobile-Last4; the reference may be typed in lowercase and without hyphens; any mismatch, including an unknown or malformed reference, is 404 APPOINTMENT_NOT_FOUND (never 403), and the digits are compared in constant time; a missing or malformed header is 400 VALIDATION_FAILED and not counted; five wrong lookups of a reference block it, even for the right digits, with 429 LOOKUP_RATE_LIMITED and Retry-After until an hour after the first. The window opens at the first failure and does not slide.
 
-**Enforced in.** application service (LookupAppointmentHandler + LookupAttemptLimiter, Caffeine, bounded)
+**Enforced in.** application service (LookupAppointmentHandler + LookupAttemptLimiter: in memory, per instance, bounded to 100,000 references; docs/architecture.md, section 4)
 
-**Proven by.** `AppointmentApiIT.getWithWrongLast4Returns404NotForbidden`
+**Proven by.** `AppointmentApiIT.getWithWrongLast4Returns404NotForbidden`, `AppointmentApiIT.getReturnsTheAppointmentWithItsPendingConfirmation`, `AppointmentApiIT.malformedLast4Returns400AndIsNotCounted`, `AppointmentApiIT.sixthWrongLast4WithinHourReturns429`, `LookupAttemptLimiterTest.fifthFailureBlocksTheReferenceUntilAnHourAfterTheFirst`, `LookupAttemptLimiterTest.windowOpensAtTheFirstFailureAndDoesNotSlide`, `LookupAttemptLimiterTest.otherReferencesAreNotAffected`
 
-**Status.** Planned for M3.
+**Status.** Proven for viewing, from M3. Cancelling, which needs the same proof, is BR-14 (Tier 2).
 
 <a id="br-14"></a>
 ## BR-14: Cancellation rules
@@ -219,7 +219,7 @@ How to read a rule:
 
 **Proven by.** `ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically`
 
-**Status.** Planned for M5.
+**Status.** Planned for M5, when the dispatcher shows that delivery never changes an appointment. Built in M3: the PENDING SMS is written in the booking transaction through a port that refuses to run outside one (`NotificationOutboxIT.refusesToWriteOutsideATransaction`), comes back with the booking (`AppointmentApiIT.postReturns201WithLocationReferenceAndPendingNotifications`), and is gone with a booking that fails (`BookAppointmentIT.secondReferenceCollisionReturns500AndLeavesNothing`).
 
 <a id="br-17"></a>
 ## BR-17: Delivery with retries and a final FAILED state
@@ -230,29 +230,29 @@ How to read a rule:
 
 **Proven by.** `NotificationDispatcherIT.retriesWithBackoffThenMarksFailedAfterFiveAttempts`
 
-**Status.** Planned for M5.
+**Status.** Planned for M5. Built in M3: each booking writes its PENDING row with no attempts, due at once (`NotificationOutboxIT.writesOnePendingSmsWithTheBoundInstantAndCorrelationId`).
 
 <a id="br-18"></a>
 ## BR-18: The SMS fits one segment
 
 **Rule.** The confirmation SMS fits one GSM-7 segment (<= 160 septets, GSM-7 charset only) for every seeded branch/service combination and for the configured public base URL (worst case from the column bounds: 87 fixed characters + 18 + 20 + the /manage URL, so the base URL may be at most 28 characters; longer values fail start-up), states service, branch, SAST time, reference and the /manage link, formats day and month names with Locale.ENGLISH, and never contains the full mobile, its last four digits or an ID number. A template regression can never fail a booking: the database bound is a coarse 320-character guard.
 
-**Enforced in.** domain (NotificationTemplates, Gsm7) + start-up check (NotificationProperties calls SmsBudget for the configured base URL) + database constraint (services.sms_name <= 18, branches.sms_name <= 20, GSM-7-safe sms_name CHECKs, notification_messages_sms_len)
+**Enforced in.** domain (NotificationTemplates, Gsm7) + start-up check (NotificationProperties computes NotificationTemplates.longestConfirmationSeptets for the configured base URL) + database constraint (services.sms_name <= 18, branches.sms_name <= 20, GSM-7-safe sms_name CHECKs, notification_messages_sms_len)
 
-**Proven by.** `NotificationTemplatesTest.confirmationFitsOneGsm7SegmentForLongestSeededNames`, `NotificationPropertiesTest.rejectsBaseUrlThatOverflowsSms`, `NotificationTemplatesTest.rendersEnglishDayNamesUnderAnyDefaultLocale`
+**Proven by.** `NotificationTemplatesTest.confirmationFitsOneGsm7SegmentForLongestSeededNames`, `NotificationPropertiesTest.rejectsBaseUrlThatOverflowsSms`, `NotificationTemplatesTest.rendersEnglishDayNamesUnderAnyDefaultLocale`, `NotificationTemplatesTest.rendersThePublishedExampleExactly`, `NotificationTemplatesTest.longestCombinationWithTheLongestAllowedBaseUrlFitsOneSegment`, `AppointmentApiIT.postReturns201WithLocationReferenceAndPendingNotifications`
 
-**Status.** Planned for M3. Built in M1: the GSM-7 checks on short names and the coarse SMS length guard.
+**Status.** Proven. The GSM-7 checks on short names and the coarse length guard from M1; the template and the start-up check from M3.
 
 <a id="br-19"></a>
 ## BR-19: South African mobile numbers, never logged
 
-**Rule.** A South African mobile number is mandatory, accepted in the six documented formats, parsed only when libphonenumber reports MOBILE and the E.164 form matches the schema CHECK pattern, stored only as E.164, displayed 082 555 0101, masked 082 *** 0101 only to a caller who proved the number, redacted 082 *** **** in the inbox and every other surface; logs, MDC, the PostgreSQL log and exception messages carry no name, email, number or masked last four digits.
+**Rule.** A South African mobile number is mandatory, accepted in the six documented formats, parsed only when libphonenumber reports MOBILE and the E.164 form matches the schema CHECK pattern, stored only as E.164, displayed 082 555 0101, masked 082 *** 0101 only to a caller who proved the number, redacted 082 *** **** in the inbox and every other surface; logs, MDC, the PostgreSQL log and exception messages carry no name, email, number or masked last four digits, and log lines name an appointment by its id, never its reference.
 
-**Enforced in.** domain (MobileNumber, CustomerName) + database constraint (customer_mobile CHECK; log_error_verbosity=terse) + driver (pgjdbc logServerErrorDetail=false) + application service (ProblemDetailHandler never echoes input; log events carry messageId, reference, channel only)
+**Enforced in.** domain (MobileNumber, CustomerName; MobileNumber.toString is the redacted form) + database constraint (customer_mobile CHECK; log_error_verbosity=terse, log_min_error_statement=panic) + driver (pgjdbc logServerErrorDetail=false) + configuration (Hibernate's SQL error log off) + application service (ProblemDetailHandler never echoes input and logs failures without their messages; log lines carry appointment ids, codes and constraint names only)
 
-**Proven by.** `MobileNumberTest.sixInputFormatsNormaliseToPlus27825550101`, `LogRedactionTest.bookingLogsContainNoCustomerNameOrMobile`
+**Proven by.** `MobileNumberTest.sixInputFormatsNormaliseToPlus27825550101`, `MobileNumberTest.rejectsLandline021Voip087AndTollFree080`, `MobileNumberTest.rendersDisplayMaskedRedactedAndLastFour`, `MobileNumberTest.toStringNeverShowsTheDigits`, `SchemaConstraintIT.mobileCheckMatchesMobileNumberPattern`, `AppointmentApiIT.postWithLandlineReturns422MobileNumberRequiredFieldError`, `AppointmentApiIT.responsesNeverContainUnmaskedMobile`, `NotificationOutboxIT.summariesMaskTheRecipient`, `LogRedactionIT.bookingLogsContainNoCustomerNameOrMobile`
 
-**Status.** Planned for M3. Built in M1: the mobile number CHECK, terse database error logging and `logServerErrorDetail=false`.
+**Status.** Proven for every surface that exists. The mobile number CHECK and the database and driver settings from M1; parsing, masking and the log proof from M3. The inbox, which shows only the redacted form, arrives in M5.
 
 <a id="br-20"></a>
 ## BR-20: Time is stored in UTC and shown in SAST
@@ -263,7 +263,7 @@ How to read a rule:
 
 **Proven by.** `AvailabilityApiIT.rendersStartsAtWithJohannesburgOffset`, `SlotCalendarTest.producesSameSlotsUnderAnyJvmDefaultZone`, `NativeSqlUsesBoundNowTest.noJavaSqlLiteralCallsNow`
 
-**Status.** Planned for M4, when the web app formats times in SAST. Built in M2 and proven by the tests above: slots computed in the branch's zone from the injected clock, every native statement binding its instants, and the API writing every instant with the +02:00 offset. CI also runs the API's unit and API tests under `TZ=America/New_York`.
+**Status.** Planned for M4, when the web app formats times in SAST. Built in M2 and proven by the tests above: slots computed in the branch's zone from the injected clock, every native statement binding its instants, and the API writing every instant with the +02:00 offset. Built in M3: booking and lookup write `startsAt` and `endsAt` with the offset (`AppointmentApiIT.postReturns201WithLocationReferenceAndPendingNotifications`), and the SMS states the time in SAST. CI also runs the API's unit and API tests under `TZ=America/New_York`.
 
 <a id="br-21"></a>
 ## BR-21: One validation code, fixed precedence
@@ -274,7 +274,7 @@ How to read a rule:
 
 **Proven by.** `SlotCalendarTest.validatePrecedence`
 
-**Status.** Proven.
+**Status.** Proven. From M3, booking reports that one code as the problem's `code` and on `startsAt` in `errors[]`.
 
 <a id="br-22"></a>
 ## BR-22: Bookings by one mobile are serialised
@@ -285,18 +285,18 @@ How to read a rule:
 
 **Proven by.** `ConcurrentBookingIT.sameMobileTwoBranchesOverlappingConcurrentlyGivesOne201AndOne409CustomerOverlap`
 
-**Status.** Planned for M5.
+**Status.** Planned for M5, with the concurrent tests. Built in M3: the advisory lock, the fixed lock order and the one re-run on 40P01 or 40001. The order of the conflicts is proven by `BookAppointmentIT.duplicateIsReportedBeforeOverlap`, and the 503 with `Retry-After: 2` for a lock or statement timeout by `ProblemDetailHandlerTest.transientDatabaseFailureBecomes503WithRetryAfterTwo`.
 
 <a id="br-23"></a>
 ## BR-23: Error bodies never reveal another booking
 
 **Rule.** No problem body reveals another appointment: 409 DUPLICATE_APPOINTMENT and 409 CUSTOMER_OVERLAP carry neither reference nor branch nor time, so a caller who knows only a cellphone number learns no credential. The residual signal (an appointment exists for that number) is an accepted demo risk closed in production by OTP-verified identity (ADR-0004).
 
-**Enforced in.** application service (ProblemDetailHandler, ConstraintViolationTranslator)
+**Enforced in.** application service (each refusal's fixed detail; ProblemDetailHandler, ConstraintViolationTranslator)
 
-**Proven by.** `AppointmentApiIT.noProblemBodyEverContainsAnAppointmentReference`
+**Proven by.** `AppointmentApiIT.noProblemBodyEverContainsAnAppointmentReference`, `AppointmentApiIT.conflict409BodiesNeverContainReferenceOrStartsAt`, `BookAppointmentIT.sameMobileSameServiceSecondBookingReturns409WithoutRevealingReference`
 
-**Status.** Planned for M3.
+**Status.** Proven, for booking and lookup.
 
 <a id="br-24"></a>
 ## BR-24: No confirmation after a cancellation
@@ -316,6 +316,6 @@ How to read a rule:
 
 **Enforced in.** application service (BookAppointmentHandler step 5: ends_at > :now) + domain (Appointment.canCancel(now))
 
-**Proven by.** `BookAppointmentIT.pastConfirmedAppointmentDoesNotBlockSameServiceBooking`
+**Proven by.** `BookAppointmentIT.pastConfirmedAppointmentDoesNotBlockSameServiceBooking`, `AppointmentTest.canCancelOnlyBeforeTheStart`
 
-**Status.** Planned for M3.
+**Status.** Proven. The response's `canCancel` comes from `Appointment.canCancel(now)`; the cancel endpoint and its 409 TOO_LATE_TO_CANCEL are BR-14 (Tier 2).

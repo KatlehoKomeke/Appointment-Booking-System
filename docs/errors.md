@@ -52,15 +52,61 @@ One request yields exactly one code:
 - **Availability:** a malformed parameter is `400 VALIDATION_FAILED`; then the branch must exist
   (`404 BRANCH_NOT_FOUND`), offer the service (`422 SERVICE_NOT_OFFERED_AT_BRANCH`) and have the date in its window
   (`422 DATE_OUTSIDE_BOOKING_WINDOW`). A closed day is not an error: it is a `200` with `closedReason` and no slots.
+- **Booking** (`POST /api/v1/appointments`), in this order, so a request that is wrong in several ways gets the
+  first:
+  1. `400 VALIDATION_FAILED`: the body is malformed, has a field the request does not define, or breaks a field
+     rule. Every field problem is listed in `errors[]` at once.
+  2. `400 IDEMPOTENCY_KEY_REQUIRED`: the `Idempotency-Key` header is missing or not a UUID.
+  3. `422 MOBILE_NUMBER_REQUIRED`: the number is missing or not a South African mobile number.
+  4. `422 IDEMPOTENCY_KEY_REUSED`, or a replay of the key's booking. Nothing after this step runs for a replay.
+  5. `404 BRANCH_NOT_FOUND`, then `422 SERVICE_NOT_OFFERED_AT_BRANCH`.
+  6. The one slot code, by the precedence above.
+  7. The 409 conflicts, by the precedence above.
+  8. `503 TRY_AGAIN` or `500 INTERNAL_ERROR`, which can happen at any step that reaches the database.
+
+  Steps 1 to 3 write nothing. A refusal from step 4 onwards rolls the whole transaction back, the idempotency key's
+  row included, so the same key can be sent again with corrected details.
+- **Lookup** (`GET /api/v1/appointments/{reference}`): a missing or malformed `X-Mobile-Last4` is
+  `400 VALIDATION_FAILED` and is not counted; then a blocked reference is `429 LOOKUP_RATE_LIMITED`, even with the
+  right digits; then any mismatch is `404 APPOINTMENT_NOT_FOUND` and is counted. A reference that cannot be a
+  reference at all is a `404` and is not counted, because it can never become a match.
+
+## Field codes
+
+Each item of `errors[]` names the field as the client sent it: a JSON path such as `customer.firstName`, or a header
+name such as `X-Mobile-Last4`. Its `code` is one of these:
+
+| Code | Field | Meaning |
+|---|---|---|
+| `REQUIRED` | a header or query parameter | It is missing. |
+| `NOT_NULL` | a body field | It is missing or `null`. |
+| `NOT_BLANK` | `customer.firstName`, `customer.lastName` | It is missing or only spaces. |
+| `PATTERN` | `branchCode`, `serviceCode`, `X-Mobile-Last4` | It has the wrong shape: 2 to 8 letters, 2 to 12 letters, four digits. |
+| `NAME_INVALID` | `customer.firstName`, `customer.lastName` | Not a name: 1 to 60 characters that start with a letter and hold only letters, spaces, hyphens and apostrophes. |
+| `OFFSET_REQUIRED` | `startsAt` | Not an ISO-8601 date and time with an offset, such as `2026-10-27T09:30:00+02:00`. |
+| `UNKNOWN_FIELD` | the unknown field, or `(body)` | The request does not define it, such as `endsAt`, which the server computes. Only the first is reported. |
+| `TYPE_MISMATCH` | a query parameter | It cannot be read as its type, such as a date. |
+| `MOBILE_NUMBER_REQUIRED` | `customer.mobile` | The same as the problem's code. |
+| a slot code | `startsAt` | The same as the problem's code: `SLOT_OFF_GRID`, for example. |
+
+A field problem's `message` is a short English hint, such as "must be 4 digits"; it never quotes the value sent.
+
+## Retry-After
+
+| Status | Seconds | When |
+|---|---|---|
+| `429 LOOKUP_RATE_LIMITED` | Up to 3600 | The seconds left until an hour after the reference's first wrong lookup, rounded up. |
+| `503 TRY_AGAIN` | 2 | A lock not granted within 2 s, a statement over 5 s, or a deadlock or serialisation failure that happened again after the one automatic re-run. |
+| `503 TRY_AGAIN` | 5 | No database connection within 3 s, or any other temporary failure. |
 
 ## Codes
 
 | Code | HTTP | When it happens | What the customer sees |
 |---|---|---|---|
-| `VALIDATION_FAILED` | 400 | The request is malformed: a missing or badly shaped field, unknown JSON property, a `startsAt` without an offset, or a malformed `X-Mobile-Last4` header. | Inline messages on the fields named in `errors[]`. |
+| `VALIDATION_FAILED` | 400 | The request is malformed: a missing or badly shaped field, unknown JSON property, a `startsAt` without an offset, or a missing or malformed `X-Mobile-Last4` header. | Inline messages on the fields named in `errors[]`. |
 | `IDEMPOTENCY_KEY_REQUIRED` | 400 | `POST /api/v1/appointments` arrived without an `Idempotency-Key` header holding a UUID. | Nothing; the web app always sends one. |
 | `BRANCH_NOT_FOUND` | 404 | The branch code is unknown or the branch is inactive. | "We couldn't find that branch." |
-| `APPOINTMENT_NOT_FOUND` | 404 | The reference is unknown **or** the last four digits are wrong. Both cases return the same body and timing, so the API cannot be used to discover references. | "We couldn't find an appointment with those details." |
+| `APPOINTMENT_NOT_FOUND` | 404 | The reference is unknown or malformed, **or** the last four digits are wrong. Every case returns the same body, the digits are compared in constant time, and the answer is never `403`, so the API cannot be used to discover references. | "We couldn't find an appointment with those details." |
 | `MESSAGE_NOT_FOUND` | 404 | Retry of a simulated message id that does not exist (Tier 2 retry endpoint, local profiles only). | Not shown to customers. |
 | `SERVICE_NOT_OFFERED_AT_BRANCH` | 422 | The branch does not offer the requested service, or no active service has that code. | "This branch doesn't offer that service." |
 | `DATE_OUTSIDE_BOOKING_WINDOW` | 422 | The date is outside the 30 bookable days, `[today, today + 30 days)` in the branch's time zone. | The date is not selectable. |
@@ -68,14 +114,14 @@ One request yields exactly one code:
 | `SLOT_OUTSIDE_HOURS` | 422 | The slot would start before opening or end after closing. | The slot is not offered. |
 | `SLOT_OFF_GRID` | 422 | The start time is not on the service's slot grid. | The slot is not offered. |
 | `SLOT_WITHIN_LEAD_TIME` | 422 | The slot starts less than two hours from now; usually a page left open too long. | "That time is too soon. Please choose a later slot." |
-| `MOBILE_NUMBER_REQUIRED` | 422 | The number is not a South African mobile number (for example a landline or a VoIP number). | "We need a cellphone number to SMS your confirmation." |
+| `MOBILE_NUMBER_REQUIRED` | 422 | The number is missing or not a South African mobile number (for example a landline or a VoIP number). `errors[]` names `customer.mobile`. | "We need a cellphone number to SMS your confirmation." |
 | `IDEMPOTENCY_KEY_REUSED` | 422 | The same `Idempotency-Key` was sent with a different request body. | Nothing; the web app mints a new key when the details change. |
 | `DUPLICATE_APPOINTMENT` | 409 | This mobile already has an upcoming appointment for this service. The body names no reference, branch or time. | "You already have an upcoming appointment for this service." |
 | `CUSTOMER_OVERLAP` | 409 | This mobile already has an appointment at an overlapping time, at any branch. | "You already have an appointment at that time." |
 | `SLOT_FULL` | 409 | The last seat was taken while the customer was filling in their details. Carries up to three `alternatives[]`. | "That time was just taken", with the alternatives and the details kept. |
 | `TOO_LATE_TO_CANCEL` | 409 | Cancellation was requested at or after the appointment's start time. | "This appointment has already started." |
-| `LOOKUP_RATE_LIMITED` | 429 | Five wrong lookups for one reference within an hour. Carries `Retry-After`. | "Too many attempts. Try again later." |
-| `INTERNAL_ERROR` | 500 | An unexpected failure. Only the correlation id is returned. | A generic error with the correlation id to quote. |
+| `LOOKUP_RATE_LIMITED` | 429 | Five wrong lookups of one reference block it, even for the right digits, until an hour after the first. Carries `Retry-After`. | "Too many attempts. Try again later." |
+| `INTERNAL_ERROR` | 500 | An unexpected failure, such as a second reference collision in one booking. Only the correlation id is returned. | A generic error with the correlation id to quote. |
 | `TRY_AGAIN` | 503 | A lock or statement timeout, a deadlock after one automatic retry, no database connection, or any other temporary failure. Always carries `Retry-After`. | The web app retries once with the same idempotency key, then asks the customer to try again. |
 
 Not in v1: `413 PAYLOAD_TOO_LARGE`. Request-body size limits belong to the gateway or WAF in front of the

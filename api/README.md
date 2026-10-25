@@ -4,9 +4,11 @@ The Spring Boot application at the heart of BranchBook. It serves the booking AP
 dispatcher, and serves the React app from [web/](../web/README.md) on the same origin. How it is structured and why
 is in [docs/architecture.md](../docs/architecture.md).
 
-**Status (M2):** the schema, the seeded catalogue, the branch API and availability. The application starts,
-migrates PostgreSQL, answers its health probes, serves the app, lists branches with their bookable dates and lists
-each day's slots with the seats left. It publishes its OpenAPI contract. Booking arrives in M3.
+**Status (M3):** the schema, the seeded catalogue, the branch API, availability, booking and lookup. The
+application starts, migrates PostgreSQL, answers its health probes, serves the app, lists branches with their
+bookable dates and each day's slots with the seats left, books an appointment with its confirmation SMS in one
+transaction, and opens it again with its reference and the last four digits. It publishes its OpenAPI contract. The
+dispatcher that delivers the SMS arrives in M5.
 
 ## Prerequisites
 
@@ -39,6 +41,7 @@ Run these from `api/`, or use the `make` targets in the repository root:
 | Architecture | `ArchitectureTest` (ArchUnit) | A module cycle appears, a domain class imports Spring, a controller reaches the infrastructure layer, or a class outside the application layer declares a transaction. |
 | Error catalogue | `ProblemCodeCatalogueTest` | `ProblemCode` and [docs/errors.md](../docs/errors.md) disagree. |
 | API contract | `OpenApiContractIT` | The OpenAPI document the API generates differs from [docs/openapi.yaml](../docs/openapi.yaml), or a parameter pattern is not anchored. |
+| Log hygiene | `LogRedactionIT`, `LogHygieneIT` | A customer's name, number or reference reaches the application's log or PostgreSQL's, in any form (BR-19). |
 | Database clock | `NativeSqlUsesBoundNowTest` | A SQL string in the main code reads the database's clock (`now()`, `CURRENT_TIMESTAMP` and the like) instead of binding the instant from the injected `Clock` (BR-20). |
 | Formatting | Spotless with google-java-format 1.36.0 | A file is not formatted. Version 1.37.0 fails inside Spotless 3.10.4, so 1.36.0 is pinned. |
 | JDK version | Maven Enforcer | The JDK is older than 25. |
@@ -59,6 +62,11 @@ Integration tests are annotated `@IntegrationTest` (in `support/`). It starts th
 `MutableClock` that tests set, so rules about dates and times are tested at fixed moments. Every integration test
 uses the same configuration, so Spring builds the context once and one container serves the whole run.
 
+Tests that book through the API add `@ExtendWith(DatabaseReset.class)`, which empties the booking tables before
+and after each test and forgets the lookup counts. `Bookings` builds request bodies and sends bookings and lookups,
+and `ScriptedReferenceGenerator`, which replaces the random generator in every integration test, hands out the
+references a test scripts first, so a test can force a reference collision.
+
 The schema is proven directly: `SchemaConstraintIT` runs raw SQL that bypasses the application and shows that each of
 the 54 named constraints (8 primary keys, 3 unique, 35 checks, 6 foreign keys and 2 exclusion constraints)
 rejects what it should, and fails if a constraint is added without a case. It also shows that rows the rules allow
@@ -74,9 +82,10 @@ environment supplies the rest:
 | `DB_URL` | JDBC URL of the PostgreSQL database | `compose.yaml` locally; the ECS task definition in AWS |
 | `DB_USER`, `DB_PASSWORD` | Database credentials | `compose.yaml` locally; AWS Secrets Manager in AWS |
 | `PORT` | HTTP port, 8080 by default | Optional |
+| `PUBLIC_BASE_URL` | The address customers reach the app at, which ends the confirmation SMS's `/manage` link. At most 28 characters with no trailing slash, so the longest SMS fits one segment; a longer value stops start-up. `http://localhost:8080` by default. | `compose.yaml` locally (it follows `APP_PORT`); the ECS task definition in AWS |
 
-The booking rules that are settings rather than code (the two-hour lead time and the thirty-day horizon) are under
-`branchbook.booking` in application.yml.
+The booking rules that are settings rather than code are under `branchbook.booking` in application.yml: the
+two-hour lead time, the thirty-day horizon, and the lookup limit of five wrong tries per reference in an hour.
 
 There are no defaults for the database variables. If one is missing, startup fails (Hikari reports that the `url`
 must start with `jdbc`) instead of connecting to a database nobody configured.
@@ -88,6 +97,8 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 | `GET /api/v1/branches` | The active branches, ordered by name |
 | `GET /api/v1/branches/{code}` | One branch: address, hours, services, the bookable window and the closed days in it |
 | `GET /api/v1/branches/{code}/availability?service=&date=` | One day's slots for one service at one branch, each with the seats left, or why the branch is closed that day |
+| `POST /api/v1/appointments` | Book a slot, with an `Idempotency-Key`. `201` with the appointment, its `Location` and its PENDING SMS |
+| `GET /api/v1/appointments/{reference}` | Open an appointment again, with `X-Mobile-Last4` |
 | `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml) |
 | `/swagger-ui.html` | Swagger UI, to read and try the API |
 | `/` and the app's routes (`/book`, `/manage`, `/messages`, `/privacy`, `/appointments/{reference}`) | The React app |
@@ -149,6 +160,22 @@ How slots are made ([docs/domain-rules.md](../docs/domain-rules.md), BR-1 to BR-
 The checks run in a fixed order: the branch must exist (404), offer the service (422
 `SERVICE_NOT_OFFERED_AT_BRANCH`) and have the date in its window (422 `DATE_OUTSIDE_BOOKING_WINDOW`).
 
+How a booking is decided ([docs/architecture.md](../docs/architecture.md), section 4):
+
+- One `READ COMMITTED` transaction runs ten steps: claim the idempotency key, load the branch and service, check
+  the slot, lock the customer's number, refuse a duplicate and then an overlap, lock the service's seats, take the
+  lowest free seat, insert the appointment, write the SMS, complete the key. A refusal rolls all of it back.
+- The same key with the same details returns the first booking with `Idempotent-Replayed: true`; with other details
+  it is `422 IDEMPOTENCY_KEY_REUSED`. The details are compared after parsing, so `0825550101` and `082 555 0101` are
+  the same request.
+- A reference collision, a deadlock or a serialisation failure runs the transaction once more. A lock not granted
+  in 2 seconds is `503 TRY_AGAIN` with `Retry-After: 2`.
+- A full slot is `409 SLOT_FULL` with up to three free slots later that day, found after the rollback.
+
+Opening an appointment needs its reference, in any case and with or without hyphens, and the last four digits of
+the number. Every mismatch is the same `404`, and five wrong tries block the reference, right digits included, until
+an hour after the first (`429` with `Retry-After`).
+
 Every error is an RFC 9457 problem with a stable `code` ([docs/errors.md](../docs/errors.md)). Its `instance` names
 the occurrence, never the request path, and an unexpected exception is logged with its type and stack frames but
 not its message, which could quote personal data:
@@ -198,9 +225,15 @@ api/
     │   │   ├── api/                     the availability endpoint
     │   │   ├── application/             the availability query; the port to read booked seats
     │   │   └── domain/                  plain Java: SlotCalendar, Slot, BookedInterval
-    │   ├── booking/
-    │   │   ├── domain/                  the Appointment entity and its lifecycle
-    │   │   └── infrastructure/          SQL reads of the seats appointments hold, for scheduling
+    │   ├── booking/                     appointments: booking and lookup
+    │   │   ├── api/                     the appointment endpoints and their request and response records
+    │   │   ├── application/             the booking transaction, lookup, the limiter, and the ports it declares
+    │   │   ├── domain/                  plain Java: Appointment, MobileNumber, CustomerName, AppointmentReference
+    │   │   └── infrastructure/          JPA and SQL adapters, the constraint translator, the key purge
+    │   ├── notification/                the confirmation SMS
+    │   │   ├── application/             the outbox writer and the message read, implementing booking's ports
+    │   │   ├── domain/                  plain Java: NotificationTemplates, Gsm7
+    │   │   └── infrastructure/          SQL for notification_messages
     │   └── shared/                      cross-cutting concerns
     │       ├── problem/                 RFC 9457 error responses
     │       ├── correlation/             correlation ids
@@ -212,5 +245,5 @@ api/
     │   ├── application.yml              configuration, one comment per property
     │   └── db/migration/                Flyway migrations V1 to V4, one header comment each
     └── test/java/za/co/fynbos/branchbook/
-        └── support/                     @IntegrationTest, MutableClock, the database container
+        └── support/                     @IntegrationTest, MutableClock, DatabaseReset, Bookings, the container
 ```

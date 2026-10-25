@@ -14,7 +14,7 @@ relevant and not excessive for its purpose (section 10).
 - **No customer accounts.** An appointment is opened with its reference, eight characters from a 31-symbol
   alphabet, plus the last four digits of the booking mobile in the `X-Mobile-Last4` header.
 - **No enumeration.** An unknown reference and wrong digits return the same `404 APPOINTMENT_NOT_FOUND`, and five
-  failures for one reference within an hour return `429`.
+  wrong lookups of one reference block it for an hour from the first with `429`.
 - **Collect only what booking needs:** first name, last name and a South African mobile number. Email arrives
   only with the optional Tier 3 email channel. No South African ID number is collected.
 - **No staff endpoints.** The full lifecycle (`CONFIRMED`, `CHECKED_IN`, `COMPLETED`, `CANCELLED`, `NO_SHOW`) is
@@ -32,4 +32,11 @@ relevant and not excessive for its purpose (section 10).
 - Anyone can book with any South African mobile number, so SMS pumping and slot squatting are open risks. They are
   documented, with the production controls: OTP verification, per-recipient caps and CAPTCHA.
 - Production would bind appointments to a verified customer through the bank's identity provider.
+- A mobile number alone opens nothing, but it is not secret either. Someone who books with another person's number
+  learns from `409 DUPLICATE_APPOINTMENT` or `409 CUSTOMER_OVERLAP` that an appointment exists for it, though never
+  its reference, branch or time ([BR-23](../domain-rules.md#br-23)). This is accepted for the demo; OTP
+  verification closes it.
+- Someone who knows a reference can block its lookup for an hour with five wrong tries. A reference appears only
+  in the customer's own SMS and pages, so this is accepted too. The limit's counts are kept in memory for one
+  instance ([docs/architecture.md](../architecture.md), section 4).
 - Branch check-in is the natural next feature, and its domain logic already exists.

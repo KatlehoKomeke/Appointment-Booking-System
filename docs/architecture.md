@@ -4,11 +4,13 @@ This document explains how BranchBook is built and why. The decisions behind it 
 [docs/adr](adr/README.md); the business rules are in [domain-rules.md](domain-rules.md). The whole design,
 including the parts not built yet, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX).
 
-**Status: design complete; milestones M0 to M2 are built.** M0 is the skeleton: one jar that serves the app,
+**Status: design complete; milestones M0 to M3 are built.** M0 is the skeleton: one jar that serves the app,
 PostgreSQL 17 migrated by Flyway, health probes and security headers. M1 adds the whole schema, the seeded
 catalogue, the `catalogue` module with the public-holiday rule, and the shared error and correlation-id handling. M2
 adds the `scheduling` module (`SlotCalendar` and the availability API) and the committed OpenAPI contract that the
-web app's types are generated from. The other modules arrive milestone by milestone. Diagrams use Mermaid, which GitHub renders in place.
+web app's types are generated from. M3 adds the `booking` module's transaction and lookup, and the part of
+`notification` that writes and reads the confirmation SMS. The web app's screens arrive in M4, and the dispatcher
+that delivers the SMS in M5. Diagrams use Mermaid, which GitHub renders in place.
 
 ## 1. What the system does
 
@@ -51,7 +53,6 @@ The back end is a modular monolith ([ADR-0001](adr/0001-modular-monolith.md)), p
 ```mermaid
 flowchart LR
     notification --> booking
-    notification --> catalogue
     booking --> scheduling
     booking --> catalogue
     scheduling --> catalogue
@@ -65,8 +66,8 @@ flowchart LR
 |---|---|
 | `catalogue` | Branches, services, weekday trading hours, capacities and public holidays. Read-only at runtime; seeded by Flyway. |
 | `scheduling` | `SlotCalendar`, a pure function that computes and validates slots in the branch's time zone, and the availability query. It learns which seats are taken through the `BookedIntervalsPort`, which `booking` implements, so it never reads the appointments table itself. |
-| `booking` | The `Appointment` aggregate, the booking transaction, idempotency, lookup and cancellation. |
-| `notification` | The outbox, message templates, the dispatcher and the gateway port. |
+| `booking` | The `Appointment` aggregate, the booking transaction, idempotency and lookup; cancellation in Tier 2. |
+| `notification` | The outbox writer, the message templates and the read of an appointment's messages; the dispatcher and the gateway port in M5. It reads nothing from `catalogue`: the booking hands it the branch's and the service's short names with the appointment. |
 | `shared` | Problem responses, correlation ids, security headers, the clock and configuration. |
 
 Inside every module the layers are `api` (HTTP only), `application` (use cases; the only layer that opens
@@ -109,6 +110,38 @@ sequenceDiagram
   same key returns the same booking ([BR-12](domain-rules.md#br-12)).
 - **Failures roll back together.** If any step fails, everything rolls back, including the idempotency row, so a
   retry starts clean.
+- **One re-run, then an answer.** A reference collision, a deadlock (`40P01`) or a serialisation failure (`40001`)
+  runs the whole transaction once more with a new reference. A second conflict is `503 TRY_AGAIN` with
+  `Retry-After: 2`; a second collision means the random source is broken, so it is a `500`. Every session gives up
+  on a lock after 2 seconds and on a statement after 5, which is also a `503`.
+- **Constraints are recognised by name.** `ConstraintViolationTranslator` reads the SQLSTATE and the constraint's
+  name from the driver, never the message, and turns the backstops into the same answers as the checks: a
+  customer overlap into `409 CUSTOMER_OVERLAP`, a taken reference into a re-run. The driver is configured to leave
+  the conflicting values out of its messages, and Hibernate's own SQL error log is off.
+- **Alternatives come after the rollback.** `SLOT_FULL` offers the next three free slots that day, searched once
+  the transaction has rolled back, so the search holds no lock and sees every booking that committed.
+
+### Lookup
+
+`GET /api/v1/appointments/{reference}` with `X-Mobile-Last4` opens an appointment again
+([BR-13](domain-rules.md#br-13)). An unknown reference, a malformed one and a right one with the wrong digits all
+get the same `404`, and the digits are compared in constant time. `LookupAttemptLimiter` counts wrong lookups per
+reference in a window that opens at the first and lasts an hour; the fifth blocks the reference, right digits
+included, until the window closes. Blocking logs one warning that names no reference.
+
+The counts live in memory, in a Caffeine cache bounded to 100,000 references. That is a deliberate trade-off for
+one instance, with three consequences:
+
+- **They are per instance.** With several instances each would allow five tries; scaling out would move the
+  counts to a shared table or cache. The hosted demo runs one task.
+- **A restart forgets them.** At worst an attacker gets five more tries per restart, out of 10,000 combinations.
+- **The bound could be flooded.** Evicting one reference's window would take failed lookups of about 100,000
+  others, and Caffeine prefers to keep entries that are used often. A per-address limit at the edge, such as the
+  web application firewall planned for the hosted demo, would close it.
+
+Because the window is per reference, someone who knows a reference can block its lookup for an hour. A reference
+is printed only in the customer's own SMS and pages, and production would bind appointments to a verified identity
+instead ([ADR-0004](adr/0004-restraint-no-login-no-id-number.md)).
 
 ## 5. The simulated confirmation
 
@@ -219,8 +252,9 @@ BranchBook stores a first name, a last name and a South African mobile number, n
 never shown: a caller who has just proved the last four digits sees `082 *** 0101`; everyone else, including the
 simulated inbox, sees `082 *** ****`. Logs, metrics and error bodies carry no personal data. Error bodies never
 quote the request, and unexpected exceptions are logged with their types and stack frames but not their messages,
-which can quote a name or a number. `LogRedactionTest` will check every log of a real booking (M3). See
-[SECURITY.md](../SECURITY.md).
+which can quote a name or a number. Log lines name an appointment by its id, never by its reference.
+`LogRedactionIT` takes one customer through every outcome of a booking and a lookup and checks both the
+application's log and PostgreSQL's for their name, number and reference. See [SECURITY.md](../SECURITY.md).
 
 ## 10. Deployment
 
