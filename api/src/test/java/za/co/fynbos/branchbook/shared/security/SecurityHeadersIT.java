@@ -56,6 +56,24 @@ class SecurityHeadersIT {
         .doesNotContain("script-src");
   }
 
+  /**
+   * There is no CORS configuration: the app and the API share one origin. A preflight from another
+   * origin is answered as a plain OPTIONS request, with no {@code Access-Control-Allow-*} header,
+   * so a browser refuses to let any other site read the API through the visitor's browser.
+   */
+  @Test
+  void corsPreflightFromForeignOriginIsNotAllowed() {
+    assertThat(
+            mvc.options()
+                .uri("/api/v1/branches")
+                .header("Origin", "https://elsewhere.example")
+                .header("Access-Control-Request-Method", "GET"))
+        .headers()
+        .doesNotContainHeader("Access-Control-Allow-Origin")
+        .doesNotContainHeader("Access-Control-Allow-Methods")
+        .doesNotContainHeader("Access-Control-Allow-Credentials");
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {"/actuator/env", "/actuator/beans", "/actuator/heapdump"})
   void operationalEndpointsBeyondHealthAndInfoAreClosed(String path) {
