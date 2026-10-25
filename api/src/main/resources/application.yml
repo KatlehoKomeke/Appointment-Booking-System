@@ -64,6 +64,11 @@ branchbook:
     lead-time: PT2H
     # Thirty bookable dates: today and the next 29 days, in the branch's time zone (BR-5).
     horizon: P30D
+  notification:
+    # The address customers reach the app at, which ends the confirmation SMS's link to /manage. At most 28
+    # characters with no trailing slash, so the longest confirmation fits one SMS; a longer value stops start-up
+    # (BR-18). docker compose sets it to the published port.
+    public-base-url: ${PUBLIC_BASE_URL:http://localhost:8080}
 
 logging:
   pattern:
