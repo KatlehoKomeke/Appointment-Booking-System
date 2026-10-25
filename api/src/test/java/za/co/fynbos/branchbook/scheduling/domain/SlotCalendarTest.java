@@ -307,6 +307,25 @@ class SlotCalendarTest {
   }
 
   /**
+   * BR-7: when 09:00 fills up, the alternatives are the next free slots that day, skipping full
+   * ones; near closing there are fewer than three, and never one on the next day.
+   */
+  @Test
+  void nextFreeSlotsSkipFullSlotsAndStayOnTheSameDay() {
+    SlotCalendar calendar = calendar(standardBranch(), offer(15, 1));
+    List<BookedInterval> booked =
+        List.of(
+            new BookedInterval(1, at(TUESDAY, "09:15"), at(TUESDAY, "09:30")),
+            new BookedInterval(1, at(TUESDAY, "09:45"), at(TUESDAY, "10:00")));
+
+    assertThat(startTimes(calendar.freeSlotsAfter(at(TUESDAY, "09:00"), booked, 3)))
+        .containsExactly("09:30", "10:00", "10:15");
+    assertThat(startTimes(calendar.freeSlotsAfter(at(TUESDAY, "16:30"), booked, 3)))
+        .containsExactly("16:45");
+    assertThat(calendar.freeSlotsAfter(at(TUESDAY, "16:45"), booked, 3)).isEmpty();
+  }
+
+  /**
    * BR-20: the hours are read in the branch's zone, never the JVM's. New York leaves daylight
    * saving on Sunday 1 November 2026, the day before the date asked for.
    */

@@ -104,6 +104,23 @@ public final class SlotCalendar {
   }
 
   /**
+   * Lists the slots after a start, on the same date, that still have a free seat: the alternatives
+   * offered when the requested slot has just filled up (BR-7). Slots within the lead time are left
+   * out, as in {@link #slotsOn}.
+   *
+   * @param startsAt the requested start; only later slots of its date in the branch's zone count
+   * @param booked the intervals that active appointments of this service at this branch hold
+   * @param limit the most slots to return
+   * @return the free slots in time order, at most {@code limit}; empty when none is left that day
+   */
+  public List<Slot> freeSlotsAfter(Instant startsAt, Collection<BookedInterval> booked, int limit) {
+    return slotsOn(LocalDate.ofInstant(startsAt, zone), booked).stream()
+        .filter(slot -> slot.startsAt().isAfter(startsAt) && slot.seatsAvailable() > 0)
+        .limit(limit)
+        .toList();
+  }
+
+  /**
    * Checks that a requested start is one of the slots, ignoring whether a seat is free.
    *
    * @param startsAt the requested start

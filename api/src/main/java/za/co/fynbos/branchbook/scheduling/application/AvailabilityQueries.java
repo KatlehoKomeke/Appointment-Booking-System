@@ -3,7 +3,6 @@ package za.co.fynbos.branchbook.scheduling.application;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneId;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Optional;
@@ -15,7 +14,6 @@ import za.co.fynbos.branchbook.catalogue.domain.Branch;
 import za.co.fynbos.branchbook.catalogue.domain.BranchCalendar;
 import za.co.fynbos.branchbook.catalogue.domain.ClosedDay;
 import za.co.fynbos.branchbook.catalogue.domain.ServiceOffer;
-import za.co.fynbos.branchbook.scheduling.domain.BookedInterval;
 import za.co.fynbos.branchbook.scheduling.domain.Slot;
 import za.co.fynbos.branchbook.scheduling.domain.SlotCalendar;
 import za.co.fynbos.branchbook.shared.config.BookingProperties;
@@ -72,18 +70,14 @@ public class AvailabilityQueries {
     }
     Optional<ClosedDay> closure = calendar.closure(date);
     List<Slot> daySlots =
-        closure.isPresent() ? List.of() : slots.slotsOn(date, bookedOn(date, branch, service));
+        closure.isPresent()
+            ? List.<Slot>of()
+            : slots.slotsOn(
+                date,
+                bookedIntervals.activeOn(
+                    branch.id(), service.serviceId(), date, branch.timezone()));
     return new DayAvailability(
         branch, service, date, now.truncatedTo(ChronoUnit.SECONDS), closure.orElse(null), daySlots);
-  }
-
-  private List<BookedInterval> bookedOn(LocalDate date, Branch branch, ServiceOffer service) {
-    ZoneId zone = branch.timezone();
-    return bookedIntervals.activeBetween(
-        branch.id(),
-        service.serviceId(),
-        date.atStartOfDay(zone).toInstant(),
-        date.plusDays(1).atStartOfDay(zone).toInstant());
   }
 
   /**
