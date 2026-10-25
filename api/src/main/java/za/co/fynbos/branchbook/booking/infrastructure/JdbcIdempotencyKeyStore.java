@@ -18,15 +18,16 @@ import za.co.fynbos.branchbook.booking.domain.IdempotencyKey;
 /**
  * Stores the keys of successful bookings in {@code idempotency_keys} (BR-12).
  *
- * <p>The claim is {@code INSERT ... ON CONFLICT DO NOTHING}. When another transaction holds the
- * same key uncommitted, the insert waits for it, bounded by the session's {@code lock_timeout};
- * once it has committed, the key's row says what it booked, and once it has rolled back, the key is
- * free. Keys are honoured for {@link #KEY_TTL} and until the hourly purge removes them.
+ * <p>The claim is one {@code INSERT ... ON CONFLICT} statement: it takes a new key, and takes over
+ * a key whose {@link #KEY_TTL} has run out, so a key is honoured for exactly that long whether or
+ * not the hourly purge has removed it yet. When another transaction holds the same key uncommitted,
+ * the insert waits for it, bounded by the session's {@code lock_timeout}; once it has committed,
+ * the key's row says what it booked, and once it has rolled back, the key is free.
  */
 @Repository
 class JdbcIdempotencyKeyStore implements IdempotencyKeyStore {
 
-  /** How long a key is honoured after its booking; the hourly purge removes it within the hour. */
+  /** How long a key is honoured after its booking; from then on it books anew. */
   static final Duration KEY_TTL = Duration.ofHours(24);
 
   private final JdbcClient jdbc;
@@ -44,7 +45,11 @@ class JdbcIdempotencyKeyStore implements IdempotencyKeyStore {
                         """
                         INSERT INTO idempotency_keys (key, request_hash, created_at, expires_at)
                         VALUES (:key, :requestHash, :createdAt, :expiresAt)
-                        ON CONFLICT (key) DO NOTHING
+                        ON CONFLICT (key) DO UPDATE
+                           SET request_hash = EXCLUDED.request_hash, appointment_id = NULL,
+                               response_status = NULL, created_at = EXCLUDED.created_at,
+                               expires_at = EXCLUDED.expires_at
+                         WHERE idempotency_keys.expires_at <= EXCLUDED.created_at
                         RETURNING key""")
                     .param("key", key.value())
                     .param("requestHash", requestHash)
@@ -67,8 +72,9 @@ class JdbcIdempotencyKeyStore implements IdempotencyKeyStore {
                                 rs.getString("request_hash"),
                                 rs.getObject("appointment_id", UUID.class)))
                     .optional());
-    // A row vanishes only if the purge removed it between the two statements, and an uncompleted
-    // row is never committed; both are a race the re-run resolves.
+    // The key is in force here: an expired one was taken over above. A row vanishes only if it
+    // expired and the purge removed it between the two statements, and an uncompleted row is never
+    // committed; both are a race the re-run resolves.
     if (used.isEmpty() || used.get().appointmentId() == null) {
       throw new TransactionConflictException("40001");
     }
@@ -95,7 +101,7 @@ class JdbcIdempotencyKeyStore implements IdempotencyKeyStore {
 
   @Override
   public int purgeExpired(Instant now) {
-    return jdbc.sql("DELETE FROM idempotency_keys WHERE expires_at < :now")
+    return jdbc.sql("DELETE FROM idempotency_keys WHERE expires_at <= :now")
         .param("now", utc(now))
         .update();
   }

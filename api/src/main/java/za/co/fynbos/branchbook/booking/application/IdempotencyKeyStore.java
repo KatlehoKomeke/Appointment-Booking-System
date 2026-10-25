@@ -20,8 +20,9 @@ public interface IdempotencyKeyStore {
    * @param key the client's key
    * @param requestHash the hash of the booking's details, after normalisation
    * @param now the current instant, from which the key's expiry is counted
-   * @return {@link New} if the key is now this request's, {@link Replay} if it already booked an
-   *     appointment with the same details, or {@link Reused} if it booked one with other details
+   * @return {@link New} if the key is now this request's, including a key whose 24 hours have run
+   *     out; {@link Replay} if it already booked an appointment with the same details; or {@link
+   *     Reused} if it booked one with other details
    */
   Reservation reserve(IdempotencyKey key, String requestHash, Instant now);
 
@@ -34,7 +35,7 @@ public interface IdempotencyKeyStore {
   void complete(IdempotencyKey key, UUID appointmentId);
 
   /**
-   * Deletes the keys that have expired.
+   * Deletes the keys that have expired, which {@link #reserve} would already treat as free.
    *
    * @param now the current instant
    * @return how many keys were deleted
