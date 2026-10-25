@@ -71,4 +71,22 @@ public interface CatalogueReadPort {
    * @return the holidays, in date order
    */
   List<PublicHoliday> publicHolidays();
+
+  /**
+   * Finds a branch by id, whether or not it is still active, so an appointment booked before a
+   * branch closed can still be shown.
+   *
+   * @param id the branch's id
+   * @return the branch, or empty if no branch has that id
+   */
+  Optional<Branch> branchById(UUID id);
+
+  /**
+   * Finds a service by id, whether or not it is still offered, so an appointment booked before a
+   * service was withdrawn can still be shown.
+   *
+   * @param id the service's id
+   * @return the service, or empty if no service has that id
+   */
+  Optional<ServiceType> serviceById(UUID id);
 }

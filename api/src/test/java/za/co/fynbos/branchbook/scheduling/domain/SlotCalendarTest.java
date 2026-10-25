@@ -409,7 +409,7 @@ class SlotCalendarTest {
   }
 
   private static ServiceOffer offer(int durationMinutes, int capacity) {
-    return new ServiceOffer(UUID.randomUUID(), "TEST", durationMinutes, capacity);
+    return new ServiceOffer(UUID.randomUUID(), "TEST", "Test", durationMinutes, capacity);
   }
 
   /** The calendar at 06:00 on Monday 2 November, with two seats. */

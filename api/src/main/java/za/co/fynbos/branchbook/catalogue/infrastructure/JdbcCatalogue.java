@@ -41,6 +41,9 @@ class JdbcCatalogue implements CatalogueReadPort {
       id, code, name, sms_name, address_line1, suburb, city, province, postal_code, timezone,
       open_on_public_holidays""";
 
+  private static final String SERVICE_COLUMNS =
+      "s.id, s.code, s.name, s.sms_name, s.description, s.duration_minutes, s.documents_needed";
+
   private final JdbcClient jdbc;
 
   JdbcCatalogue(JdbcClient jdbc) {
@@ -95,22 +98,13 @@ class JdbcCatalogue implements CatalogueReadPort {
   public List<ServiceType> servicesOfferedAt(UUID branchId) {
     return jdbc.sql(
             """
-            SELECT s.id, s.code, s.name, s.sms_name, s.description, s.duration_minutes,
-                   s.documents_needed
+            SELECT %s
             FROM services s JOIN branch_services bs ON bs.service_id = s.id
             WHERE bs.branch_id = :branchId AND s.active
-            ORDER BY s.sort_order""")
+            ORDER BY s.sort_order"""
+                .formatted(SERVICE_COLUMNS))
         .param("branchId", branchId)
-        .query(
-            (rs, row) ->
-                new ServiceType(
-                    rs.getObject("id", UUID.class),
-                    rs.getString("code"),
-                    rs.getString("name"),
-                    rs.getString("sms_name"),
-                    rs.getString("description"),
-                    rs.getInt("duration_minutes"),
-                    textArray(rs.getArray("documents_needed"))))
+        .query((rs, row) -> service(rs))
         .list();
   }
 
@@ -118,7 +112,7 @@ class JdbcCatalogue implements CatalogueReadPort {
   public Optional<ServiceOffer> serviceOffer(UUID branchId, String serviceCode) {
     return jdbc.sql(
             """
-            SELECT s.id, s.code, s.duration_minutes, bs.capacity
+            SELECT s.id, s.code, s.sms_name, s.duration_minutes, bs.capacity
             FROM branch_services bs JOIN services s ON s.id = bs.service_id
             WHERE bs.branch_id = :branchId AND s.code = :serviceCode AND s.active""")
         .param("branchId", branchId)
@@ -128,6 +122,7 @@ class JdbcCatalogue implements CatalogueReadPort {
                 new ServiceOffer(
                     rs.getObject("id", UUID.class),
                     rs.getString("code"),
+                    rs.getString("sms_name"),
                     rs.getInt("duration_minutes"),
                     rs.getInt("capacity")))
         .optional();
@@ -143,6 +138,33 @@ class JdbcCatalogue implements CatalogueReadPort {
                     rs.getString("name"),
                     PublicHoliday.Source.valueOf(rs.getString("source"))))
         .list();
+  }
+
+  @Override
+  public Optional<Branch> branchById(UUID id) {
+    return jdbc.sql("SELECT " + BRANCH_COLUMNS + " FROM branches WHERE id = :id")
+        .param("id", id)
+        .query((rs, row) -> branch(rs))
+        .optional();
+  }
+
+  @Override
+  public Optional<ServiceType> serviceById(UUID id) {
+    return jdbc.sql("SELECT " + SERVICE_COLUMNS + " FROM services s WHERE s.id = :id")
+        .param("id", id)
+        .query((rs, row) -> service(rs))
+        .optional();
+  }
+
+  private static ServiceType service(ResultSet rs) throws SQLException {
+    return new ServiceType(
+        rs.getObject("id", UUID.class),
+        rs.getString("code"),
+        rs.getString("name"),
+        rs.getString("sms_name"),
+        rs.getString("description"),
+        rs.getInt("duration_minutes"),
+        textArray(rs.getArray("documents_needed")));
   }
 
   private static Branch branch(ResultSet rs) throws SQLException {

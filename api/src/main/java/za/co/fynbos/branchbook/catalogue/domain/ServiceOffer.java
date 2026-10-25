@@ -10,15 +10,18 @@ import java.util.UUID;
  *
  * @param serviceId the service's id
  * @param code the service code, for example {@code FICA}
+ * @param smsName the service's short name in an SMS, for example {@code FICA update}
  * @param durationMinutes how long an appointment lasts, which is also the slot grid's step (BR-1)
  * @param capacity the number of seats: consultants who can see customers for it at once (BR-7)
  */
-public record ServiceOffer(UUID serviceId, String code, int durationMinutes, int capacity) {
+public record ServiceOffer(
+    UUID serviceId, String code, String smsName, int durationMinutes, int capacity) {
 
   /** Rejects an offer that could produce no slot or no seat. */
   public ServiceOffer {
     Objects.requireNonNull(serviceId, "serviceId");
     Objects.requireNonNull(code, "code");
+    Objects.requireNonNull(smsName, "smsName");
     if (durationMinutes <= 0 || capacity <= 0) {
       throw new IllegalArgumentException("A service needs a positive duration and capacity");
     }
