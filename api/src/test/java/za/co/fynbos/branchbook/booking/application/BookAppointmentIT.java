@@ -7,9 +7,13 @@ import static za.co.fynbos.branchbook.support.Bookings.book;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -66,6 +70,39 @@ class BookAppointmentIT {
     assertThat(
             jdbc.queryForList("SELECT status FROM appointments ORDER BY starts_at", String.class))
         .containsExactly("CONFIRMED", "CONFIRMED");
+  }
+
+  /**
+   * BR-10, BR-9, BR-15: only CONFIRMED and CHECKED_IN appointments count. One that was cancelled,
+   * completed or missed, at the same time and for the same service, blocks neither a second booking
+   * of the service nor one at the same time, and its seat is free again.
+   */
+  @ParameterizedTest(name = "[{index}] {0}")
+  @ValueSource(strings = {"CANCELLED", "COMPLETED", "NO_SHOW"})
+  void cancelledCompletedOrNoShowAppointmentBlocksNothing(String status) {
+    assertThat(book(mvc, body("POL", "FICA", "2026-10-27T10:00:00+02:00", "082 555 0169")))
+        .hasStatus(HttpStatus.CREATED);
+    OffsetDateTime at = clock.instant().atOffset(ZoneOffset.UTC);
+    String timestamps =
+        switch (status) {
+          case "CANCELLED" -> "cancelled_at = ?";
+          case "COMPLETED" -> "checked_in_at = ?, completed_at = ?";
+          case "NO_SHOW" -> "no_show_at = ?";
+          default -> throw new IllegalArgumentException(status);
+        };
+    Object[] parameters =
+        status.equals("COMPLETED") ? new Object[] {status, at, at} : new Object[] {status, at};
+    jdbc.update("UPDATE appointments SET status = ?, " + timestamps, parameters);
+
+    MvcTestResult again =
+        book(mvc, body("POL", "FICA", "2026-10-27T10:00:00+02:00", "082 555 0169"));
+
+    assertThat(again).hasStatus(HttpStatus.CREATED);
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT seat_no FROM appointments WHERE status = 'CONFIRMED'", Integer.class))
+        .as("Polokwane has one FICA seat, so the new appointment took the freed one")
+        .isOne();
   }
 
   /** BR-10: one upcoming appointment per service; the refusal says nothing about the first. */
