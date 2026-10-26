@@ -15,7 +15,7 @@ Nothing installs the hooks for you: until you run `make hooks`, your commits are
 
 - **How changes land today.** This is a one-person repository: commits are pushed straight to `main`, with
   `make test` run first, and each push runs the workflows described in [docs/delivery.md](docs/delivery.md). `main`
-  has no branch protection, so a red check blocks nothing; [docs/delivery.md](docs/delivery.md#known-gaps) states
+  refuses force-pushes and deletion but requires no passing checks, so a red check blocks nothing; [docs/delivery.md](docs/delivery.md#known-gaps) states
   that gap and what would close it.
 - **With a team.** `main` would be protected, requiring the `api`, `web` and `stack` jobs of `ci` and the `gitleaks`
   job of `secret-scan`, one approving review, linear history, and a CODEOWNERS file covering `.github/` and `infra/`.

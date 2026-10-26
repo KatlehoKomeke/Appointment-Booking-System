@@ -389,11 +389,11 @@ follow its start-up order:
 
 ### 10.2 From a commit to AWS
 
-![From a commit to Cape Town: an opt-in pre-commit hook refuses secret files and runs gitleaks, push protection checks the push, and the unprotected main starts ci, secret-scan, infra (on infra changes) and deploy side by side. deploy does not wait for ci. It passes the aws-demo gate, exchanges an OIDC token at STS, deploys BranchbookRelease through the bootstrap roles and verifies the commit; an administrator deploys BranchbookAccount.](assets/diagrams/delivery-pipeline.svg)
+![From a commit to Cape Town: an opt-in pre-commit hook refuses secret files and runs gitleaks, push protection checks the push, and main, which requires no checks, starts ci, secret-scan, infra (on infra changes) and deploy side by side. deploy does not wait for ci. It passes the aws-demo gate, exchanges an OIDC token at STS, deploys BranchbookRelease through the bootstrap roles and verifies the commit; an administrator deploys BranchbookAccount.](assets/diagrams/delivery-pipeline.svg)
 
 Every push to `main` starts `ci`, `secret-scan` and `deploy` side by side, and `infra` joins when `infra/` changes;
 `deploy` runs the CDK app's tests, signs in to AWS through OpenID Connect, deploys `BranchbookRelease` and reads
-the recorded commit back. `deploy` does not wait for `ci` yet, and `main` has no branch protection;
+the recorded commit back. `deploy` does not wait for `ci` yet, and `main` requires no passing checks;
 [delivery.md](delivery.md) walks through each numbered step, what each workflow proves and what would close the
 gaps.
 
