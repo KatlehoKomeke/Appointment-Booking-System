@@ -155,8 +155,11 @@ management:
   endpoints:
     web:
       exposure:
-        # Only health and info are reachable over HTTP. Endpoints such as env, beans and heapdump stay closed.
-        include: health, info
+        # Only health, info and prometheus are reachable over HTTP. Endpoints such as env, beans, metrics and heapdump
+        # stay closed. prometheus serves the meters in Prometheus's text format: Spring Boot's own and the two the
+        # application adds, appointments_booked_total by outcome and outbox_pending (FR-30). No meter carries
+        # personal data: tags hold codes and URI templates, never a value a customer typed.
+        include: health, info, prometheus
   endpoint:
     health:
       probes:

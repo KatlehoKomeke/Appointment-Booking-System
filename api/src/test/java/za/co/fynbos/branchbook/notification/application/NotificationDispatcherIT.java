@@ -63,6 +63,8 @@ class NotificationDispatcherIT {
 
   @Autowired private AppointmentDirectory appointments;
 
+  @Autowired private OutboxPendingGauge pending;
+
   /** FR-15, FR-16: a delivered SMS is SENT with the gateway's id, and the appointment says so. */
   @Test
   void marksSentWithProviderMessageId() throws Exception {
@@ -386,7 +388,8 @@ class NotificationDispatcherIT {
     ConcurrentLinkedQueue<UUID> sent = new ConcurrentLinkedQueue<>();
 
     int handled =
-        new NotificationDispatcher(transactionManager, messages, recordingInto(sent), unanswering)
+        new NotificationDispatcher(
+                transactionManager, messages, recordingInto(sent), unanswering, pending)
             .runOnce(clock.instant());
 
     assertThat(handled).as("the tick ends at the failed check").isZero();
@@ -474,7 +477,7 @@ class NotificationDispatcherIT {
 
   /** A dispatcher like the application's, with a gateway of the test's own. */
   private NotificationDispatcher dispatcherWith(MessageGateway gateway) {
-    return new NotificationDispatcher(transactionManager, messages, gateway, appointments);
+    return new NotificationDispatcher(transactionManager, messages, gateway, appointments, pending);
   }
 
   private Map<String, Object> onlyMessage() {

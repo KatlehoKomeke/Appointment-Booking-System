@@ -8,6 +8,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
 import java.net.URI;
@@ -38,9 +39,12 @@ import za.co.fynbos.branchbook.shared.web.OpenApiConfig;
  * The appointment endpoints: booking one, opening it again with its reference, and cancelling it.
  */
 @RestController
-@RequestMapping(path = "/api/v1/appointments", produces = MediaType.APPLICATION_JSON_VALUE)
+@RequestMapping(path = AppointmentController.PATH, produces = MediaType.APPLICATION_JSON_VALUE)
 @Tag(name = "Appointments", description = "Book an appointment, open it again, and cancel it.")
 class AppointmentController {
+
+  /** Where appointments are booked, and under which each one is opened again and cancelled. */
+  static final String PATH = "/api/v1/appointments";
 
   /** The response header that marks a replay of an earlier booking (BR-12). */
   static final String IDEMPOTENT_REPLAYED = "Idempotent-Replayed";
@@ -96,6 +100,8 @@ class AppointmentController {
    * @param idempotencyKey the client's key, a UUID sent again unchanged on a retry; checked here
    *     rather than by Spring, so a malformed body is reported first
    * @param request the booking
+   * @param http the servlet request, on which the booking's outcome is noted for {@link
+   *     BookingOutcomeMeter}; not part of the API
    * @return 201 with the appointment and its {@code Location}; a replay adds {@code
    *     Idempotent-Replayed: true}
    */
@@ -168,13 +174,15 @@ class AppointmentController {
               schema = @Schema(type = "string", format = "uuid", pattern = UUID_PATTERN))
           @RequestHeader(name = "Idempotency-Key", required = false)
           @Nullable String idempotencyKey,
-      @Valid @RequestBody BookAppointmentRequest request) {
+      @Valid @RequestBody BookAppointmentRequest request,
+      HttpServletRequest http) {
     IdempotencyKey key =
         IdempotencyKey.parse(idempotencyKey).orElseThrow(IdempotencyKeyRequiredException::new);
     BookingResult result = booking.handle(request.toCommand(key, demoNumbersOnly));
+    BookingOutcomeMeter.noteBooked(http, result);
     AppointmentResponse body = AppointmentResponse.from(result.appointment());
     ResponseEntity.BodyBuilder response =
-        ResponseEntity.created(URI.create("/api/v1/appointments/" + body.reference()));
+        ResponseEntity.created(URI.create(PATH + "/" + body.reference()));
     if (result instanceof BookingResult.Replayed) {
       response.header(IDEMPOTENT_REPLAYED, "true");
     }

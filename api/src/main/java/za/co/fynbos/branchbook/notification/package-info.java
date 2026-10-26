@@ -15,7 +15,8 @@
  * message's appointment through booking's {@code AppointmentDirectory}; from M5, the dispatcher
  * that delivers PENDING messages through the simulated SMS gateway, with retries and a final FAILED
  * (BR-17); and from M6, the cancellation SMS, which supersedes a confirmation still PENDING or
- * FAILED so none is delivered after its cancellation (BR-24), and the retry of a failed message
- * from the inbox (FR-18).
+ * FAILED so none is delivered after its cancellation (BR-24), the retry of a failed message from
+ * the inbox (FR-18), and the {@code outbox_pending} gauge the dispatcher refreshes on every tick
+ * (FR-30).
  */
 package za.co.fynbos.branchbook.notification;

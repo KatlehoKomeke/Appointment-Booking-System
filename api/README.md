@@ -125,8 +125,10 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 | `/readyz` | Readiness: up once the app has started and PostgreSQL answers. Used by the image's Docker health check; the planned load balancer will use it too. |
 | `/livez` | Liveness: up while the process is healthy. Deliberately ignores the database. |
 | `/actuator/health`, `/actuator/info` | Overall health (no details) and build information |
+| `/actuator/prometheus` | Every meter in Prometheus's text format, the application's two included ([Metrics](#metrics)) |
 
-Every other actuator endpoint is closed. Every response carries the security headers described in
+Every other actuator endpoint is closed: `env`, `beans`, `heapdump`, `metrics` and `loggers` answer 404
+(`SecurityHeadersIT`). Every response carries the security headers described in
 [SecurityConfig](src/main/java/za/co/fynbos/branchbook/shared/security/SecurityConfig.java) and an
 `X-Correlation-Id`: the caller's, if it is up to 64 letters, digits and hyphens, otherwise a new one. Swagger UI's
 pages alone may use inline styles, which its rendering needs; inline scripts are refused everywhere.
@@ -257,6 +259,46 @@ not its message, which could quote personal data:
   "correlationId": "readme-example-1"
 }
 ```
+
+## Metrics
+
+`GET /actuator/prometheus` serves every meter in Prometheus's text format (`text/plain;version=0.0.4`). Spring
+Boot's own are there: `http_server_requests_seconds` by method, URI template, status and exception type,
+`hikaricp_connections_*`, `jvm_*`, `process_*` and `logback_events_total`. The application adds two (FR-30):
+
+| Metric | Type | What it says |
+|---|---|---|
+| `appointments_booked_total{outcome}` | Counter | Every `POST /api/v1/appointments`, counted once its response is written, by how it ended. `outcome` is its only tag. |
+| `outbox_pending` | Gauge | The messages still PENDING after the dispatcher's last tick, those backing off after a refusal included. One `COUNT` query per tick, every 2 seconds; a scrape never touches the database. `NaN` until the first tick, so a dispatcher that is switched off shows no number rather than a healthy 0. |
+
+[BookingOutcome](src/main/java/za/co/fynbos/branchbook/booking/application/BookingOutcome.java) is the one place
+that decides the outcome, and it must name every problem code to compile (`BookingOutcomeTest`). The counting happens
+in [BookingOutcomeMeter](src/main/java/za/co/fynbos/branchbook/booking/api/BookingOutcomeMeter.java), after the
+response is written, so it also sees the 400s Spring gives before the controller runs and the 503s that only the
+problem handler names:
+
+| The booking request was answered with | `outcome` |
+|---|---|
+| `201`, a new appointment | `confirmed` |
+| `201` with `Idempotent-Replayed: true` | `replayed` |
+| `409 SLOT_FULL` | `slot_full` |
+| `409 DUPLICATE_APPOINTMENT` | `duplicate` |
+| `409 CUSTOMER_OVERLAP` | `customer_overlap` |
+| `400 VALIDATION_FAILED` (a malformed, missing or unknown field, or an unreadable body); `400 IDEMPOTENCY_KEY_REQUIRED`; `404 BRANCH_NOT_FOUND`; `422 SERVICE_NOT_OFFERED_AT_BRANCH`, `DATE_OUTSIDE_BOOKING_WINDOW`, `SLOT_ON_CLOSED_DAY`, `SLOT_OUTSIDE_HOURS`, `SLOT_OFF_GRID`, `SLOT_WITHIN_LEAD_TIME`, `MOBILE_NUMBER_REQUIRED`, `DEMO_NUMBER_REQUIRED` or `IDEMPOTENCY_KEY_REUSED` | `validation` |
+| `503 TRY_AGAIN`: a lock not granted in 2 s, no free connection in 3 s, a statement over 5 s, or a second deadlock or serialization conflict | `try_again` |
+| `500 INTERNAL_ERROR` after the booking committed, as when the client has gone before its `201` is written | `confirmed` (or `replayed`): the appointment exists and holds its seat |
+| `500 INTERNAL_ERROR` that booked nothing | Not counted. It is a defect, not an outcome of booking; it shows as `status="500"` in `http_server_requests_seconds` and in the log with its correlation id. |
+| A refusal before the request reaches the endpoint: `405`, `406` or `415` | Not counted |
+
+The booking endpoint has no `429`. Should another endpoint's code, such as `LOOKUP_RATE_LIMITED`, ever answer a
+booking, it is left out rather than counted as something it is not. Bookings that do not come through HTTP, such as
+the demo data, are not counted. So `confirmed` counts exactly the appointments booked through the API: a client that
+never got its `201` and retries with the same key adds one `replayed`. All seven series exist from start-up at 0, so
+a rate over one that never moved is 0, not missing (`BookingOutcomeMeterTest`). `MetricsIT` books, replays and
+refuses through the API and reads the scrape, and checks that the scrape holds no name, number or reference;
+`DemoNumbersOnlyIT`, which runs with only the demo numbers taken, checks that `DEMO_NUMBER_REQUIRED` counts as
+`validation`. The SECURITY.md section on hardening says where the endpoint is reachable, and `scripts/smoke.sh`
+checks that the running stack serves it.
 
 ## Demo data
 

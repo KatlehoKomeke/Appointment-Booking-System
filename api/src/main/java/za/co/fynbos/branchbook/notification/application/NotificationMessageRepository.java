@@ -44,6 +44,14 @@ public interface NotificationMessageRepository {
   Optional<NotificationMessage> lockById(UUID id);
 
   /**
+   * Counts the messages still waiting to be delivered, whether due now or backing off, for the
+   * {@code outbox.pending} gauge.
+   *
+   * @return how many messages are PENDING
+   */
+  long countPending();
+
+  /**
    * Locks the next due PENDING message for the caller's transaction, skipping any another
    * transaction has locked.
    *

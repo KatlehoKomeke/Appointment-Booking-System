@@ -12,6 +12,8 @@
  *   <li>{@link za.co.fynbos.branchbook.notification.application.NotificationDispatcher} delivers
  *       due PENDING messages through the {@code MessageGateway} port, one transaction each, with
  *       backoff and a final FAILED, and never sends the confirmation of a cancelled appointment.
+ *   <li>{@code OutboxPendingGauge} holds the {@code outbox.pending} gauge, which the dispatcher
+ *       refreshes with one count of the PENDING messages at the end of every tick.
  *   <li>{@link za.co.fynbos.branchbook.notification.application.InboxQueries} reads the simulated
  *       inbox: the newest messages of every appointment, recipients redacted.
  *   <li>{@link za.co.fynbos.branchbook.notification.application.RetryMessageHandler} makes a failed

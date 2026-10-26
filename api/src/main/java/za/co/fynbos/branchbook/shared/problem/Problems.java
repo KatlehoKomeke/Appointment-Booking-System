@@ -20,7 +20,10 @@ final class Problems {
 
   private Problems() {}
 
-  /** A problem with one of the API's codes. */
+  /**
+   * A problem with one of the API's codes. The code is also noted on the request (see {@link
+   * AnsweredProblem}), so the booking meter can count the request by it.
+   */
   static ProblemDetail of(ProblemCode code, String detail, String correlationId) {
     ProblemDetail problem =
         ProblemDetail.forStatusAndDetail(HttpStatus.valueOf(code.status()), detail);
@@ -28,6 +31,7 @@ final class Problems {
     problem.setTitle(code.title());
     problem.setProperty("code", code.name());
     identify(problem, correlationId);
+    AnsweredProblem.note(code);
     return problem;
   }
 

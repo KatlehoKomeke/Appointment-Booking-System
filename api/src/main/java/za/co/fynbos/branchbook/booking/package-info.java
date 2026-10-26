@@ -19,7 +19,9 @@
  * by {@code infrastructure.RetentionPurgeJob} only while {@code branchbook.retention.enabled} is
  * true).
  *
- * <p>From M6: docker compose starts with three demo appointments ({@code
+ * <p>From M6: every booking request is counted by its outcome, the {@code
+ * appointments_booked_total} metric ({@code api.BookingOutcomeMeter}, {@code
+ * application.BookingOutcome}), and docker compose starts with three demo appointments ({@code
  * infrastructure.DemoDataLoader}).
  */
 package za.co.fynbos.branchbook.booking;

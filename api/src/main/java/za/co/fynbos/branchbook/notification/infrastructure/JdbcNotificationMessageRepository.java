@@ -121,6 +121,13 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
   }
 
   @Override
+  public long countPending() {
+    return jdbc.sql("SELECT count(*) FROM notification_messages WHERE status = 'PENDING'")
+        .query(Long.class)
+        .single();
+  }
+
+  @Override
   public Optional<NotificationMessage> claimNextDue(Instant now) {
     return jdbc.sql(CLAIM_NEXT_DUE)
         .param("now", utc(now))

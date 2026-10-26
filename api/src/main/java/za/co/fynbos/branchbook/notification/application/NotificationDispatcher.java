@@ -66,12 +66,14 @@ public class NotificationDispatcher {
   private final NotificationMessageRepository messages;
   private final MessageGateway gateway;
   private final AppointmentDirectory appointments;
+  private final OutboxPendingGauge pending;
 
   NotificationDispatcher(
       PlatformTransactionManager transactionManager,
       NotificationMessageRepository messages,
       MessageGateway gateway,
-      AppointmentDirectory appointments) {
+      AppointmentDirectory appointments,
+      OutboxPendingGauge pending) {
     TransactionTemplate template = new TransactionTemplate(transactionManager);
     template.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     template.setName("NotificationDispatcher.dispatchNext");
@@ -79,10 +81,12 @@ public class NotificationDispatcher {
     this.messages = messages;
     this.gateway = gateway;
     this.appointments = appointments;
+    this.pending = pending;
   }
 
   /**
-   * Runs one tick: delivers the messages that are due, up to {@value #BATCH}.
+   * Runs one tick: delivers the messages that are due, up to {@value #BATCH}, then counts those
+   * still PENDING for the {@code outbox.pending} gauge.
    *
    * @param now the current instant, from the application's clock; the tests pass their own
    * @return how many messages the tick handled
@@ -112,6 +116,7 @@ public class NotificationDispatcher {
       }
       handled++;
     }
+    pending.refresh();
     return handled;
   }
 

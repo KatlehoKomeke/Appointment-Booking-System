@@ -5,6 +5,7 @@ import static za.co.fynbos.branchbook.support.Bookings.body;
 import static za.co.fynbos.branchbook.support.Bookings.book;
 
 import com.jayway.jsonpath.JsonPath;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -53,6 +54,8 @@ class DemoNumbersOnlyIT {
   @Autowired private JdbcTemplate jdbc;
 
   @Autowired private ConfigurableApplicationContext context;
+
+  @Autowired private MeterRegistry meters;
 
   /**
    * A number just past the block and an everyday one are refused before the booking transaction: no
@@ -158,6 +161,26 @@ class DemoNumbersOnlyIT {
         .contains(
             "Bookings take only the published demo numbers"
                 + " (branchbook.booking.demo-numbers-only is on).");
+  }
+
+  /**
+   * FR-30: a refusal for the number is counted once, as the {@code validation} outcome that {@code
+   * MOBILE_NUMBER_REQUIRED} is counted as, so on the hosted demo a visitor who types another number
+   * shows on the booking counter as a refused request rather than not at all.
+   */
+  @Test
+  void aRefusalForTheNumberIsCountedAsAValidationOutcome() {
+    double before = booked("validation");
+
+    MvcTestResult result = book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0200"));
+
+    assertThat(result).bodyJson().extractingPath("$.code").isEqualTo("DEMO_NUMBER_REQUIRED");
+    assertThat(booked("validation") - before).isEqualTo(1.0);
+  }
+
+  /** How many booking requests the {@code appointments.booked} counter holds for an outcome. */
+  private double booked(String outcome) {
+    return meters.get("appointments.booked").tag("outcome", outcome).counter().count();
   }
 
   /** The rows a booking writes, by table, in a fixed order. */

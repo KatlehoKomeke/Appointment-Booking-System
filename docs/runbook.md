@@ -159,3 +159,43 @@ docker compose logs app | grep '<correlation id>'
 
 Log lines name appointments and messages by id. They never hold a name, a number in any form, or a reference
 ([BR-19](domain-rules.md#br-19)), so a log can be shared to diagnose a problem.
+
+## Read the metrics
+
+`/actuator/prometheus` serves every meter in Prometheus's text format, on the app's own port, with no personal data
+in it. Two are BranchBook's own (FR-30; the full mapping is in [api/README.md](../api/README.md#metrics)):
+
+```bash
+curl -s localhost:8080/actuator/prometheus | grep -E '^(outbox_pending|appointments_booked_total)'
+```
+
+**`outbox_pending`** is how many messages were still PENDING at the end of the dispatcher's last tick, counted once
+per tick, every 2 seconds. It includes messages backing off after a refusal. Only the dispatcher's ticks move it, so
+it says nothing about a dispatcher that is not running: the SQL count below is the ground truth.
+
+| Reading | Means | Do |
+|---|---|---|
+| `NaN` | No tick has run since the app started: the dispatcher is switched off, and every confirmation stays PENDING. | Check that `BRANCHBOOK_DISPATCHER_ENABLED` is not `false`, and the SQL count below. |
+| 0, or back to 0 between bursts of bookings | Delivery is keeping up. | Nothing. |
+| A few that clear within 30 seconds | Messages backing off after a refusal (2, 4, 8, 16 seconds). A number ending 0000 does this on purpose, so the demo data's third booking shows here briefly after `make up`. | Nothing; a message refused five times turns FAILED and leaves the count. |
+| Climbing, and never back down | The dispatcher runs but is not keeping up. | Check the log for `outbox.tick_failed` or `outbox.claim_failed`. The SQL below says which messages wait and why. |
+| Frozen, at 0 or any other value, while `appointments_booked_total{outcome="confirmed"}` rises | The dispatcher's thread has stopped after at least one tick, or only the count fails: then the log has `outbox.pending_not_counted` and the gauge keeps its last value. | Compare it with the SQL count below; then as for a climbing count. |
+
+```sql
+SELECT status, count(*) AS messages, min(next_attempt_at) AS next_due
+FROM notification_messages
+GROUP BY status;
+```
+
+**`appointments_booked_total{outcome}`** counts every booking request by how it ended. Read it as a rate, such as
+`rate(appointments_booked_total[5m])`, not as a total: the counters start at 0 when the app starts.
+
+- `slot_full` rising: customers lose seats to each other while booking, so demand is outrunning the seats.
+- `try_again` rising: bookings wait more than 2 seconds for a lock, 3 for a connection or 5 for a statement, or hit a
+  deadlock or serialization conflict twice. Look for `Temporary database failure` in the log, whose SQLSTATE says
+  which (`55P03` a lock, `57014` a statement, `40P01` or `40001` a conflict), and `Database unavailable` for a
+  connection.
+- `validation` rising while `confirmed` falls: a client is sending requests the API refuses;
+  [errors.md](errors.md) explains each code.
+- A 500 is not an outcome and is not counted here, unless the booking had already committed, when it counts as
+  `confirmed`: look for `status="500"` in `http_server_requests_seconds` and for `Unexpected failure` in the log.

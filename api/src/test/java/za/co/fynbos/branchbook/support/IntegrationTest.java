@@ -6,6 +6,7 @@ import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.micrometer.metrics.test.autoconfigure.AutoConfigureMetrics;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
@@ -29,6 +30,10 @@ import org.springframework.context.annotation.Import;
  * BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY} exported in the developer's shell cannot change what the
  * tests prove. References come from a {@link ScriptedReferenceGenerator}, which hands out random
  * ones unless a test scripts them. Classes that book through the API add {@link DatabaseReset}.
+ *
+ * <p>Metrics are exported as the application exports them, so {@code /actuator/prometheus} answers:
+ * Spring Boot switches export off in tests unless {@link AutoConfigureMetrics} asks for it. Every
+ * test shares the meters, so a test reads how a counter moved, never its absolute value.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
@@ -42,6 +47,7 @@ import org.springframework.context.annotation.Import;
     })
 @ExtendWith(ResetClockExtension.class)
 @AutoConfigureMockMvc
+@AutoConfigureMetrics
 @Import({
   TestcontainersConfiguration.class,
   TestClockConfiguration.class,

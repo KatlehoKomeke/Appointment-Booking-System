@@ -21,5 +21,8 @@
  * <p>{@link za.co.fynbos.branchbook.booking.application.RetentionPurge} deletes appointments older
  * than {@link za.co.fynbos.branchbook.booking.application.RetentionProperties#maxAge()}, with their
  * messages and keys, in small transactions, for the hosted demo's 48-hour promise.
+ *
+ * <p>{@link za.co.fynbos.branchbook.booking.application.BookingOutcome} is the one place that
+ * decides how a booking request ended, for the {@code appointments_booked_total} metric (FR-30).
  */
 package za.co.fynbos.branchbook.booking.application;
