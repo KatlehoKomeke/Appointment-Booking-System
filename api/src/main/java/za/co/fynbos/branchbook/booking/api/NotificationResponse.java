@@ -43,6 +43,16 @@ public record NotificationResponse(
     @Schema(example = "082 *** 0101") String recipientMasked,
     String body) {
 
+  /**
+   * Hides the recipient and the body, which holds the reference (BR-19).
+   *
+   * @return the kind, the status and a fixed text
+   */
+  @Override
+  public String toString() {
+    return "NotificationResponse[" + kind + ", " + status + ", redacted]";
+  }
+
   static NotificationResponse from(NotificationSummary summary, ZoneId zone) {
     return new NotificationResponse(
         summary.id(),

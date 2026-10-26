@@ -27,4 +27,15 @@ public record NotificationSummary(
     @Nullable Instant sentAt,
     @Nullable String failureReason,
     String recipientMasked,
-    String body) {}
+    String body) {
+
+  /**
+   * Hides the recipient and the body, which holds the reference (BR-19).
+   *
+   * @return the kind, the status and a fixed text
+   */
+  @Override
+  public String toString() {
+    return "NotificationSummary[" + kind + ", " + status + ", redacted]";
+  }
+}

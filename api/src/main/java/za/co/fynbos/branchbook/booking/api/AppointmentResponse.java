@@ -45,6 +45,17 @@ public record AppointmentResponse(
         @Nullable String cancelledAt,
     List<NotificationResponse> notifications) {
 
+  /**
+   * Hides the reference, the customer and the messages, so a response passed to a logger shows none
+   * of them (BR-19).
+   *
+   * @return the status and a fixed text
+   */
+  @Override
+  public String toString() {
+    return "AppointmentResponse[" + status + ", redacted]";
+  }
+
   static AppointmentResponse from(AppointmentView view) {
     ZoneId zone = view.branch().timezone();
     return new AppointmentResponse(
