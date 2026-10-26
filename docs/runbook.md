@@ -57,7 +57,7 @@ LIMIT 20;
 ## Replay a failed message
 
 Where the simulated inbox is switched on (`branchbook.inbox.enabled`, as in `make up` and `make dev-api`), the retry
-endpoint is the replay path. The web inbox's Retry button, which arrives with the web Tier 2 change, calls it. Put the message's id, from the inbox, in
+endpoint is the replay path. The web inbox's Retry button calls it. Put the message's id, from the inbox, in
 place of the example:
 
 ```bash

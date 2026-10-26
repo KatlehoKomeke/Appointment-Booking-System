@@ -14,7 +14,8 @@ flow, the confirmation page with its live delivery status, `/manage` and the sim
 [UI design](../web/README.md#ui-design). M5 adds the dispatcher that delivers the SMS through a simulated gateway,
 the simulated inbox's API and the concurrent proofs. M6 adds the Tier 2 API: cancelling an appointment with its
 cancellation SMS, retrying a failed message from the simulated inbox, demo data for a fresh compose stack, and two
-meters on `/actuator/prometheus`; the web app's cancel and retry screens are still to come. Each section opens with its status. Diagrams are Mermaid, or SVG files in
+meters on `/actuator/prometheus`, with the web app's screens for them: cancelling from the appointment page and Retry in
+the simulated inbox. Each section opens with its status. Diagrams are Mermaid, or SVG files in
 [assets/diagrams](assets/diagrams/README.md); solid parts are built and dashed parts are planned, with their
 milestone.
 
@@ -34,7 +35,7 @@ milestone.
 
 *Status: describes the finished v1. Built so far: branches and availability (M1, M2), and booking and lookup with
 the confirmation SMS written as PENDING (M3), the booking screens (M4), the SMS's delivery (M5), and cancellation
-through the API (M6). The web app's cancel screen is still to come.*
+from the appointment page (M6).*
 
 A customer of the fictional Fynbos Bank picks a branch, a service, a date and a time slot, enters a name and a
 South African mobile number, and gets a booking reference such as `APT-7K3M-9Q2X`. A simulated SMS confirmation

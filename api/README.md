@@ -121,7 +121,7 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 | `GET /api/v1/appointments/{reference}` | Open an appointment again, with `X-Mobile-Last4` |
 | `POST /api/v1/appointments/{reference}/cancel` | Cancel an appointment before it starts, with `X-Mobile-Last4`. `200` with the appointment as a lookup now shows it: `CANCELLED`, its PENDING or FAILED confirmation superseded and its cancellation SMS PENDING |
 | `GET /api/v1/messages?limit=` | The simulated inbox: the newest messages of every booking, recipients redacted to `082 *** ****`, and references to `APT-****-****` while `branchbook.inbox.redact-references` is true. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
-| `POST /api/v1/messages/{id}/retry` | Make a FAILED message due again (the web inbox's Retry button, arriving with the web Tier 2 change, calls it); any other message is returned unchanged. The answer is the message as the inbox shows it, its reference redacted the same way. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
+| `POST /api/v1/messages/{id}/retry` | Make a FAILED message due again (the web inbox's Retry button calls it); any other message is returned unchanged. The answer is the message as the inbox shows it, its reference redacted the same way. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
 | `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml) |
 | `/swagger-ui.html` | Swagger UI, to read and try the API |
 | `/` and the app's routes (`/book`, `/manage`, `/messages`, `/privacy`, `/appointments/{reference}`) | The React app |
