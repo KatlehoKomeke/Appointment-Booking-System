@@ -1,12 +1,18 @@
 /**
- * Entry point: mounts the app into the `#root` element of index.html.
+ * Entry point: loads the font and the global styles, then mounts the app into the `#root` element of index.html.
  *
  * @packageDocumentation
  */
+import '@fontsource/nunito-sans/latin-400.css';
+import '@fontsource/nunito-sans/latin-600.css';
+import '@fontsource/nunito-sans/latin-700.css';
+import './ui/tokens.css';
+import './ui/global.css';
+import './lib/zodConfig';
+
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
-import './index.css';
 
 const container = document.getElementById('root');
 if (container === null) {

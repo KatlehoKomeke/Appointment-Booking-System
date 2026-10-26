@@ -8,10 +8,16 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-const api = 'http://localhost:8080';
+// API_URL points the dev server at an API on another port, for example the jar that `APP_PORT=18080 make up` runs.
+const api = process.env.API_URL ?? 'http://localhost:8080';
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    // The Content Security Policy allows fonts only from the app's own files, so a font must never be inlined as a
+    // data: URI, however small. Other small assets keep Vite's default.
+    assetsInlineLimit: (file) => (/\.(woff2?|ttf|otf)$/.test(file) ? false : undefined),
+  },
   server: {
     proxy: {
       '/api': api,

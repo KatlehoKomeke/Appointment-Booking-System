@@ -1,0 +1,108 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  padding-top: var(--space-2);
+}
+
+/* The heading and its lead keep their own bottom margin in flow layout; here the gap takes its place. */
+.page > :has(> h1) {
+  margin-bottom: 0;
+}
+
+.muted {
+  color: var(--colour-text-muted);
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Cards in a list sit 8 px apart. */
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.cardHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.cardHeading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--type-card-heading-size);
+  line-height: var(--type-card-heading-line);
+}
+
+.cardHeading svg {
+  color: var(--colour-text-muted);
+}
+
+.to {
+  margin-top: calc(var(--space-1) - var(--space-3));
+  color: var(--colour-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.reference {
+  font-family: var(--font-mono);
+  font-weight: var(--weight-bold);
+  white-space: nowrap;
+}
+
+.subject {
+  font-weight: var(--weight-bold);
+}
+
+.problem,
+.failure {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+}
+
+.problem {
+  background: var(--colour-fill-muted);
+}
+
+.failure {
+  background: var(--colour-accent-tint);
+}
+
+.problemRow {
+  display: grid;
+  grid-template-columns: 6.5em 1fr;
+  gap: var(--space-3);
+}
+
+.problemRow dt {
+  font-weight: var(--weight-bold);
+}
+
+.meta {
+  font-size: var(--type-meta-size);
+  line-height: var(--type-meta-line);
+  color: var(--colour-text-muted);
+  font-variant-numeric: tabular-nums;
+}

@@ -1,0 +1,18 @@
+.heading {
+  margin-bottom: var(--space-4);
+  font-size: var(--type-page-heading-size);
+  line-height: var(--type-page-heading-line);
+  font-weight: var(--weight-bold);
+}
+
+.group {
+  margin-bottom: var(--space-4);
+}
+
+.group .heading {
+  margin-bottom: var(--space-3);
+}
+
+.lead {
+  color: var(--colour-text-muted);
+}

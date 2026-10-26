@@ -1,0 +1,83 @@
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The heading keeps its own bottom margin; the gap above takes its place here. */
+.step > h1 {
+  margin-bottom: 0;
+}
+
+.count,
+.muted {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}
+
+/*
+ * The status region keeps its line while it is empty, so the list does not jump when the count arrives. It is never
+ * display: none, which would take it out of the accessibility tree and lose the first announcement.
+ */
+.count {
+  min-height: var(--type-small-line);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+/* The whole card is the link. Its text identifies it, so the card's soft edge need not meet 3:1. */
+.branch {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  color: var(--colour-text);
+  text-decoration: none;
+}
+
+.branch:hover {
+  color: var(--colour-text);
+  background: var(--colour-primary-tint);
+}
+
+.branch:hover .name {
+  text-decoration: underline;
+}
+
+.details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  flex: 1;
+  min-width: 0;
+}
+
+.name {
+  font-size: var(--type-card-heading-size);
+  line-height: var(--type-card-heading-line);
+  font-weight: var(--weight-bold);
+}
+
+.place {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.chevron {
+  color: var(--colour-text);
+}

@@ -5,15 +5,17 @@ The React app customers use to book and look up branch appointments, and to canc
 its own: the Dockerfile builds it and places the output inside the Spring Boot jar, which serves the app and the API
 from one origin ([docs/architecture.md, section 2](../docs/architecture.md#2-system-context-and-containers)).
 
-**Status (M3):** a placeholder page showing the fictional-bank notice, and the typed API client the booking flow
-will use, which now covers booking and lookup. The main Tier 1 screens and states are designed
-([UI design](#ui-design)); the booking flow is built to that design in M4 and tested end to end in M6.
+**Status (M4):** built to the [UI design](#ui-design): the five booking steps, the confirmation page with the SMS's
+live delivery status, `/manage` and the simulated inbox, with the landing page, the privacy notice, a not-found page
+and an error page. Playwright tests the flow end to end in M6.
 
 ## Stack
 
-React 19 and TypeScript (strict) on Vite. Vitest with Testing Library runs the tests in jsdom. TanStack Query,
-react-hook-form and zod arrive with the booking flow (M4). Exact versions are in [package.json](package.json) and the
-lockfile, and the main ones in the root [README](../README.md#versions).
+React 19 and TypeScript (strict) on Vite, with React Router for the routes, TanStack Query for the API cache and
+polling, and react-hook-form with zod for the forms. Styles are CSS Modules over the design tokens. Vitest with
+Testing Library runs the tests in jsdom against a fake API in MSW, which is a test dependency only, so no service
+worker ships. Each library is pinned to a release at least two weeks old. Exact versions are in
+[package.json](package.json) and the lockfile, and the main ones in the root [README](../README.md#versions).
 
 ## Commands
 
@@ -56,6 +58,11 @@ day.closedReason; // 'CLOSED_DAY' | 'PUBLIC_HOLIDAY' | null
 stable `code` (typed as the union of the codes the contract lists) and the `correlationId`. Screens choose their wording from `code`, never from the problem's `detail`.
 A network failure is not an `ApiProblem`, so a screen can tell "offline" from "refused".
 
+[src/api/queries.ts](src/api/queries.ts) wraps the calls in TanStack Query hooks, and
+[src/api/problemCopy.ts](src/api/problemCopy.ts) holds the customer copy for every code. The confirmation page and
+the inbox poll every 2 s while a message is PENDING. Booking sends an `Idempotency-Key` that survives a refresh and
+changes with the details, and retries a `503 TRY_AGAIN` once, with the same key, after `Retry-After`.
+
 `schema.d.ts` is generated and committed, never edited by hand; ESLint and Prettier skip it, and `npm run
 check:api` (in CI and `make test`) fails if regenerating it would change anything. After an API change, `make contract` in the repository root refreshes the contract
 and this file together.
@@ -88,11 +95,15 @@ web/
 ├── index.html         the single page; marked noindex because the bank is fictional
 ├── public/            files served as they are (the favicon)
 └── src/
-    ├── main.tsx       mounts the app
-    ├── App.tsx        the app shell (App.test.tsx beside it)
-    ├── index.css      global styles and a placeholder palette, replaced by the design tokens in M4
-    ├── api/           the typed API client and its tests; schema.d.ts is generated from docs/openapi.yaml
-    └── test/setup.ts  test setup: DOM matchers and cleanup
+    ├── main.tsx       loads the font and the global styles, and mounts the app
+    ├── App.tsx        the router and the API cache around routes.tsx
+    ├── routes.tsx     every page, inside the shell, with the error page
+    ├── ui/            the design tokens, global styles, the shell and the shared components
+    ├── booking/       the five steps at /book: the URL state, session storage, the idempotency key, each step
+    ├── pages/         landing, confirmation, manage, inbox, privacy, not found, error
+    ├── api/           the typed client, the query hooks and the copy by code; schema.d.ts is generated
+    ├── lib/           SAST formatting, the cellphone parser, safe session storage, zod's settings
+    └── test/          the fake API (MSW), its fixtures from the seed data, and the render helpers
 ```
 
 ## Security
@@ -100,7 +111,10 @@ web/
 The API sends a strict Content Security Policy (`default-src 'self'`), so the app must never rely on inline
 scripts, inline `<style>` elements or third-party origins. Fonts, images and scripts are bundled and served from
 the same origin: the design's font, Nunito Sans, is self-hosted rather than loaded from Google Fonts, and no font
-is inlined as a `data:` URI ([Building it](#building-it)).
+is inlined as a `data:` URI ([Building it](#building-it)). zod parses without compiling
+([src/lib/zodConfig.ts](src/lib/zodConfig.ts)), because its compiler first probes for `new Function`, which the
+policy refuses, and the browser reports every probe as a violation. A real-browser pass over every screen at 390
+and 1280 px, on the jar under this policy, reports none.
 
 ## UI design
 
@@ -369,12 +383,15 @@ skeletons, empty and offline states; the not-found page; and the layout for scre
 
 ### Building it
 
-- The tokens will be CSS custom properties in `src/ui/tokens.css`, named `--colour-` and the token, for example
-  `--colour-primary` and `--colour-control-soft`. They replace the placeholder colours in `src/index.css`, which date
-  from the scaffold.
-- Nunito Sans will be self-hosted through `@fontsource/nunito-sans`. The mockups load it from Google Fonts, but the
-  app's Content Security Policy allows no other origin, and fonts only from the app's own files, so Vite's
-  `build.assetsInlineLimit` must not turn a font into a `data:` URI.
-- Styles will live in CSS Modules. The mockups' inline styles are a drawing convenience, not the implementation.
+- The tokens are CSS custom properties in [src/ui/tokens.css](src/ui/tokens.css), named `--colour-` and the token,
+  for example `--colour-primary` and `--colour-control-soft`.
+- Nunito Sans is self-hosted through `@fontsource/nunito-sans`, latin subset only. The mockups load it from Google
+  Fonts, but the app's Content Security Policy allows no other origin, and fonts only from the app's own files, so
+  Vite's `build.assetsInlineLimit` never turns a font into a `data:` URI.
+- Styles live in CSS Modules, and no component sets a `style` attribute. The mockups' inline styles are a drawing
+  convenience, not the implementation.
+- The states not designed yet are built from the designed parts: a not-found page and an error page inside the
+  shell, loading lines, the offline and try-again copy from the code table, and, when the confirmation page is
+  opened in a new tab, a short form asking for the last four digits.
 - Each image here is exported from the design canvas: phone boards at twice their size, Foundations at its own. When
   the design changes, the board is exported again under the same file name, and this section changes with it.

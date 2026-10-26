@@ -1,0 +1,60 @@
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-height: var(--button-height);
+  padding: var(--space-2) var(--space-4);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-line);
+  font-weight: var(--weight-bold);
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.primary,
+.primary:hover {
+  color: var(--colour-card);
+}
+
+.primary {
+  background: var(--colour-primary);
+}
+
+.primary:hover {
+  background: var(--colour-primary-strong);
+}
+
+/*
+ * A secondary button reads its colours from custom properties, so a container can recolour the buttons inside it
+ * without reaching into this module: the stale-times banner draws Refresh in warn on its own tint.
+ */
+.secondary {
+  background: var(--button-fill, var(--colour-card));
+  color: var(--button-colour, var(--colour-primary));
+  border-color: var(--button-colour, var(--colour-primary));
+}
+
+.secondary:hover {
+  background: var(--button-hover-fill, var(--colour-primary-tint));
+  color: var(--button-hover-colour, var(--colour-primary-strong));
+}
+
+.compact {
+  min-height: var(--target-min);
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+.button:disabled,
+.button[aria-disabled='true'] {
+  background: var(--colour-disabled);
+  color: var(--colour-text-muted);
+  border-color: transparent;
+  cursor: not-allowed;
+}

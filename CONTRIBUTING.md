@@ -131,12 +131,12 @@ corrected. Re-check it after every major commit and at the end of every mileston
 
 - [ ] The README's Stage row and its Milestones table.
 - [ ] The status paragraph at the top of [docs/architecture.md](docs/architecture.md) and each section's status line.
-- [ ] Flip what is now built, found by search (here for M4, the next milestone; the steps are in
+- [ ] Flip what is now built, found by search (here for M6, the next milestone; the steps are in
   [When a milestone lands](docs/assets/diagrams/README.md#when-a-milestone-lands)):
 
   ```sh
-  grep -rn --exclude=_template.svg 'data-milestone="M4"' docs/assets/diagrams
-  grep -rn 'M4' README.md SECURITY.md docs infra/README.md api/README.md web/README.md
+  grep -rn --exclude=_template.svg 'data-milestone="M6"' docs/assets/diagrams
+  grep -rn 'M6' README.md SECURITY.md docs infra/README.md api/README.md web/README.md
   ```
 
 - [ ] The **Status.** line of each rule in [docs/domain-rules.md](docs/domain-rules.md) the milestone proves.

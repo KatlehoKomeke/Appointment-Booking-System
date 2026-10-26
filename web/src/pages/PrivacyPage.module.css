@@ -1,0 +1,17 @@
+.sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Section headings in the card-heading style: five short cards, none of them a page section in its own right. */
+.heading {
+  margin-bottom: var(--space-2);
+  font-size: var(--type-card-heading-size);
+  line-height: var(--type-card-heading-line);
+}
+
+.body {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+}

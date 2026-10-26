@@ -1,0 +1,14 @@
+.status {
+  display: inline-flex;
+}
+
+/* The pending ring turns slowly while the SMS is on its way; reduced motion stops it (global.css). */
+.spinner {
+  animation: spin 1.2s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

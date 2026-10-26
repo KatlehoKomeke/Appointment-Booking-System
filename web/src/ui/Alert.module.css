@@ -1,0 +1,76 @@
+.alert {
+  padding: var(--space-4);
+  border: 1px solid;
+  border-radius: var(--radius);
+  color: var(--colour-text);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.icon {
+  display: flex;
+  flex: none;
+}
+
+.body {
+  flex: 1;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--type-alert-title-size);
+  line-height: var(--type-alert-title-line);
+  font-weight: var(--weight-bold);
+}
+
+/* The icon sits on the title's line, 24 px high. */
+.error .icon {
+  margin-top: 2px;
+  color: var(--colour-accent-strong);
+}
+
+.title + .text {
+  margin-top: var(--space-1);
+}
+
+.actions {
+  margin-top: var(--space-4);
+}
+
+.sideActions {
+  flex: none;
+}
+
+.error {
+  background: var(--colour-accent-tint);
+  border-color: var(--colour-alert-edge);
+}
+
+.status {
+  background: var(--colour-warn-tint);
+  border-color: var(--colour-banner-edge);
+  --button-colour: var(--colour-warn);
+  --button-fill: transparent;
+  --button-hover-fill: var(--colour-card);
+  --button-hover-colour: var(--colour-warn);
+}
+
+.status .row {
+  align-items: center;
+}
+
+.status .icon,
+.info .icon {
+  color: var(--colour-warn);
+}
+
+.info {
+  background: transparent;
+  border: 1px dashed var(--colour-warn);
+}

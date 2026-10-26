@@ -1,0 +1,54 @@
+/* The Back link is a 44 px target; the negative margin keeps its text where the mockups put it. */
+.stepper {
+  margin-top: calc(-1 * var(--space-2));
+  margin-bottom: var(--space-4);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  min-height: var(--target-min);
+}
+
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--target-min);
+  padding-right: var(--space-2);
+  margin-left: calc(-1 * var(--space-1));
+  font-weight: var(--weight-bold);
+  text-decoration: none;
+}
+
+.back:hover {
+  text-decoration: underline;
+}
+
+.count {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}
+
+.segments {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: var(--space-1);
+  margin-top: var(--space-1);
+  padding: 0;
+  list-style: none;
+}
+
+/* Steps to come are drawn in border, which is not a control's edge; "Step 3 of 5" says the same in words. */
+.segment {
+  height: 4px;
+  border-radius: var(--radius-segment);
+  background: var(--colour-border);
+}
+
+.reached {
+  background: var(--colour-primary);
+}

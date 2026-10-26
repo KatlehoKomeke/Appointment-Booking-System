@@ -1,0 +1,84 @@
+.step {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Empty until the times go stale; then the banner sits above the date strip. */
+.staleRegion:not(:empty) {
+  margin-top: var(--space-4);
+}
+
+.muted {
+  margin-top: var(--space-4);
+  color: var(--colour-text-muted);
+}
+
+.problem {
+  margin-top: var(--space-4);
+}
+
+.times {
+  margin-bottom: var(--space-5);
+}
+
+.asOf {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}
+
+/* Refresh beside "Times as of": a button drawn as a link, still a 44 px target. */
+.textButton {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  padding: 0 var(--space-1);
+  border: 0;
+  background: none;
+  color: var(--colour-primary);
+  font-weight: var(--weight-bold);
+  cursor: pointer;
+}
+
+.textButton:hover {
+  color: var(--colour-primary-strong);
+  text-decoration: underline;
+}
+
+.closed,
+.noTimes {
+  margin-top: var(--space-5);
+}
+
+.dayHeading {
+  margin-bottom: var(--space-2);
+  font-size: var(--type-alert-title-size);
+  line-height: var(--type-alert-title-line);
+}
+
+.noTimes {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+/* The choice and Continue stay in reach while the times scroll, edge to edge above the footer. */
+.actionBar {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: 0 calc(-1 * var(--gutter)) calc(-1 * var(--space-6));
+  padding: var(--space-3) var(--gutter) var(--space-4);
+  border-top: 1px solid var(--colour-border);
+  background: var(--colour-card);
+  box-shadow: var(--shadow-action-bar);
+}
+
+.choice {
+  margin-bottom: var(--space-3);
+}
