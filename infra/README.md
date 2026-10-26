@@ -231,16 +231,15 @@ The task is configured by environment variables; there are no `prod` or `demo` S
 | `DB_USER`, `DB_PASSWORD` | From the Secrets Manager secret `branchbook/database`; never in the template |
 | `PUBLIC_BASE_URL` | `https://branchbook.click`, the confirmation SMS's `/manage` link |
 | `BRANCHBOOK_INBOX_ENABLED` | `false`: the simulated inbox is off, so `/api/v1/messages` answers 404 and the `/messages` page says it is switched off on this deployment. Each booker still sees their own SMS and its status on the confirmation page |
-| `BRANCHBOOK_RETENTION_ENABLED` | `true`: an hourly job deletes every booking 48 hours after it was made, with its messages and idempotency keys. Arrives with the next backend change |
-| `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` | `true`: only the published demo numbers, 082 555 0000 to 082 555 0199, may book. Arrives with the next backend change |
+| `BRANCHBOOK_RETENTION_ENABLED` | `true`: an hourly job deletes every booking 48 hours after it was made, with its messages and idempotency keys. Live since 058e6fd |
+| `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` | `true`: only the published demo numbers, 082 555 0000 to 082 555 0199, may book; any other number gets `422 DEMO_NUMBER_REQUIRED`. Live since 058e6fd |
 | `SERVER_FORWARD_HEADERS_STRATEGY` | `native`: the app trusts the load balancer's `X-Forwarded-*` headers, so it sees each request as HTTPS |
 
 **No sign-in.** Anyone with the address can try the demo: a sign-in prompt in front of a demo is a poor experience
 for everyone who opens it, reviewers included
 ([ADR-0006, Notes](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). What keeps real personal data out is
-the demo-number check and the 48-hour deletion above, and the simulated gateway, which sends nothing. Both switches
-are set in the task, but the backend change that reads them is not merged yet; until it is deployed, the app
-ignores them. The inbox is off because, with no sign-in, it would list every booking's reference to every visitor,
+the demo-number check and the 48-hour deletion above, live since 058e6fd, and the simulated gateway, which sends
+nothing. The task logs both at start-up and every hour, so a deployment that lost a switch shows it. The inbox is off because, with no sign-in, it would list every booking's reference to every visitor,
 and a demo number's last four digits are public, so anyone could open anyone's booking and see the name typed into
 it.
 

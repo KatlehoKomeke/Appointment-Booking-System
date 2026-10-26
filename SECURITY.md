@@ -75,8 +75,8 @@ The demo has no sign-in, so it holds no password of its own: a sign-in prompt in
 experience for everyone who opens it, reviewers included. The application keeps real personal data out instead:
 only the published demo numbers, 082 555 0000 to 082 555 0199, may book (`BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY`),
 every booking is deleted 48 hours after it is made (`BRANCHBOOK_RETENTION_ENABLED`), and the simulated gateway sends
-nothing. Both switches are on in the task, but they arrive with the next backend change, which is not merged yet;
-until it is deployed, the app ignores them. The simulated inbox is off on the hosted demo
+nothing. Both have been live since 2026-10-26 (058e6fd): a number outside the range gets `422
+DEMO_NUMBER_REQUIRED` and nothing is written, and the deletion runs every hour. The simulated inbox is off on the hosted demo
 (`BRANCHBOOK_INBOX_ENABLED=false`), so other visitors cannot see anyone's booking; each booker still sees their own
 SMS and its status on the confirmation page.
 
