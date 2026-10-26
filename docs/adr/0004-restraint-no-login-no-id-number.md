@@ -40,3 +40,8 @@ relevant and not excessive for its purpose (section 10).
   in the customer's own SMS and pages, so this is accepted too. The limit's counts are kept in memory for one
   instance ([docs/architecture.md](../architecture.md), section 4).
 - Branch check-in is the natural next feature, and its domain logic already exists.
+
+## Notes
+
+- **2026-10-26.** The risks under Consequences, with their production controls, are listed in
+  [SECURITY.md](../../SECURITY.md#known-risks).
