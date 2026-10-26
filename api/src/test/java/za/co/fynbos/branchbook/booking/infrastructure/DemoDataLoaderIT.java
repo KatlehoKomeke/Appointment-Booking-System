@@ -139,6 +139,43 @@ class DemoDataLoaderIT {
   }
 
   /**
+   * ADR-0006: where only the published demo numbers book, as on the hosted demo, the fixtures,
+   * whose numbers are outside them on purpose, are not booked. The load says why in one INFO line
+   * that holds no number, rather than storing numbers the deployment promises it never takes. The
+   * setting is the only difference from the loader the context holds.
+   */
+  @Test
+  void booksNothingWhereOnlyTheDemoNumbersBook(CapturedOutput output) {
+    BookingProperties demoNumbersOnly =
+        new BookingProperties(
+            rules.leadTime(),
+            rules.horizon(),
+            rules.lookupMaxFailures(),
+            rules.lookupWindow(),
+            true);
+    DemoDataLoader hosted =
+        new DemoDataLoader(
+            booking,
+            calendars,
+            bookedIntervals,
+            jdbcClient,
+            clock,
+            demoNumbersOnly,
+            new DemoDataProperties(true),
+            Runnable::run);
+
+    assertThat(hosted.loadIfEmpty()).isZero();
+
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM appointments", Integer.class)).isZero();
+    assertThat(output.getAll().lines().filter(line -> line.contains("demo_data.")))
+        .singleElement()
+        .asString()
+        .contains("INFO")
+        .contains("demo_data.skipped reason=demo_numbers_only");
+    assertThat(output.getAll()).doesNotContainPattern("60\\D{0,3}000\\D{0,3}000[012]");
+  }
+
+  /**
    * A fixture the database refuses is logged as a warning by branch and service, never by number or
    * name, and the other two are still booked; nothing is thrown. A test-only trigger refuses the
    * second fixture's insert.

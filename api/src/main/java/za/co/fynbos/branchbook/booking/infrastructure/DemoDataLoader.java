@@ -54,7 +54,11 @@ import za.co.fynbos.branchbook.shared.problem.ProblemException;
  * </ul>
  *
  * <p>It runs only when {@code appointments} is empty, so a restart never adds to a database that
- * holds bookings. It runs on a thread of its own, after the application is ready, so it never
+ * holds bookings. It books nothing where {@code branchbook.booking.demo-numbers-only} is on, as on
+ * the hosted demo (ADR-0006): the fixtures' numbers are outside the published demo numbers on
+ * purpose, so the README's walkthrough never meets them, and the handler, which does not check that
+ * rule, would otherwise store numbers that deployment promises it never takes. It says so in one
+ * line at INFO instead. It runs on a thread of its own, after the application is ready, so it never
  * delays readiness, and under one correlation id, {@code sys-<uuid>}, which its log lines and the
  * three confirmations carry. A fixture that cannot be booked is logged as a warning, by its branch
  * and service only, and the others carry on; nothing it does can stop the application.
@@ -137,13 +141,18 @@ class DemoDataLoader {
   }
 
   /**
-   * Books the fixtures if no appointment exists. It never throws: any failure is logged.
+   * Books the fixtures if no appointment exists and the deployment takes any mobile number. It
+   * never throws: any failure is logged.
    *
    * @return how many fixtures were booked
    */
   int loadIfEmpty() {
     try (var _ = MDC.putCloseable(CorrelationIds.MDC_KEY, CorrelationIds.systemId())) {
       try {
+        if (rules.demoNumbersOnly()) {
+          log.info("demo_data.skipped reason=demo_numbers_only");
+          return 0;
+        }
         if (appointmentsExist()) {
           log.info("demo_data.skipped reason=appointments_exist");
           return 0;
