@@ -1,10 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
-  <title id="title">AWS: built today and planned</title>
-  <desc id="desc">What BranchBook has in AWS today, and what the hosted demo will add after M6. Outside AWS, on the left: the Administrator, IAM user branchbook-admin, who signs in with aws login and gets short-lived credentials; GitHub, repository KatlehoKomeke/Appointment-Booking-System, with the environment aws-demo (main and v* tags only, no reviewers) holding the secret AWS_DEPLOY_ROLE_ARN, the workflows deploy.yml (every push to main) and aws-connection-check.yml (manual), and infra.yml, which runs the tests and synth with no AWS access; and, planned after M6, a reviewer's browser. The AWS account, whose ID is never committed, costs $0 a month today apart from cents of bootstrap storage. In us-east-1 (N. Virginia), built: the stack BranchbookAccount, deployed by hand by the administrator, holds the IAM OIDC provider for token.actions.githubusercontent.com with audience sts.amazonaws.com; the AWS Budgets budget branchbook-monthly, $90 a month, which e-mails at $45, $72 and $90; the IAM role branchbook-github-deploy, with sessions of at most 1 hour, whose ARN is the stack output DeployRoleArn, copied once into the secret and never printed; and the IAM policy on that role, which allows only the statements AssumeCdkBootstrapRolesOnly and ReadReleaseRecordOnly. Beside it is the CDK bootstrap stack CDKToolkit, qualifier hnb659fds, with its roles, assets bucket and ECR repository. IAM and Budgets are global; no customer data is held here. In af-south-1 (Cape Town), built: a second CDKToolkit, with the five bootstrap roles deploy, lookup, cfn-exec, file-publishing and image-publishing, an assets bucket and an ECR repository; and the stack BranchbookRelease, deployed by the pipeline, holding the SSM parameter /branchbook/release, Standard tier, which records the last deployed commit. Step A: the administrator runs cdk deploy for BranchbookAccount by hand; the pipeline never deploys it. Step 1: the deploy job in deploy.yml enters the environment aws-demo and signs in through OpenID Connect via AWS STS as the deploy role, with no stored keys. Step 2: the role assumes the af-south-1 bootstrap roles. Step 3: CloudFormation updates BranchbookRelease. Step 4: the job reads /branchbook/release back and fails unless it equals GITHUB_SHA. Planned after M6, dashed, in af-south-1, at about $82 a month before VAT: BranchbookDns, a Route 53 hosted zone for branchbook.co.za, which is not registered yet; BranchbookApp, with AWS WAF (a basic-auth gate, a booking rate limit and an /actuator block), an Application Load Balancer (HTTPS on 443 with an ACM certificate, health check /readyz), CloudWatch (the log group AppLogs kept 7 days, and 3 alarms to the SNS topic Alerts) and one ECS Fargate task (ARM64, 0.5 vCPU, 1 GB, in a public subnet, reachable only from the load balancer, its image in the bootstrap ECR repository); and BranchbookData, with a VPC across 2 Availability Zones, with public and isolated /24 subnets and no NAT gateway, Secrets Manager holding generated database credentials, and RDS for PostgreSQL 17 (db.t4g.micro, Single-AZ, encrypted, 7-day backups) in the isolated subnets. The planned request path runs from the browser to Route 53, AWS WAF, the load balancer, the Fargate task on port 8080, and RDS on port 5432 over JDBC with TLS and no RDS Proxy.</desc>
+  <title id="title">BranchBook in AWS</title>
+  <desc id="desc">What BranchBook has in AWS: the pipeline's release record and the hosted demo at branchbook.click, all built. Outside AWS, on the left: the Administrator, IAM user branchbook-admin, who signs in with aws login and gets short-lived credentials; GitHub, repository KatlehoKomeke/Appointment-Booking-System, with the environment aws-demo (main and v* tags only, no reviewers) holding the secret AWS_DEPLOY_ROLE_ARN, the workflows deploy.yml (every push to main) and aws-connection-check.yml (manual), and infra.yml, which runs the tests and synth with no AWS access; a reviewer's browser, which signs in to the demo gate as the user reviewer; and the administrator's machine, which runs cdk deploy by hand and builds the ARM64 image for ECR. The AWS account, whose ID is never committed, costs about $82 a month before VAT while the demo runs, inside the $90 budget; the domain costs about $3 a year. In us-east-1 (N. Virginia), built: the stack BranchbookAccount, deployed by hand by the administrator, holds the IAM OIDC provider for token.actions.githubusercontent.com with audience sts.amazonaws.com; the AWS Budgets budget branchbook-monthly, $90 a month, which e-mails at $45, $72 and $90; the IAM role branchbook-github-deploy, with sessions of at most 1 hour, whose ARN is the stack output DeployRoleArn, copied once into the secret and never printed; and the IAM policy on that role, which allows only the statements AssumeCdkBootstrapRolesOnly and ReadReleaseRecordOnly. Beside it is the CDK bootstrap stack CDKToolkit, qualifier hnb659fds, with its roles, assets bucket and ECR repository. IAM and Budgets are global; no customer data is held here. In af-south-1 (Cape Town), built: a second CDKToolkit, with the five bootstrap roles deploy, lookup, cfn-exec, file-publishing and image-publishing, an assets bucket and an ECR repository, which holds the app image; the stack BranchbookRelease, deployed by the pipeline, holding the SSM parameter /branchbook/release, Standard tier, which records the last commit the pipeline deployed; and the hosted demo's two stacks, both deployed by the administrator by hand. BranchbookApp holds a Route 53 A alias record for branchbook.click, whose hosted zone Route 53 created when the domain was registered, so there is no DNS stack; AWS WAF, attached to the load balancer, which blocks /actuator with 403, asks for the demo gate's basic-auth credentials with 401, allows 30 booking POSTs to /api/v1/appointments per address in 5 minutes, and applies the AWS managed rule groups for IP reputation, known bad inputs and common threats; an internet-facing Application Load Balancer, HTTPS on 443 with an ACM certificate validated through Route 53 and the recommended TLS 1.3 policy, no plain HTTP served, and invalid header fields dropped; CloudWatch and SNS: the log group /branchbook/app kept 7 days, and 3 alarms (5xx answers, no healthy task, less than 2 GB of database storage) sent to an SNS topic; and one ECS Fargate task, ARM64, 0.5 vCPU, 1 GB, in a public subnet with a public IP and no NAT, reachable only from the load balancer, with the simulated inbox switched on and a deployment circuit breaker that rolls back. BranchbookData holds a VPC, 10.40.0.0/16 across af-south-1a and af-south-1b, with a public and an isolated /24 subnet in each and no NAT gateway; Secrets Manager, holding the generated database credentials branchbook/database, which the task reads as DB_USER and DB_PASSWORD; and RDS for PostgreSQL 17, Single-AZ on db.t4g.micro in the isolated subnets, with 20 GB of gp3 storage growing to 50, encrypted, 7-day backups, TLS required and a final snapshot on deletion; PostgreSQL's own log is not exported, because it can quote a mobile number. Step A, twice: the administrator runs cdk deploy by hand, for BranchbookAccount in us-east-1, and for BranchbookData and BranchbookApp in af-south-1, which also pushes the image to the bootstrap ECR repository; the pipeline deploys none of these. Step 1: the deploy job in deploy.yml enters the environment aws-demo and signs in through OpenID Connect via AWS STS as the deploy role, with no stored keys. Step 2: the role assumes the af-south-1 bootstrap roles. Step 3: CloudFormation updates BranchbookRelease. Step 4: the job reads /branchbook/release back and fails unless it equals GITHUB_SHA. The main path is a reviewer's request: from the browser over HTTPS to Route 53, AWS WAF, the load balancer, the Fargate task on port 8080, health-checked at /readyz, and RDS on port 5432 over TLS, with no RDS Proxy.</desc>
   <!--
     Diagram id: aws-footprint
     Shown in: infra/README.md (What exists today); docs/architecture.md (10.3 In AWS)
-    Sources: infra/bin/branchbook.ts; infra/lib/account-stack.ts; infra/lib/release-stack.ts; infra/cdk.json;
+    Sources: infra/bin/branchbook.ts; infra/lib/account-stack.ts; infra/lib/release-stack.ts;
+      infra/lib/data-stack.ts; infra/lib/app-stack.ts; infra/cdk.json;
       infra/README.md; .github/workflows/deploy.yml; .github/workflows/aws-connection-check.yml;
       .github/workflows/infra.yml; docs/adr/0006-hosted-demo-on-aws-with-cdk.md;
       docs/adr/0007-continuous-deployment-from-main.md;
@@ -18,10 +19,9 @@
       the deploy.yml run history, which shows BranchbookAccount was redeployed by hand after 3f842b1:
         gh api repos/KatlehoKomeke/Appointment-Booking-System/actions/workflows/deploy.yml/runs
           -q '.workflow_runs[] | [.head_sha[0:7], .conclusion]'
-      planned stacks: the architecture page, section Deployment on AWS with CDK
-    Verified at 85cd726 (2026-10-26)
+    Verified at 152b96f (2026-10-26)
     Conventions: docs/assets/diagrams/README.md
-    Planned elements carry class="planned" data-milestone.
+    Planned elements carry class="planned" data-milestone; none is left in this diagram.
   -->
   <style>
 :root{--bg:#F2F5F2;--surface:#FFFFFF;--surface-2:#E8EEE9;--ink:#15201A;--ink-2:#46534C;--ink-3:#69766E;--line:#D3DCD5;--line-strong:#AEBDB3;--accent:#1E6B52;--accent-strong:#164F3D;--accent-soft:#DCEDE4;--bad:#A63650;--bad-soft:#F6E0E6;--warn:#775C10;--warn-soft:#F5ECCD}
@@ -101,17 +101,22 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
       <text class="s mono" x="40" y="522">KatlehoKomeke/</text>
       <text class="s mono" x="40" y="538">Appointment-Booking-System</text>
     </g>
-    <g id="actor-reviewer-browser" class="planned" data-milestone="after-M6">
-      <rect class="box-dash" x="24.5" y="568.5" width="171" height="31" rx="15.5"/>
-      <text class="t tp" x="110" y="589" text-anchor="middle">Reviewer's browser</text>
-      <rect class="pill-plan" x="24.5" y="608.5" width="139" height="19" rx="9.5"/>
-      <text class="pill-plan-t" x="94" y="622" text-anchor="middle">planned · after M6</text>
+    <g id="actor-reviewer-browser">
+      <rect class="box" x="24.5" y="568.5" width="171" height="31" rx="15.5"/>
+      <text class="t" x="110" y="589" text-anchor="middle">Reviewer's browser</text>
+      <text class="s" x="24" y="618">signs in as <tspan class="s mono">reviewer</tspan></text>
+    </g>
+    <g id="node-administrator-machine">
+      <rect class="box" x="24.5" y="630.5" width="207" height="71" rx="8"/>
+      <text class="t" x="36" y="652">Administrator's machine</text>
+      <text class="s" x="36" y="671"><tspan class="s mono">cdk deploy</tspan> · by hand</text>
+      <text class="s" x="36" y="689">builds the ARM64 image</text>
     </g>
   </g>
   <g id="aws-account">
     <rect class="box-soft" x="256.5" y="24.5" width="679" height="731" rx="12"/>
     <text class="g" x="272" y="44">AWS account (ID never committed)</text>
-    <text class="s" x="920" y="44" text-anchor="end">Today: $0 a month (bootstrap storage costs cents)</text>
+    <text class="s" x="920" y="44" text-anchor="end">Demo: about $82 a month before VAT; budget $90</text>
     <g id="region-us-east-1">
       <path class="box-soft" d="M498,60.5 H911.5 A12,12 0 0 1 923.5,72.5 V279.5 A12,12 0 0 1 911.5,291.5 H280.5 A12,12 0 0 1 268.5,279.5 V72.5 A12,12 0 0 1 280.5,60.5 H278"/>
       <text class="g" x="284" y="64">AWS · us-east-1 (N. Virginia)</text>
@@ -177,6 +182,7 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
         <text class="s" x="296" y="382">5 roles: deploy, lookup, cfn-exec,</text>
         <text class="s" x="296" y="400">file- and image-publishing</text>
         <text class="s" x="296" y="418">assets bucket · ECR repository</text>
+        <text class="s" x="296" y="436">ECR holds the app image</text>
       </g>
       <g id="stack-branchbook-release">
         <rect class="box" x="632.5" y="340.5" width="279" height="107" rx="8"/>
@@ -191,105 +197,122 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
         <text class="s mono" x="660" y="415">/branchbook/release</text>
         <text class="s" x="660" y="432">last deployed commit</text>
       </g>
-      <g id="planned-after-m6" class="planned" data-milestone="after-M6">
-        <path class="box-dash" d="M903.5,486.5 A12,12 0 0 1 915.5,498.5 V727.5 A12,12 0 0 1 903.5,739.5 H288.5 A12,12 0 0 1 276.5,727.5 V498.5 A12,12 0 0 1 288.5,486.5 H548"/>
-        <text class="s" x="754" y="491" text-anchor="end">about $82 a month before VAT</text>
-        <rect class="pill-plan" x="764.5" y="476.5" width="139" height="19" rx="9.5"/>
-        <text class="pill-plan-t" x="834" y="490" text-anchor="middle">planned · after M6</text>
-        <g id="stack-branchbook-dns" class="planned" data-milestone="after-M6">
-          <path class="box-dash" d="M420,504.5 H421.5 A8,8 0 0 1 429.5,512.5 V631.5 A8,8 0 0 1 421.5,639.5 H292.5 A8,8 0 0 1 284.5,631.5 V512.5 A8,8 0 0 1 292.5,504.5 H292"/>
-          <text class="t mono tp" x="298" y="509">BranchbookDns</text>
-          <rect class="box-dash" x="296.5" y="516.5" width="121" height="47" rx="6"/>
-          <rect class="aws-net" x="300" y="520" width="4" height="40"/>
-          <text class="t tp" x="312" y="536">Route 53</text>
-          <text class="s" x="312" y="554">hosted zone</text>
-          <text class="s mono" x="296" y="588">branchbook.co.za</text>
-          <text class="s" x="296" y="606">not registered yet</text>
+      <g id="stack-branchbook-app">
+        <rect class="box" x="276.5" y="482.5" width="639" height="158" rx="8"/>
+        <path class="pill-built" d="M277.1,510.5 V490.5 A7.4,7.4 0 0 1 284.5,483.1 H907.5 A7.4,7.4 0 0 1 914.9,490.5 V510.5 Z"/>
+        <text class="t mono" x="288" y="501">BranchbookApp</text>
+        <rect class="pill-built" x="691" y="486" width="213" height="20" rx="10"/>
+        <text class="pill-built-t" x="797.5" y="500" text-anchor="middle">built · administrator, by hand</text>
+        <g id="tile-route-53">
+          <rect class="box" x="288.5" y="518.5" width="170" height="47" rx="6"/>
+          <rect class="aws-net" x="292" y="522" width="4" height="40"/>
+          <text class="t" x="304" y="538">Route 53</text>
+          <text class="s" x="446" y="538" text-anchor="end">A alias</text>
+          <text class="s mono" x="304" y="556">branchbook.click</text>
         </g>
-        <g id="stack-branchbook-app" class="planned" data-milestone="after-M6">
-          <path class="box-dash" d="M578,504.5 H899.5 A8,8 0 0 1 907.5,512.5 V631.5 A8,8 0 0 1 899.5,639.5 H450.5 A8,8 0 0 1 442.5,631.5 V512.5 A8,8 0 0 1 450.5,504.5 H450"/>
-          <text class="t mono tp" x="456" y="509">BranchbookApp</text>
-          <rect class="box-dash" x="454.5" y="516.5" width="175" height="47" rx="6"/>
-          <rect class="aws-sec" x="458" y="520" width="4" height="40"/>
-          <text class="t tp" x="470" y="536">AWS WAF</text>
-          <text class="s" x="470" y="554">auth gate · rate limit</text>
-          <rect class="box-dash" x="660.5" y="516.5" width="235" height="47" rx="6"/>
-          <rect class="aws-net" x="664" y="520" width="4" height="40"/>
-          <text class="t tp" x="676" y="536">Application Load Balancer</text>
-          <text class="s" x="676" y="554">HTTPS 443 · ACM · <tspan class="s mono">/readyz</tspan></text>
-          <rect class="box-dash" x="454.5" y="584.5" width="175" height="47" rx="6"/>
-          <rect class="aws-mgmt" x="458" y="588" width="4" height="40"/>
-          <text class="t tp" x="470" y="604">CloudWatch</text>
-          <text class="s" x="470" y="622">7-day logs · 3 alarms</text>
-          <rect class="box-dash" x="660.5" y="584.5" width="235" height="47" rx="6"/>
-          <rect class="aws-compute" x="664" y="588" width="4" height="40"/>
-          <text class="t tp" x="676" y="604">ECS Fargate</text>
-          <text class="s" x="884" y="604" text-anchor="end">1 task</text>
-          <text class="s" x="676" y="622">ARM64 · 0.5 vCPU · 1 GB</text>
+        <g id="tile-cloudwatch-sns">
+          <rect class="box" x="288.5" y="585.5" width="170" height="47" rx="6"/>
+          <rect class="aws-mgmt" x="292" y="589" width="4" height="40"/>
+          <text class="t" x="304" y="605">CloudWatch · SNS</text>
+          <text class="s" x="304" y="623">7-day logs · 3 alarms</text>
         </g>
-        <g id="stack-branchbook-data" class="planned" data-milestone="after-M6">
-          <path class="box-dash" d="M424,660.5 H899.5 A8,8 0 0 1 907.5,668.5 V719.5 A8,8 0 0 1 899.5,727.5 H292.5 A8,8 0 0 1 284.5,719.5 V668.5 A8,8 0 0 1 292.5,660.5 H292"/>
-          <text class="t mono tp" x="298" y="665">BranchbookData</text>
-          <rect class="box-dash" x="296.5" y="672.5" width="193" height="47" rx="6"/>
-          <rect class="aws-net" x="300" y="676" width="4" height="40"/>
-          <text class="t tp" x="312" y="692">VPC · 2 AZs · no NAT</text>
-          <text class="s" x="312" y="710">public, isolated subnets</text>
-          <rect class="box-dash" x="502.5" y="672.5" width="159" height="47" rx="6"/>
-          <rect class="aws-sec" x="506" y="676" width="4" height="40"/>
-          <text class="t tp" x="518" y="692">Secrets Manager</text>
-          <text class="s" x="518" y="710">database credentials</text>
-          <rect class="box-dash" x="674.5" y="672.5" width="207" height="47" rx="6"/>
-          <rect class="aws-db" x="678" y="676" width="4" height="40"/>
-          <text class="t tp" x="690" y="692">RDS for PostgreSQL 17</text>
-          <text class="s" x="690" y="710">db.t4g.micro · Single-AZ</text>
+        <g id="tile-aws-waf">
+          <rect class="box" x="486.5" y="518.5" width="150" height="114" rx="6"/>
+          <rect class="aws-sec" x="490" y="522" width="4" height="107"/>
+          <text class="t" x="502" y="538">AWS WAF</text>
+          <text class="s" x="502" y="558">blocks <tspan class="s mono">/actuator</tspan></text>
+          <text class="s" x="502" y="577">basic-auth gate</text>
+          <text class="s" x="502" y="596">booking rate limit</text>
+          <text class="s" x="502" y="615">AWS managed rules</text>
+        </g>
+        <g id="tile-load-balancer">
+          <rect class="box" x="664.5" y="518.5" width="239" height="47" rx="6"/>
+          <rect class="aws-net" x="668" y="522" width="4" height="40"/>
+          <text class="t" x="680" y="538">Application Load Balancer</text>
+          <text class="s" x="680" y="556">HTTPS 443 · ACM certificate</text>
+        </g>
+        <g id="tile-ecs-fargate">
+          <rect class="box" x="664.5" y="585.5" width="239" height="47" rx="6"/>
+          <rect class="aws-compute" x="668" y="589" width="4" height="40"/>
+          <text class="t" x="680" y="605">ECS Fargate</text>
+          <text class="s" x="891" y="605" text-anchor="end">1 task</text>
+          <text class="s" x="680" y="623">ARM64 · 0.5 vCPU · 1 GB</text>
+        </g>
+      </g>
+      <g id="stack-branchbook-data">
+        <rect class="box" x="276.5" y="648.5" width="639" height="91" rx="8"/>
+        <path class="pill-built" d="M277.1,676.5 V656.5 A7.4,7.4 0 0 1 284.5,649.1 H907.5 A7.4,7.4 0 0 1 914.9,656.5 V676.5 Z"/>
+        <text class="t mono" x="288" y="667">BranchbookData</text>
+        <rect class="pill-built" x="416" y="652" width="213" height="20" rx="10"/>
+        <text class="pill-built-t" x="522.5" y="666" text-anchor="middle">built · administrator, by hand</text>
+        <g id="tile-vpc">
+          <rect class="box" x="288.5" y="684.5" width="200" height="47" rx="6"/>
+          <rect class="aws-net" x="292" y="688" width="4" height="40"/>
+          <text class="t" x="304" y="704">VPC · 2 AZs · no NAT</text>
+          <text class="s" x="304" y="722">public and isolated subnets</text>
+        </g>
+        <g id="tile-secrets-manager">
+          <rect class="box" x="500.5" y="684.5" width="152" height="47" rx="6"/>
+          <rect class="aws-sec" x="504" y="688" width="4" height="40"/>
+          <text class="t" x="516" y="704">Secrets Manager</text>
+          <text class="s" x="516" y="722">database credentials</text>
+        </g>
+        <g id="tile-rds">
+          <rect class="box" x="664.5" y="684.5" width="239" height="47" rx="6"/>
+          <rect class="aws-db" x="668" y="688" width="4" height="40"/>
+          <text class="t" x="680" y="704">RDS for PostgreSQL 17</text>
+          <text class="s" x="680" y="722">Single-AZ · isolated subnets</text>
         </g>
       </g>
     </g>
   </g>
-  <g id="edges-built">
+  <g id="edges-pipeline">
     <path class="edge" d="M148,86 H280" marker-end="url(#ah)"/>
     <circle class="badge" cx="164" cy="86" r="10"/>
     <text class="badge-t" x="164" y="90" text-anchor="middle">A</text>
     <text class="l mono halo" x="178" y="80">cdk deploy</text>
     <path class="edge" d="M308,258 H216" marker-end="url(#ah)"/>
-    <path class="edge-acc" d="M132,332 V276" marker-end="url(#ah-acc)"/>
+    <path class="edge" d="M132,332 V276" marker-end="url(#ah)"/>
     <circle class="badge" cx="132" cy="304" r="10"/>
     <text class="badge-t" x="132" y="308" text-anchor="middle">1</text>
     <text class="l halo-2" x="146" y="300">keyless OIDC</text>
     <text class="l halo-2" x="146" y="316">through STS</text>
-    <path class="edge-acc" d="M232,228 H292" marker-end="url(#ah-acc)"/>
-    <path class="edge-acc" d="M404,276 V340" marker-end="url(#ah-acc)"/>
+    <path class="edge" d="M232,228 H292" marker-end="url(#ah)"/>
+    <path class="edge" d="M404,276 V340" marker-end="url(#ah)"/>
     <circle class="badge" cx="404" cy="308" r="10"/>
     <text class="badge-t" x="404" y="312" text-anchor="middle">2</text>
     <text class="l halo-2" x="420" y="312">assumes bootstrap roles</text>
-    <path class="edge-acc" d="M528,394 H632" marker-end="url(#ah-acc)"/>
+    <path class="edge" d="M528,394 H632" marker-end="url(#ah)"/>
     <circle class="badge" cx="580" cy="394" r="10"/>
     <text class="badge-t" x="580" y="398" text-anchor="middle">3</text>
     <text class="l halo-2" x="580" y="378" text-anchor="middle">CloudFormation</text>
     <text class="l halo-2" x="580" y="420" text-anchor="middle">update</text>
-    <path class="edge-acc" d="M772,440 V452 Q772,458 766,458 H254 Q248,458 248,452 V366 Q248,360 242,360 H232" marker-end="url(#ah-acc)"/>
+    <path class="edge" d="M772,440 V452 Q772,458 766,458 H254 Q248,458 248,452 V366 Q248,360 242,360 H232" marker-end="url(#ah)"/>
     <circle class="badge" cx="580" cy="458" r="10"/>
     <text class="badge-t" x="580" y="462" text-anchor="middle">4</text>
     <text class="l halo-2" x="566" y="474" text-anchor="end">read back: must equal <tspan class="l mono">GITHUB_SHA</tspan></text>
   </g>
-  <g id="edges-planned" class="planned" data-milestone="after-M6">
-    <path class="edge-dash" d="M196,584 H242 Q248,584 248,578 V546 Q248,540 254,540 H296" marker-end="url(#ah-dash)"/>
-    <path class="edge-dash" d="M418,540 H454" marker-end="url(#ah-dash)"/>
-    <path class="edge-dash" d="M630,540 H660" marker-end="url(#ah-dash)"/>
-    <path class="edge-dash" d="M778,564 V584" marker-end="url(#ah-dash)"/>
-    <text class="l halo-2" x="790" y="578">:8080 · after M6</text>
-    <path class="edge-dash" d="M778,632 V672" marker-end="url(#ah-dash)"/>
-    <text class="l halo-2" x="766" y="654" text-anchor="end">:5432 · JDBC over TLS, no RDS Proxy · after M6</text>
+  <g id="edges-administrator-demo">
+    <path class="edge" d="M232,666 H254 Q260,666 260,660 V630 Q260,624 266,624 H276" marker-end="url(#ah)"/>
+    <path class="edge" d="M254,666 Q260,666 260,672 V688 Q260,694 266,694 H276" marker-end="url(#ah)"/>
+    <circle class="badge" cx="243" cy="666" r="10"/>
+    <text class="badge-t" x="243" y="670" text-anchor="middle">A</text>
+  </g>
+  <g id="edges-request">
+    <path class="edge-acc" d="M196,584 H254 Q260,584 260,578 V548 Q260,542 266,542 H288" marker-end="url(#ah-acc)"/>
+    <text class="l halo" x="225" y="577" text-anchor="middle">HTTPS</text>
+    <path class="edge-acc" d="M459,542 H486" marker-end="url(#ah-acc)"/>
+    <path class="edge-acc" d="M637,542 H664" marker-end="url(#ah-acc)"/>
+    <path class="edge-acc" d="M784,566 V585" marker-end="url(#ah-acc)"/>
+    <text class="l" x="796" y="580"><tspan class="l mono">:8080</tspan> · <tspan class="l mono">/readyz</tspan></text>
+    <path class="edge-acc" d="M784,633 V684" marker-end="url(#ah-acc)"/>
+    <text class="l" x="772" y="667" text-anchor="end"><tspan class="l mono">:5432</tspan> · TLS required</text>
   </g>
   <g id="legend">
-    <rect class="box" x="24.5" y="669.5" width="23" height="13" rx="3"/>
-    <text class="tp" x="56" y="680" font-size="12">Built</text>
-    <rect class="box-dash" x="24.5" y="689.5" width="23" height="13" rx="3"/>
-    <text class="tp" x="56" y="700" font-size="12">Planned, with milestone</text>
-    <path class="edge-acc" d="M24,715.5 H48"/>
-    <text class="tp" x="56" y="720" font-size="12">Main path</text>
-    <path class="edge-dash" d="M24,735.5 H48"/>
-    <text class="tp" x="56" y="740" font-size="12">Planned flow</text>
+    <rect class="box" x="24.5" y="717.5" width="23" height="13" rx="3"/>
+    <text class="tp" x="56" y="728" font-size="12">Built</text>
+    <path class="edge-acc" d="M24,743.5 H48"/>
+    <text class="tp" x="56" y="748" font-size="12">Main path</text>
     <text class="tp" x="24" y="776" font-size="12">AWS category:</text>
     <rect class="aws-compute" x="125" y="765" width="4" height="14"/>
     <text class="tp" x="135" y="776" font-size="12">compute and containers</text>
