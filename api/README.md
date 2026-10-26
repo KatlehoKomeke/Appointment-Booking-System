@@ -1,8 +1,8 @@
 # BranchBook API
 
-The Spring Boot application at the heart of BranchBook. It serves the booking API, runs the confirmation
-dispatcher, and serves the React app from [web/](../web/README.md) on the same origin. How it is structured and why
-is in [docs/architecture.md](../docs/architecture.md).
+The Spring Boot application at the heart of BranchBook. It serves the booking API and the React app from
+[web/](../web/README.md) on the same origin, and will run the confirmation dispatcher (M5). How it is structured and
+why is in [docs/architecture.md](../docs/architecture.md).
 
 **Status (M3):** the schema, the seeded catalogue, the branch API, availability, booking and lookup. The
 application starts, migrates PostgreSQL, answers its health probes, serves the app, lists branches with their
@@ -68,10 +68,10 @@ and after each test and forgets the lookup counts. `Bookings` builds request bod
 and `ScriptedReferenceGenerator`, which replaces the random generator in every integration test, hands out the
 references a test scripts first, so a test can force a reference collision.
 
-The schema is proven directly: `SchemaConstraintIT` runs raw SQL that bypasses the application and shows that each of
-the 54 named constraints (8 primary keys, 3 unique, 35 checks, 6 foreign keys and 2 exclusion constraints)
-rejects what it should, and fails if a constraint is added without a case. It also shows that rows the rules allow
-together, such as back-to-back appointments on one seat, are accepted.
+The schema is proven directly: `SchemaConstraintIT` runs raw SQL that bypasses the application and shows that each
+named constraint rejects what it should, and fails if a constraint is added without a case. It also shows that rows
+the rules allow together, such as back-to-back appointments on one seat, are accepted. The constraints and their
+totals are listed in [docs/architecture.md, section 7](../docs/architecture.md#7-data-model).
 
 ## Configuration
 
@@ -80,10 +80,10 @@ environment supplies the rest:
 
 | Variable | Purpose | Set by |
 |---|---|---|
-| `DB_URL` | JDBC URL of the PostgreSQL database | `compose.yaml` locally; the ECS task definition in AWS |
-| `DB_USER`, `DB_PASSWORD` | Database credentials | `compose.yaml` locally; AWS Secrets Manager in AWS |
+| `DB_URL` | JDBC URL of the PostgreSQL database | `compose.yaml` locally; planned for the hosted demo (after M6): the ECS task definition |
+| `DB_USER`, `DB_PASSWORD` | Database credentials | `compose.yaml` locally; planned for the hosted demo (after M6): AWS Secrets Manager |
 | `PORT` | HTTP port, 8080 by default | Optional |
-| `PUBLIC_BASE_URL` | The address customers reach the app at, which ends the confirmation SMS's `/manage` link. At most 28 characters with no trailing slash, so the longest SMS fits one segment; a longer value stops start-up. `http://localhost:8080` by default. | `compose.yaml` locally (it follows `APP_PORT`); the ECS task definition in AWS |
+| `PUBLIC_BASE_URL` | The address customers reach the app at, which ends the confirmation SMS's `/manage` link. At most 28 characters with no trailing slash, so the longest SMS fits one segment; a longer value stops start-up. `http://localhost:8080` by default. | `compose.yaml` locally (it follows `APP_PORT`); planned for the hosted demo (after M6): the ECS task definition |
 
 The booking rules that are settings rather than code are under `branchbook.booking` in application.yml: the
 two-hour lead time, the thirty-day horizon, and the lookup limit of five wrong tries per reference in an hour.
@@ -103,7 +103,7 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 | `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml) |
 | `/swagger-ui.html` | Swagger UI, to read and try the API |
 | `/` and the app's routes (`/book`, `/manage`, `/messages`, `/privacy`, `/appointments/{reference}`) | The React app |
-| `/readyz` | Readiness: up once the app has started and PostgreSQL answers. Used by Docker and the load balancer. |
+| `/readyz` | Readiness: up once the app has started and PostgreSQL answers. Used by the image's Docker health check; the planned load balancer will use it too. |
 | `/livez` | Liveness: up while the process is healthy. Deliberately ignores the database. |
 | `/actuator/health`, `/actuator/info` | Overall health (no details) and build information |
 
@@ -248,3 +248,6 @@ api/
     └── test/java/za/co/fynbos/branchbook/
         └── support/                     @IntegrationTest, MutableClock, DatabaseReset, Bookings, the container
 ```
+
+**Next:** the module map in [docs/architecture.md, section 3](../docs/architecture.md#3-modules-and-the-dependency-rule),
+and one request through the jar in [section 2.1](../docs/architecture.md#21-one-request-through-the-jar).
