@@ -80,3 +80,17 @@ on this date. Where they depart from the decision above and the notes before thi
 - **The PostgreSQL minor version is 17.11,** the version `make up` runs, which Cape Town offers.
 
 The decision stands.
+
+**2026-10-26, the demo gate removed.** The project owner removed it on the same day.
+
+- **No sign-in, and the inbox off.** A sign-in prompt in front of a demo is a poor experience for everyone who opens
+  it, reviewers included, so WAF no longer asks for basic-auth credentials, and no in-app filter replaces it. WAF
+  still blocks `/actuator`, rate-limits bookings per IP and applies AWS's managed rules, and the load balancer now
+  redirects plain HTTP to HTTPS. The two stacks are in the CDK app when `BRANCHBOOK_HOSTED_DEMO=true`, which replaces
+  `BRANCHBOOK_DEMO_GATE_PASSWORD`. With no gate, the application keeps real data out: only the published demo
+  numbers, 082 555 0000 to 082 555 0199, may book, every booking is deleted after 48 hours, and the simulated gateway
+  sends nothing; the first two arrive with the next backend change, not merged yet. The simulated inbox is off
+  (`BRANCHBOOK_INBOX_ENABLED=false`), because with no sign-in it would list every booking's reference, and a demo
+  number's last four digits are public ([infra/README.md](../../infra/README.md#the-hosted-demo)).
+
+The decision otherwise stands.

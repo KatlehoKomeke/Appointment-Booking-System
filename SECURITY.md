@@ -71,15 +71,19 @@ The GitHub settings behind layers 4 and 6 can be read with
    committed or held by GitHub ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md),
    [infra/README.md](infra/README.md)).
 
-The demo gate is the exception. Its password is read from the administrator's environment
-(`BRANCHBOOK_DEMO_GATE_PASSWORD`) when they deploy, and is never committed, but its base64 form sits in the
-synthesised WAF rule and the CloudFormation template, where anyone who can read the stack in the AWS account can
-see it. That is accepted for a gate that only keeps casual visitors out of a demo with fictional data.
+The demo has no sign-in, so it holds no password of its own: a sign-in prompt in front of a demo is a poor
+experience for everyone who opens it, reviewers included. The application keeps real personal data out instead:
+only the published demo numbers, 082 555 0000 to 082 555 0199, may book (`BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY`),
+every booking is deleted 48 hours after it is made (`BRANCHBOOK_RETENTION_ENABLED`), and the simulated gateway sends
+nothing. Both switches are on in the task, but they arrive with the next backend change, which is not merged yet;
+until it is deployed, the app ignores them. The simulated inbox is off on the hosted demo
+(`BRANCHBOOK_INBOX_ENABLED=false`), so other visitors cannot see anyone's booking; each booker still sees their own
+SMS and its status on the confirmation page.
 
 The hosted demo's other controls, all in [infra/lib/app-stack.ts](infra/lib/app-stack.ts) and
-[infra/lib/data-stack.ts](infra/lib/data-stack.ts): AWS WAF on the load balancer blocks `/actuator` (403), asks for
-the demo gate (401), allows 30 booking `POST`s per address in five minutes and applies AWS's managed rules for
-known bad inputs and addresses; HTTPS uses ELB's recommended TLS 1.3 policy, and plain HTTP is not served at all, so the gate never asks for its password unencrypted; the task
+[infra/lib/data-stack.ts](infra/lib/data-stack.ts): AWS WAF on the load balancer blocks `/actuator` (403), allows 30
+booking `POST`s per address in five minutes and applies AWS's managed rules for known bad inputs and addresses;
+HTTPS uses ELB's recommended TLS 1.3 policy, plain HTTP is redirected to HTTPS, and HSTS keeps browsers there; the task
 accepts only the load balancer, and the database, in subnets with no route to the internet, accepts only the task,
 over TLS (`rds.force_ssl`), encrypted at rest. PostgreSQL's own log is not exported, because a constraint error's
 detail line can quote a mobile number, and the application's logs are kept for seven days.
@@ -161,4 +165,4 @@ These risks are accepted in v1, or reduced but not closed. Each has the control 
 | **Blocking someone's lookup.** Five wrong tries block a known reference for an hour, and the counts are kept in memory for one instance ([docs/architecture.md](docs/architecture.md#lookup)). | Accepted: a reference appears only in the customer's own SMS and pages | A shared rate-limit store, and identity-bound lookups |
 | **The pipeline's access boundary.** IAM alone does not stop a change pushed to `main` from deploying with wider access. | One administrator collaborator and the `aws-demo` branch policy | The hardening options in [infra/README.md](infra/README.md#who-can-change-what-in-aws) |
 | **The hosted demo's database certificate is not verified.** `sslmode=require` encrypts the connection to RDS but does not check the server's certificate, so it does not stop an impostor inside the VPC. | Accepted for the demo: the database is reachable only from the task's security group, in subnets with no internet route | `sslmode=verify-full` with the RDS certificate bundle in the image |
-| **The hosted demo's inbox shows every booking's reference.** The simulated inbox is on, by choice, so reviewers can watch the outbox; recipients are redacted, but each message's text carries its reference. | Accepted for fictional data: only holders of the demo gate's password reach it, a lookup still needs the last four digits, and every booking is deleted after 48 hours | The inbox stays off (`branchbook.inbox.enabled` defaults to false) |
+| **Opening another visitor's booking on the hosted demo.** The demo has no sign-in, and a demo number's last four digits are public, so anyone who learnt a booking's reference could open it and see the name typed into it. The simulated inbox would list every reference. | Reduced: the inbox is off on the hosted demo (`BRANCHBOOK_INBOX_ENABLED=false`), so `/api/v1/messages` answers 404 and a reference appears only on its booker's confirmation page; guessing one meets the lookup rate limit ([BR-13](docs/domain-rules.md#br-13)) | The inbox stays off (`branchbook.inbox.enabled` defaults to false), and lookups are bound to a verified customer |

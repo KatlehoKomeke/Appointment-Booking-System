@@ -420,10 +420,11 @@ administrator deploys the other three by hand. There is no DNS stack: the hosted
 registration.
 
 A reviewer's request to https://branchbook.click: Route 53 resolves the name to the load balancer; AWS WAF, attached
-to the load balancer, blocks `/actuator`, asks for the demo gate's basic-auth credentials and rate-limits bookings;
-the load balancer ends HTTPS and forwards to one ARM64 Fargate task on port 8080; and the task reaches RDS for
-PostgreSQL 17 over TLS, directly. The picture draws Route 53, then WAF, then the load balancer for readability;
-Route 53 only resolves the name. Resources, the request path step by step, deploying, teardown, trust and access
-are in [infra/README.md](../infra/README.md#the-hosted-demo).
+to the load balancer, blocks `/actuator` and rate-limits bookings, with no sign-in; the load balancer redirects plain
+HTTP to HTTPS, ends HTTPS and forwards to one ARM64 Fargate task on port 8080; and the task reaches RDS for
+PostgreSQL 17 over TLS, directly. The simulated inbox is off there, so no visitor sees another's booking
+([ADR-0006, Notes](adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). The picture draws Route 53, then WAF, then the
+load balancer for readability; Route 53 only resolves the name. Resources, the request path step by step,
+deploying, teardown, trust and access are in [infra/README.md](../infra/README.md#the-hosted-demo).
 
 Next: [domain-rules.md](domain-rules.md) for the proofs; [delivery.md](delivery.md) for how it ships.
