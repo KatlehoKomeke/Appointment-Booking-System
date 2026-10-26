@@ -18,5 +18,8 @@
  * branchbook.retention.max-age} for the hosted demo ({@code application.RetentionPurge}, run hourly
  * by {@code infrastructure.RetentionPurgeJob} only while {@code branchbook.retention.enabled} is
  * true).
+ *
+ * <p>From M6: docker compose starts with three demo appointments ({@code
+ * infrastructure.DemoDataLoader}).
  */
 package za.co.fynbos.branchbook.booking;

@@ -108,6 +108,11 @@ branchbook:
     # How long after its booking an appointment is deleted. At least PT24H, the life of an Idempotency-Key (BR-12), so
     # a retry can never book again a booking that was purged; a shorter value stops start-up.
     max-age: PT48H
+  demo-data:
+    # Books three demo appointments at Bellville and Umhlanga, through the real booking path, when the application
+    # starts on an empty database, so the first screen and the simulated inbox have something to show (FR-28). Only
+    # docker compose switches it on: a database that a developer or a test fills itself must stay as they left it.
+    enabled: false
 
 logging:
   pattern:

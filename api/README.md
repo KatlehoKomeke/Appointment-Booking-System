@@ -94,6 +94,7 @@ environment supplies the rest:
 | `PORT` | HTTP port, 8080 by default | Optional |
 | `BRANCHBOOK_DISPATCHER_ENABLED` | Runs the dispatcher that delivers PENDING messages every 2 seconds on its own thread. `true` by default; its interval and the simulated gateway's latency are in application.yml. | Optional; the tests switch it off and drive it themselves |
 | `BRANCHBOOK_INBOX_ENABLED` | Switches on the simulated inbox, `GET /api/v1/messages`, an operator view of every booking's messages, and its retry, `POST /api/v1/messages/{id}/retry`. `false` by default. | `compose.yaml` and `make dev-api` set it to `true`, and so do the tests |
+| `BRANCHBOOK_DEMO_DATA_ENABLED` | Books three demo appointments once the application is ready, if the database has none ([Demo data](#demo-data)). `false` by default. | `compose.yaml` only; `make dev-api` and the tests leave it off |
 | `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` | Takes bookings only from the published demo numbers, 082 555 0000 to 0199, so a public demo is never given a real person's number ([ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md)). Any other South African mobile is `422 DEMO_NUMBER_REQUIRED`. `false` by default. | The hosted demo's ECS task definition sets it to `true`, and `EXPECT_DEMO_NUMBERS_ONLY=1 scripts/smoke.sh <url>` fails if a deployment has it off. The start-up log says which numbers bookings take. `compose.yaml` and `make dev-api` leave it off, and the shared test configuration sets it to `false`; `DemoNumbersOnlyIT` switches it on |
 | `BRANCHBOOK_RETENTION_ENABLED` | `branchbook.retention.enabled`. Switches on the hourly retention job, which deletes every appointment older than the max-age below, with its messages and idempotency keys, keeping the hosted demo's 48-hour promise ([SECURITY.md](../SECURITY.md#personal-information-popia)). `false` by default. | The hosted demo's ECS task definition sets it to `true`, and nothing else does. `compose.yaml`, `make dev-api` and the tests leave it off; the tests call `RetentionPurge` themselves |
 | `BRANCHBOOK_RETENTION_MAX_AGE` | `branchbook.retention.max-age`. How long after its booking an appointment is deleted, as an ISO-8601 duration. `PT48H` by default; less than `PT24H`, the life of an `Idempotency-Key`, stops start-up. | Optional; the default is the hosted demo's promise |
@@ -256,6 +257,30 @@ not its message, which could quote personal data:
   "correlationId": "readme-example-1"
 }
 ```
+
+## Demo data
+
+With `BRANCHBOOK_DEMO_DATA_ENABLED=true` (`branchbook.demo-data.enabled`), which only `compose.yaml` sets, the
+application books three appointments once it is ready, if the `appointments` table is empty, so the first screen
+and the simulated inbox have something to show (FR-28):
+
+| Branch | Service | Customer | Number |
+|---|---|---|---|
+| Bellville Kingsway (`BEL`) | FICA update | Ayanda Demo | +27 60 000 0001 |
+| Umhlanga Ridge (`UMH`) | Card replacement | Pieter Demo | +27 60 000 0002 |
+| Umhlanga Ridge (`UMH`) | FICA update | Priya Demo | +27 60 000 0000 |
+
+[DemoDataLoader](src/main/java/za/co/fynbos/branchbook/booking/infrastructure/DemoDataLoader.java) books each
+through `BookAppointmentHandler`, with its own `Idempotency-Key`, at the first free slot of the branch's next open
+day after today, as `SlotCalendar` finds it, so the lead time, Sundays and public holidays are respected whatever day
+the stack starts. It never books at Polokwane, whose single seats `make demo-409` races for, or at Sandton, which the
+smoke test and the README's walkthrough use. The three confirmations carry one correlation id, `sys-<uuid>`; the one
+to the number ending 0000 fails all five attempts by design and shows as FAILED in the inbox about 30 seconds after
+start-up. The load runs on a virtual thread of its own, `demo-data`, so it never delays readiness, and a fixture that
+cannot be booked is logged as a warning by its branch and service only (`demo_data.fixture_failed`); the application
+carries on. A restart books nothing more while any appointment exists. `DemoDataLoaderIT` drives the loader
+directly, and checks that the loader the application builds hands the load to that thread; `DemoDataPropertiesTest`
+reads `compose.yaml` and checks that the app's environment there switches the loader on.
 
 ## The contract
 

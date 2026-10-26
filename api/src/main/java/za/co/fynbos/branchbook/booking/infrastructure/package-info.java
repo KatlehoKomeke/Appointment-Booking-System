@@ -16,6 +16,9 @@
  *   <li>{@link za.co.fynbos.branchbook.booking.infrastructure.RetentionPurgeJob}: runs the
  *       retention purge every hour, and exists only while {@code branchbook.retention.enabled} is
  *       true.
+ *   <li>{@code DemoDataLoader}: books three demo appointments through the real booking path when
+ *       the application starts on an empty database, only while {@code
+ *       branchbook.demo-data.enabled} is on, as it is in docker compose (FR-28).
  * </ul>
  *
  * <p>This is the only package that imports the PostgreSQL driver, to read a failure's SQLSTATE and

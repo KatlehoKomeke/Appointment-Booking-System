@@ -130,8 +130,10 @@ BranchBook is designed around the Protection of Personal Information Act, even t
 - **Log lines name appointments by id.** *Built in M3.* A reference and the last four digits open an appointment, so log
   lines carry the appointment's id and never its reference.
 - **Synthetic test data only.** Tests and demos use made-up names and the published demo numbers: `082 555 01xx`,
-  and `082 555 0000`, which the simulated gateway always refuses, to show a failed delivery. Never use a real
-  person's details, including your own.
+  and `082 555 0000`, which the simulated gateway always refuses, to show a failed delivery. The demo data that
+  docker compose books on a fresh database uses `+27 60 000 0001`, `+27 60 000 0002` and `+27 60 000 0000`, the last
+  refused like any number ending 0000, with the fictional surname Demo ([api/README.md](api/README.md#demo-data)).
+  Never use a real person's details, including your own.
 - **A hosted demo cannot collect a real number.** *Built; on in the hosted demo only.* While
   `branchbook.booking.demo-numbers-only` is true (`BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true`), a booking is taken
   only for the demo block, `082 555 0000` to `082 555 0199`. Any other South African mobile is refused with
