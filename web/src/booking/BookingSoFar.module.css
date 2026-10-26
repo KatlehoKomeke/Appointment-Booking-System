@@ -1,0 +1,51 @@
+/* No margin of its own: each step that shows the card spaces it, under the step's heading. */
+.rows {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+}
+
+/* Rows sit 12 px either side of a divider; the card's own padding is the space above the first and below the last. */
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+}
+
+.row:first-child {
+  padding-top: 0;
+}
+
+.row:last-child {
+  padding-bottom: 0;
+}
+
+.row + .row {
+  border-top: 1px solid var(--colour-border);
+}
+
+.value {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  margin: 0;
+}
+
+.meta {
+  color: var(--colour-text-muted);
+}
+
+.action {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+/* A 44 px target that does not make the row taller than its 20 px line; the rows' small size, as in the mockups. */
+.change {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target-min);
+  margin: calc(-1 * (var(--target-min) - var(--type-small-line)) / 2) 0;
+  font-weight: var(--weight-bold);
+}

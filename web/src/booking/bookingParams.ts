@@ -41,6 +41,16 @@ export const STEP_LABEL: Readonly<Record<BookingStepId, string>> = {
   review: 'Review',
 };
 
+/**
+ * A step's tab title, before " - BranchBook", so every step names the tab the same way.
+ *
+ * @example `stepDocTitle('datetime')` is "Step 3 of 5: Date and time"
+ * @param step - the step on screen
+ */
+export function stepDocTitle(step: BookingStepId): string {
+  return `Step ${String(STEP_NUMBER[step])} of ${String(BOOKING_STEPS.length)}: ${STEP_LABEL[step]}`;
+}
+
 /** The value of the `step` parameter; the first three steps need none. */
 export type StepParam = 'details' | 'review';
 

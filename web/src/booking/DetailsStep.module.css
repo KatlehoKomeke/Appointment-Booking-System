@@ -1,0 +1,33 @@
+/* The heading, the booking so far, an alert when there is one, and the form sit 16 px apart, as on every step. */
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The heading keeps its own bottom margin; the gap above takes its place here. */
+.step > h1 {
+  margin-bottom: 0;
+}
+
+/* The fields, the privacy notice and Continue sit 16 px apart, as mockup 05 draws them. */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* A plain boxed note rather than a Card: the notice is padded 12 px, where a card is padded 16. */
+.privacy {
+  padding: var(--space-3);
+  border: 1px solid var(--colour-border);
+  border-radius: var(--radius);
+  background: var(--colour-card);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}
+
+.privacy a {
+  font-weight: var(--weight-bold);
+}

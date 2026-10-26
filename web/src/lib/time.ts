@@ -260,6 +260,17 @@ export function sastInstant(date: IsoDate, time: string): string {
 }
 
 /**
+ * An instant some minutes after another, such as the end of a slot from its start and the service's length.
+ *
+ * @example `addMinutes('2026-10-27T09:30:00+02:00', 15)` is "2026-10-27T07:45:00.000Z" (09:45 SAST)
+ * @param instant - an ISO-8601 date and time with an offset
+ * @param minutes - how many minutes later
+ */
+export function addMinutes(instant: string, minutes: number): string {
+  return new Date(Date.parse(instant) + minutes * 60_000).toISOString();
+}
+
+/**
  * Today's date in SAST, which is the date the branches and the API's booking window count from.
  *
  * @param now - the moment to read; defaults to the device's clock

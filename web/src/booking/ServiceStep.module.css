@@ -1,0 +1,147 @@
+.step {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The heading keeps its own bottom margin; the gap above takes its place here. */
+.step > h1 {
+  margin-bottom: 0;
+}
+
+.muted {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}
+
+.cardTop {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+
+.cardHeading {
+  font-size: var(--type-card-heading-size);
+  line-height: var(--type-card-heading-line);
+}
+
+/* A 44 px target that keeps the row as tall as its heading, in the small size the mockups give a Change link. */
+.change {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  min-height: var(--target-min);
+  margin: calc(-1 * (var(--target-min) - var(--type-card-heading-line)) / 2) 0;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  font-weight: var(--weight-bold);
+}
+
+.address {
+  margin-top: var(--space-2);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}
+
+.hours {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  column-gap: var(--space-4);
+  row-gap: var(--space-1);
+  margin-top: var(--space-2);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+}
+
+/* Each row's term and value sit in the grid's two columns. */
+.hoursRow {
+  display: contents;
+}
+
+.days {
+  color: var(--colour-text-muted);
+}
+
+.hours dd {
+  margin: 0;
+}
+
+.services {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.serviceText {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+  padding-top: var(--space-1);
+}
+
+.duration {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}
+
+.choose {
+  flex-shrink: 0;
+  min-width: 88px;
+}
+
+/* 16 px from the duration to the summary's text; the summary's negative margin takes back its larger target. */
+.bring {
+  margin-top: var(--space-4);
+}
+
+/* The disclosure's own marker is replaced by the chevron, which turns to show it is open. */
+.bringSummary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--target-min);
+  margin: calc(-1 * (var(--target-min) - var(--type-small-line)) / 2) 0;
+  color: var(--colour-primary);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  font-weight: var(--weight-bold);
+  cursor: pointer;
+  list-style: none;
+}
+
+.bringSummary::-webkit-details-marker {
+  display: none;
+}
+
+.bringSummary:hover {
+  color: var(--colour-primary-strong);
+  text-decoration: underline;
+}
+
+.bringChevron {
+  transform: rotate(90deg);
+}
+
+.bring[open] .bringChevron {
+  transform: rotate(-90deg);
+}
+
+.documents {
+  margin-top: var(--space-2);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+}
+
+.documents li + li {
+  margin-top: var(--space-1);
+}

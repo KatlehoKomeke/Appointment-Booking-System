@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { problem } from '../test/fixtures';
 import { ApiProblem, type Problem } from './client';
-import { fieldErrors, type ProblemCode, problemMessage } from './problemCopy';
+import { fieldErrors, messageForCode, type ProblemCode, problemMessage } from './problemCopy';
 
 function thrown(body: Problem, headers: Record<string, string> = {}) {
   return new ApiProblem(new Response(null, { status: body.status, headers }), body);
@@ -94,6 +94,14 @@ describe('problemMessage', () => {
 
   it('copes with something that is not an error at all', () => {
     expect(problemMessage('nope').title).toBe('Something went wrong on our side');
+  });
+});
+
+describe('messageForCode', () => {
+  it('words a refusal the page sees coming exactly as the API refusal would be worded', () => {
+    for (const code of ['BRANCH_NOT_FOUND', 'SERVICE_NOT_OFFERED_AT_BRANCH'] as const) {
+      expect(messageForCode(code)).toEqual(problemMessage(thrown(problem(code))));
+    }
   });
 });
 

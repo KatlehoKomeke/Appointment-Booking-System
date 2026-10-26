@@ -1,0 +1,143 @@
+/* The heading brings its own 16 px below it; the sections under it sit 16 px apart. */
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.muted {
+  color: var(--colour-text-muted);
+}
+
+/*
+ * The summary: one fact a row, its Edit link on the right, a divider between rows. The card is flush and the list
+ * pads its sides, so each row's 12 px reaches the card's top and bottom edges as mockup 06 draws them.
+ */
+.facts {
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--space-4);
+}
+
+.fact {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: var(--space-3);
+  padding: var(--space-3) 0;
+}
+
+.fact + .fact {
+  border-top: 1px solid var(--colour-border);
+}
+
+/* A 60-character name or a long address wraps inside the card rather than widening the page on a phone. */
+.label,
+.value,
+.detail {
+  grid-column: 1;
+  overflow-wrap: anywhere;
+}
+
+.label {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}
+
+.value {
+  font-size: var(--type-card-heading-size);
+  line-height: var(--type-card-heading-line);
+  font-weight: var(--weight-bold);
+}
+
+.detail {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}
+
+.time {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.edit {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: center;
+}
+
+/* A link on its own, not in a line of text, so it is a 44 px target. */
+.editLink,
+.actionLink {
+  display: inline-flex;
+  align-items: center;
+  min-width: var(--target-min);
+  min-height: var(--target-min);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  font-weight: var(--weight-bold);
+}
+
+.editLink {
+  justify-content: center;
+}
+
+/* The later times after SLOT_FULL, three across, then the link to every time. */
+.slotActions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+}
+
+.alternatives {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  width: 100%;
+}
+
+.bring {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  background: var(--colour-primary-tint);
+}
+
+.bringHeading {
+  font-size: var(--type-card-heading-size);
+  line-height: var(--type-card-heading-line);
+}
+
+.bringList {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+}
+
+/* 8 px under the list: the section's 4 px gap and 4 px more. */
+.bringNote {
+  margin-top: var(--space-1);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+}
+
+.confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.note {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+  text-align: center;
+}

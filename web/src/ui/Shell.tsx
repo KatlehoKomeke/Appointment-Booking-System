@@ -8,6 +8,7 @@ import { Link, NavLink, Outlet, ScrollRestoration } from 'react-router';
 
 import { Badge } from './Badge';
 import { LeafMark } from './LeafMark';
+import { NavigatedContext, useTrackNavigation } from './navigation';
 import styles from './Shell.module.css';
 
 /**
@@ -19,6 +20,7 @@ import styles from './Shell.module.css';
  */
 export function Shell() {
   const main = useRef<HTMLElement>(null);
+  const navigated = useTrackNavigation();
 
   // The link still points at #main for a browser without scripts; with them, focus moves without a router
   // navigation to the hash.
@@ -55,7 +57,9 @@ export function Shell() {
       </header>
 
       <main id="main" ref={main} tabIndex={-1} className={styles.main}>
-        <Outlet />
+        <NavigatedContext value={navigated}>
+          <Outlet />
+        </NavigatedContext>
       </main>
 
       <footer className={styles.footer}>

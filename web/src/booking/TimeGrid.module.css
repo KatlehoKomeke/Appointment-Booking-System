@@ -1,0 +1,100 @@
+.grid {
+  margin-top: var(--space-5);
+}
+
+.legend {
+  display: block;
+  width: 100%;
+  padding: 0;
+}
+
+.title {
+  font-size: var(--type-alert-title-size);
+  line-height: var(--type-alert-title-line);
+}
+
+.zone {
+  display: block;
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}
+
+.group {
+  margin-top: var(--space-4);
+}
+
+.groupLegend {
+  padding: 0;
+  margin-bottom: var(--space-2);
+  font-weight: var(--weight-semibold);
+  color: var(--colour-text-muted);
+}
+
+/* Four to a row on a phone: a 15-minute service's 36 times are nine rows, and each tile stays wider than 70 px. */
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--button-height);
+  padding: var(--space-1) 0;
+  border: 1px solid var(--colour-control-soft);
+  border-radius: var(--radius);
+  background: var(--colour-card);
+  color: var(--colour-text);
+  cursor: pointer;
+}
+
+.tile:hover {
+  border-color: var(--colour-primary);
+}
+
+/* The radio is hidden, so its tile shows the focus ring. */
+.tile:has(.radio:focus-visible) {
+  outline: 2px solid var(--colour-primary);
+  outline-offset: 2px;
+}
+
+.time {
+  font-size: var(--type-date-size);
+  line-height: var(--type-date-line);
+  font-weight: var(--weight-bold);
+}
+
+.note {
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-line);
+  font-weight: var(--weight-semibold);
+}
+
+.lastSeat .note {
+  color: var(--colour-warn);
+}
+
+.selected,
+.selected:hover {
+  border-color: var(--colour-primary);
+  background: var(--colour-primary);
+  color: var(--colour-card);
+}
+
+.selected .note {
+  color: var(--colour-card);
+}
+
+.full,
+.full:hover {
+  border-style: dashed;
+  border-color: var(--colour-unavailable-edge);
+  background: var(--colour-fill-muted);
+  color: var(--colour-text-muted);
+  cursor: not-allowed;
+}

@@ -133,6 +133,16 @@ export function problemMessage(error: unknown): ProblemMessage {
   return somethingWentWrong(undefined);
 }
 
+/**
+ * The copy for a code, for a refusal the page sees coming before the API would make it, such as a branch in the URL
+ * that the branch list does not have. It is worded exactly as the API's refusal would be.
+ *
+ * @param code - the refusal's code
+ */
+export function messageForCode(code: ProblemCode): ProblemMessage {
+  return COPY[code](undefined);
+}
+
 /** The form fields a problem's `errors[]` can name, by the name the API gives them. */
 const FIELD_NAMES: Readonly<Record<string, BookingFormField>> = {
   'customer.firstName': 'firstName',

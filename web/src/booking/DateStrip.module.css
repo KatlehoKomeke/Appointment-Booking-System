@@ -1,0 +1,128 @@
+.strip {
+  margin-top: var(--space-4);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-2);
+}
+
+.range {
+  font-size: var(--type-alert-title-size);
+  line-height: var(--type-alert-title-line);
+}
+
+.pager {
+  display: flex;
+  flex: none;
+  gap: var(--space-2);
+}
+
+.pagerButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--target-min);
+  height: var(--target-min);
+  padding: 0;
+  border: 1px solid var(--colour-control);
+  border-radius: var(--radius);
+  background: var(--colour-card);
+  color: var(--colour-text);
+  cursor: pointer;
+}
+
+.pagerButton:hover {
+  background: var(--colour-primary-tint);
+}
+
+/* At the window's edge: still focusable, so focus is not lost, but drawn and treated as disabled. */
+.pagerButton[aria-disabled='true'] {
+  border-color: var(--colour-border);
+  background: transparent;
+  color: var(--colour-disabled-icon);
+  cursor: not-allowed;
+}
+
+/* Seven columns, so a short last page keeps the tiles the same width. */
+.dates {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--space-1);
+  padding: 0;
+  list-style: none;
+}
+
+/* Each tile fills its cell, so a tile with "Today" or "Holiday" under the day is no taller than the rest. */
+.dates > li {
+  display: flex;
+}
+
+.date {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 64px;
+  padding: var(--space-1) 0;
+  border: 1px solid var(--colour-control-soft);
+  border-radius: var(--radius);
+  background: var(--colour-card);
+  color: var(--colour-text);
+  cursor: pointer;
+}
+
+.date:hover:not(:disabled) {
+  border-color: var(--colour-primary);
+}
+
+.weekday {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+}
+
+.day {
+  font-size: var(--type-date-size);
+  line-height: var(--type-date-line);
+  font-weight: var(--weight-bold);
+}
+
+.marker {
+  font-size: var(--type-caption-size);
+  line-height: var(--type-caption-line);
+  font-weight: var(--weight-semibold);
+}
+
+.chosen,
+.chosen:hover:not(:disabled) {
+  border-color: var(--colour-primary);
+  background: var(--colour-primary);
+  color: var(--colour-card);
+}
+
+.closed {
+  border-style: dashed;
+  border-color: var(--colour-unavailable-edge);
+  background: var(--colour-fill-muted);
+  color: var(--colour-text-muted);
+  cursor: not-allowed;
+}
+
+.reasons {
+  margin-top: var(--space-2);
+  padding: 0;
+  list-style: none;
+}
+
+.reason {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}

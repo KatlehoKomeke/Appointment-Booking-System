@@ -4,8 +4,8 @@
  * @packageDocumentation
  */
 import { useEffect, useRef, type ReactNode } from 'react';
-import { useLocation } from 'react-router';
 
+import { useArrivedByNavigation } from './navigation';
 import styles from './PageHeading.module.css';
 
 /** What follows every tab title, as in "Step 3 of 5: Date and time - BranchBook". */
@@ -30,15 +30,15 @@ export interface PageHeadingProps {
  * The page heading.
  *
  * It sets `document.title` to `${docTitle ?? title} - BranchBook`, and moves focus to itself (it is `tabIndex={-1}`,
- * so it takes focus without joining the tab order) in two cases: when it mounts after an in-app navigation, so a
- * new page or step is announced from its heading; and when {@link PageHeadingProps.focusKey} changes. On the first
+ * so it takes focus without joining the tab order) in two cases: when it mounts after an in-app navigation, Back
+ * included, so a new page or step is announced from its heading; and when {@link PageHeadingProps.focusKey} changes. On the first
  * page the browser loads, focus stays where the browser put it, so the skip link remains the first thing a
  * keyboard reaches. It needs a router, as every page has.
  */
 export function PageHeading({ title, docTitle, focusKey, lead }: PageHeadingProps) {
   const heading = useRef<HTMLHeadingElement>(null);
-  // The router gives the first location it loads the key "default"; every navigation after it gets a new key.
-  const arrivedByNavigation = useLocation().key !== 'default';
+  // Back to the first page loaded counts too: the control the customer last pressed went with the page they left.
+  const arrivedByNavigation = useArrivedByNavigation();
   const previousKey = useRef(focusKey);
 
   const tabTitle = `${docTitle ?? title}${TITLE_SUFFIX}`;
