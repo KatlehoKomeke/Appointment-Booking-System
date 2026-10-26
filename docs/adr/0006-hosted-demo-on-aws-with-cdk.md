@@ -57,3 +57,26 @@ the public internet must not collect real personal information.
   ([infra/README.md](../../infra/README.md#what-exists-today)).
 - **The budget alarm already exists,** in `BranchbookAccount`. The teardown date will be recorded in
   [infra/README.md](../../infra/README.md) when the app stacks are first deployed.
+
+**2026-10-26, the hosted demo deployed.** `BranchbookData` and `BranchbookApp` were first deployed to `af-south-1`
+on this date. Where they depart from the decision above and the notes before this one
+([infra/README.md](../../infra/README.md#the-hosted-demo)):
+
+- **The domain is `branchbook.click`,** registered through Route 53 on 2026-10-26, not `branchbook.co.za`.
+  `https://branchbook.click` is 24 characters, inside the 28 the SMS allows.
+- **There is no DNS stack.** Route 53 created the hosted zone when the domain was registered, so the stacks are four:
+  `BranchbookAccount`, `BranchbookRelease`, `BranchbookData` and `BranchbookApp`. The zone's ID is in
+  `infra/cdk.json`.
+- **The administrator deploys the demo by hand,** with `cdk deploy BranchbookData BranchbookApp`, not the pipeline.
+  The two stacks are in the CDK app only when `BRANCHBOOK_DEMO_GATE_PASSWORD` is set, which `deploy.yml` never does,
+  so the pipeline still deploys `BranchbookRelease` alone. The image is built for ARM64 on the administrator's machine
+  during the deploy.
+- **There are no `prod` or `demo` Spring profiles.** The task sets environment variables instead: the database URL
+  with `sslmode=require`, the credentials from Secrets Manager, `PUBLIC_BASE_URL`, the simulated inbox on, and
+  `BRANCHBOOK_RETENTION_ENABLED`, which deletes every booking 48 hours after it was made.
+- **Demo numbers are not restricted to personas.** The demo gate limits who can book, and the 48-hour deletion limits
+  how long anything entered stays.
+- **The release record does not record the hosted app's version.** Only the pipeline writes `/branchbook/release`.
+- **The PostgreSQL minor version is 17.11,** the version `make up` runs, which Cape Town offers.
+
+The decision stands.

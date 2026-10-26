@@ -45,11 +45,11 @@ look the appointment up, and cancel it, with the reference and the last four dig
 (M4), the branch, availability, booking and lookup API, the confirmation SMS with its dispatcher and simulated SMS
 gateway (M5), and PostgreSQL 17.*
 
-![BranchBook at a glance: one Spring Boot jar serves the React app and the REST API over PostgreSQL 17. Built: the booking screens, branches, availability, the OpenAPI contract, booking and lookup with the PENDING confirmation SMS, and the dispatcher that sends it through a simulated SMS gateway. Dashed and planned: cancel (Tier 2). Code ships through GitHub Actions and OpenID Connect to AWS, which today holds the deploy role, a budget and a release record; hosting follows M6.](assets/diagrams/system-at-a-glance.svg)
+![BranchBook at a glance: one Spring Boot jar serves the React app and the REST API over PostgreSQL 17. Built: the booking screens, branches, availability, the OpenAPI contract, booking and lookup with the PENDING confirmation SMS, and the dispatcher that sends it through a simulated SMS gateway. Dashed and planned: cancel (Tier 2). Code ships through GitHub Actions and OpenID Connect to AWS, where the hosted demo at branchbook.click is deployed by hand.](assets/diagrams/system-at-a-glance.svg)
 
 - **One deployable, one database.** The jar serves the single-page app and the REST API under `/api/v1`, so there
-  is one origin and no CORS. Locally it is plain HTTP on `127.0.0.1`; HTTPS arrives with the load balancer planned
-  for the hosted demo (after M6).
+  is one origin and no CORS. Locally it is plain HTTP on `127.0.0.1`; in the hosted demo the load balancer ends
+  HTTPS ([10.3](#103-in-aws)).
 - **Everything on the customer path is synchronous.** Background work runs in the same jar: `HolidayCoverageCheck`
   at start-up and daily at 06:00 SAST (M2), `IdempotencyKeyPurgeJob` every hour (M3) and the dispatcher (M5), which
   delivers the outbox rows the booking transaction writes
@@ -226,11 +226,11 @@ The counts live in memory, in a Caffeine cache bounded to 100,000 references. Th
 one instance, with three consequences:
 
 - **They are per instance.** With several instances each would allow five tries; scaling out would move the
-  counts to a shared table or cache. The hosted demo will run one task.
+  counts to a shared table or cache. The hosted demo runs one task.
 - **A restart forgets them.** At worst an attacker gets five more tries per restart, out of 10,000 combinations.
 - **The bound could be flooded.** Evicting one reference's window would take failed lookups of about 100,000
-  others, and Caffeine prefers to keep entries that are used often. A per-address limit at the edge, such as the
-  web application firewall planned for the hosted demo, would close it.
+  others, and Caffeine prefers to keep entries that are used often. A per-address limit on lookups at the edge
+  would close it; the hosted demo's web application firewall limits only booking `POST`s per address today.
 
 Because the window is per reference, someone who knows a reference can block its lookup for an hour. A reference
 is printed only in the customer's own SMS and pages, and production would bind appointments to a verified identity
@@ -363,12 +363,12 @@ number and reference. How the data is protected, and what is planned, is in
 
 ## 10. Deployment
 
-*Status: Partly built. The image and the local stack are built, and every push to `main` deploys a release record
-to AWS. The hosted application is planned after M6.*
+*Status: Built. The image and the local stack are built, every push to `main` deploys a release record to AWS, and
+the hosted demo runs in Cape Town (af-south-1), deployed by the administrator by hand since 2026-10-26.*
 
 ### 10.1 Locally: the image and the stack
 
-![From source to a running stack: a three-stage Dockerfile builds the React app and the jar into branchbook:local (user 10001, /readyz health check). make up runs it with PostgreSQL 17 in Docker Compose on 127.0.0.1 and waits until both are healthy. CI's stack job builds and smoke-tests the same image; a Fargate task is planned after M6.](assets/diagrams/local-runtime.svg)
+![From source to a running stack: a three-stage Dockerfile builds the React app and the jar into branchbook:local (user 10001, /readyz health check). make up runs it with PostgreSQL 17 in Docker Compose on 127.0.0.1 and waits until both are healthy. CI's stack job builds and smoke-tests the same image, which the hosted demo runs as one Fargate task.](assets/diagrams/local-runtime.svg)
 
 `make up` runs `docker compose up --build --detach --wait --wait-timeout 300`, and the numbers in the picture
 follow its start-up order:
@@ -400,7 +400,7 @@ gaps.
 
 ### 10.3 In AWS
 
-![AWS today and planned. Built: in us-east-1, BranchbookAccount holds the GitHub OIDC provider, the deploy role (it may only assume the CDK bootstrap roles and read the release record) and a budget, deployed once by the administrator; in Cape Town, the pipeline deploys BranchbookRelease, one SSM parameter. Dashed, after M6: Route 53, a VPC without NAT, RDS PostgreSQL 17, WAF, a load balancer and one Fargate task.](assets/diagrams/aws-footprint.svg)
+![BranchBook in AWS, all built: the administrator's BranchbookAccount in us-east-1 (GitHub OIDC provider, a narrow deploy role, a $90 budget), the pipeline's release record in Cape Town, and the hosted demo there, deployed by hand, where a reviewer's request runs through Route 53, WAF and a load balancer to one Fargate task and RDS PostgreSQL 17.](assets/diagrams/aws-footprint.svg)
 
 The letter and numbers in the picture:
 
@@ -412,11 +412,18 @@ The letter and numbers in the picture:
 - **3.** CloudFormation updates the `BranchbookRelease` stack.
 - **4.** The job reads `/branchbook/release` back and fails unless it equals `GITHUB_SHA`.
 
-Two stacks are built: `BranchbookAccount` in us-east-1 (the GitHub OIDC provider, the deploy role and the
-budget) and `BranchbookRelease` in Cape Town (`af-south-1`), the release record. Three are planned after M6:
-`BranchbookDns`, `BranchbookData` and `BranchbookApp` ([ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md)). The pipeline deploys with no stored keys
-([ADR-0007](adr/0007-continuous-deployment-from-main.md)). The picture draws the planned request path as Route 53,
-then WAF, then the load balancer for readability; in the design Route 53 only resolves the name, and the WAF is
-attached to the load balancer. Resources, trust and access are in [infra/README.md](../infra/README.md).
+Four stacks are built: `BranchbookAccount` in us-east-1 (the GitHub OIDC provider, the deploy role and the
+budget), and in Cape Town (`af-south-1`) `BranchbookRelease`, the release record, and the hosted demo's
+`BranchbookData` and `BranchbookApp` ([ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md)). The pipeline deploys
+`BranchbookRelease` alone, with no stored keys ([ADR-0007](adr/0007-continuous-deployment-from-main.md)); the
+administrator deploys the other three by hand. There is no DNS stack: the hosted zone came with the domain's Route 53
+registration.
+
+A reviewer's request to https://branchbook.click: Route 53 resolves the name to the load balancer; AWS WAF, attached
+to the load balancer, blocks `/actuator`, asks for the demo gate's basic-auth credentials and rate-limits bookings;
+the load balancer ends HTTPS and forwards to one ARM64 Fargate task on port 8080; and the task reaches RDS for
+PostgreSQL 17 over TLS, directly. The picture draws Route 53, then WAF, then the load balancer for readability;
+Route 53 only resolves the name. Resources, the request path step by step, deploying, teardown, trust and access
+are in [infra/README.md](../infra/README.md#the-hosted-demo).
 
 Next: [domain-rules.md](domain-rules.md) for the proofs; [delivery.md](delivery.md) for how it ships.

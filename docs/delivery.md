@@ -1,7 +1,8 @@
 # Delivery: from a commit to Cape Town
 
 *Status: Built: two git hooks, five workflows, Dependabot, the `Protect main` ruleset, continuous deployment of the release record. Not built:
-required checks on `main` and ci gating the deploy ([Known gaps](#known-gaps)). Planned (after M6): the application stacks.*
+required checks on `main` and ci gating the deploy ([Known gaps](#known-gaps)). The hosted demo's two stacks are
+deployed by the administrator by hand, not by the pipeline ([infra/README.md](../infra/README.md#the-hosted-demo)).*
 
 This page is the one home for how code moves from a laptop to AWS: the hooks, how changes reach `main`, what each
 workflow proves, which workflow runs when, the deployment, Dependabot, the GitHub settings the pipeline relies on,
@@ -36,7 +37,7 @@ A. **Administrator**: `branchbook-admin`, `aws login`, `BRANCHBOOK_ALERT_EMAIL` 
 by hand.
 
 Also drawn: Dependabot's weekly pull requests, the manual `aws-connection-check.yml`, the gap between ci and deploy,
-the stacks planned after M6, and `BranchbookAccount` in us-east-1, which holds the GitHub OIDC provider, the deploy
+the plan for the hosted demo's two stacks to join the deploy job after M6, and `BranchbookAccount` in us-east-1, which holds the GitHub OIDC provider, the deploy
 role and the `branchbook-monthly` budget.
 
 ## On your machine: the hooks
@@ -165,9 +166,10 @@ Every push to `main` runs [deploy.yml](../.github/workflows/deploy.yml)
    read on the run page.
 
 **What the read-back proves:** CloudFormation applied this commit's template in af-south-1. **What it does not
-prove:** that an application is serving (none is hosted until after M6), or that the application's tests passed
-(`ci` runs alongside and is not consulted). The pipeline never sets `BRANCHBOOK_ALERT_EMAIL`, so the CDK app it
-runs does not contain `BranchbookAccount`, the stack that defines its own role. How the trust works, and who can
+prove:** that an application is serving (the hosted demo is deployed by hand, not by this job), or that the
+application's tests passed (`ci` runs alongside and is not consulted). The pipeline never sets
+`BRANCHBOOK_ALERT_EMAIL`, so the CDK app it runs does not contain `BranchbookAccount`, the stack that defines its own
+role; nor `BRANCHBOOK_DEMO_GATE_PASSWORD`, so it does not contain the hosted demo's stacks. How the trust works, and who can
 change what, is in [infra/README.md](../infra/README.md#how-github-reaches-aws-without-keys) and
 [Who can change what in AWS](../infra/README.md#who-can-change-what-in-aws).
 
@@ -209,7 +211,7 @@ group, so each image gets its own pull request. A major version always gets its 
 | `github-actions` | `/` | `actions-minor-and-patch` | none |
 
 The ignored majors are deliberate: Java and Node.js stay on their LTS lines, TypeScript stays on 6.x for
-typescript-eslint, and PostgreSQL stays on 17, the version the planned Amazon RDS database targets
+typescript-eslint, and PostgreSQL stays on 17, the version the hosted demo's Amazon RDS database runs
 ([ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md)). Dependabot alerts and security updates are also on
 ([GitHub settings](#github-settings-this-relies-on)).
 
@@ -259,8 +261,9 @@ Each gap is stated here once, with what limits it today and what would close it.
 
 | Gap | Effect today | What would close it |
 |---|---|---|
-| `main` requires no checks | The `Protect main` ruleset refuses force-pushes and deletion, but no pull request, review or passing check is required, so a red check blocks nothing. On the push of [e8950df](https://github.com/KatlehoKomeke/Appointment-Booking-System/commit/e8950df), [ci failed](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/runs/40211944802) in *Build and run every check* and [deploy passed](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/runs/40211944830); [80e4c83](https://github.com/KatlehoKomeke/Appointment-Booking-System/commit/80e4c83) fixed it. Leaving `main` open is a deliberate choice while one person works on the repository. | Before the application is hosted (after M6): protect `main` with the settings under [With a team](#with-a-team), required checks first. |
-| `deploy` does not wait for `ci` | Harmless while only `BranchbookRelease` deploys: the release record can name a commit whose `ci` failed, as e8950df's did. | Before `BranchbookApp` joins the job: start `deploy` with `workflow_run` after a successful `ci`, call `ci` as a reusable workflow, or rely on required checks. Not yet decided in an ADR. |
+| `main` requires no checks | The `Protect main` ruleset refuses force-pushes and deletion, but no pull request, review or passing check is required, so a red check blocks nothing. On the push of [e8950df](https://github.com/KatlehoKomeke/Appointment-Booking-System/commit/e8950df), [ci failed](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/runs/40211944802) in *Build and run every check* and [deploy passed](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/runs/40211944830); [80e4c83](https://github.com/KatlehoKomeke/Appointment-Booking-System/commit/80e4c83) fixed it. Leaving `main` open is a deliberate choice while one person works on the repository. | Before the pipeline deploys the hosted application: protect `main` with the settings under [With a team](#with-a-team), required checks first. |
+| `deploy` does not wait for `ci` | Harmless while only `BranchbookRelease` deploys: the release record can name a commit whose `ci` failed, as e8950df's did. The hosted demo is deployed by hand, so this job never ships the application. | Before `BranchbookApp` joins the job: start `deploy` with `workflow_run` after a successful `ci`, call `ci` as a reusable workflow, or rely on required checks. Not yet decided in an ADR. |
+| The hosted demo is deployed by hand | The administrator deploys `BranchbookData` and `BranchbookApp` from their own machine, from whatever commit is checked out, and nothing records which; `/branchbook/release` names only what the pipeline deployed. | A pipeline deploy: an `ubuntu-24.04-arm` runner or QEMU for the ARM64 image, and the release record written after a smoke test ([infra/README.md](../infra/README.md#the-hosted-demo)). |
 | Only the head of each push is built | A broken commit in the middle of a push goes unnoticed by `ci`. `secret-scan` still reads every commit. | Run `make test` before each push; with a team, one pull request per change. |
 | `secret-scan` reports after publication | In a public repository, a secret that reaches GitHub is already exposed when the scan finds it. | The pre-commit hook and push protection can stop a secret before it is published; a finding means rotating first ([SECURITY.md](../SECURITY.md#if-a-secret-is-committed)). |
 | Push protection knows provider patterns only | The two custom rules in [.gitleaks.toml](../.gitleaks.toml), a PostgreSQL URL with a password and an ARN with an account ID, are checked only by the hook and `secret-scan`. | Custom secret-scanning patterns that mirror those rules, with push protection on for them. |
@@ -278,7 +281,7 @@ Each gap is stated here once, with what limits it today and what would close it.
 | The test-reference check in `ci / api` | `make test-docs` | The same script. |
 | `ci / stack` | `make up && make smoke` | No credential check of the logs. |
 | `secret-scan / gitleaks` | `make secrets-scan-history` | The same command. `make secrets-scan` scans the working tree instead, untracked files included. |
-| `infra / test-and-synth` and `deploy / test` | `cd infra && npm ci && npm run lint && npm run build && npm test` | There is no make target. `infra` also runs `BRANCHBOOK_ALERT_EMAIL=alerts@example.com npx cdk synth --quiet`. |
+| `infra / test-and-synth` and `deploy / test` | `cd infra && npm ci && npm run lint && npm run build && npm test` | There is no make target. `infra` also runs `npx cdk synth --quiet` with `BRANCHBOOK_ALERT_EMAIL=alerts@example.com` and `BRANCHBOOK_DEMO_GATE_PASSWORD=synth-only-placeholder`. |
 
 `make test` runs `test-api`, `test-web` and `test-docs` in turn ([Makefile](../Makefile)).
 

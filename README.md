@@ -9,7 +9,7 @@ a simulated SMS confirmation that cannot be lost.
 > affiliated with Capitec Bank or any other bank. Every branch, person and phone number in it is made up, and no
 > real message is ever sent.
 
-![BranchBook at a glance: one Spring Boot jar serves the React app and the REST API over PostgreSQL 17. Built: the booking screens, branches, availability, the OpenAPI contract, booking and lookup with the confirmation SMS written in the booking transaction, and the dispatcher that sends it through a simulated SMS gateway. Planned: cancel (Tier 2). Code ships through GitHub Actions and OpenID Connect to AWS, which holds a release record and the deploy role but no part of the application; hosting follows M6.](docs/assets/diagrams/system-at-a-glance.svg)
+![BranchBook at a glance: one Spring Boot jar serves the React app and the REST API over PostgreSQL 17. Built: the booking screens, branches, availability, the OpenAPI contract, booking and lookup with the confirmation SMS written in the booking transaction, and the dispatcher that sends it through a simulated SMS gateway. Planned: cancel (Tier 2). Code ships through GitHub Actions and OpenID Connect to AWS, where the hosted demo at branchbook.click is deployed by hand.](docs/assets/diagrams/system-at-a-glance.svg)
 
 One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Solid parts are built; dashed parts are planned, with their milestone ([key](docs/assets/diagrams/README.md#key)).
 
@@ -20,8 +20,8 @@ One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Soli
 | Stage | Milestones M0 to M5 built: the web app's five-step booking flow, confirmation page, `/manage` and simulated inbox; booking in one transaction that also writes the confirmation SMS; lookup with the reference and the last four digits; and a dispatcher that delivers the SMS through a simulated gateway, with the race proofs. |
 | Design | The whole design, including planned work, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX); its header names the commit it was last checked against. The repository records what is built and wins where the two disagree. |
 | Run locally | `make up`, then open http://localhost:8080 |
-| Hosted demo | Not hosted yet. Planned after M6 in AWS Cape Town (af-south-1), defined in AWS CDK ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)). Today AWS holds the deploy role, a budget and a release record, and no part of the application ([infra/README.md](infra/README.md)). |
-| Deployment | Every push to `main` deploys `BranchbookRelease`, a release record in af-south-1 that holds the deployed commit, through OpenID Connect with no stored keys, after the CDK app's own tests pass ([ADR-0007](docs/adr/0007-continuous-deployment-from-main.md), [docs/delivery.md](docs/delivery.md)). The application's CI runs alongside and does not gate it yet. |
+| Hosted demo | https://branchbook.click, in AWS Cape Town (af-south-1) since 2026-10-26, behind a basic-auth demo gate (user `reviewer`). Defined in AWS CDK and deployed by the administrator by hand; bookings there are deleted 48 hours after they are made ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md), [infra/README.md](infra/README.md#the-hosted-demo)). |
+| Deployment | Every push to `main` deploys `BranchbookRelease`, a release record in af-south-1 that holds the deployed commit, through OpenID Connect with no stored keys, after the CDK app's own tests pass ([ADR-0007](docs/adr/0007-continuous-deployment-from-main.md), [docs/delivery.md](docs/delivery.md)). The application's CI runs alongside and does not gate it yet. The pipeline does not deploy the hosted demo. |
 
 ### Milestones
 
@@ -35,7 +35,7 @@ One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Soli
 | M5 | The dispatcher and simulated SMS gateway, delivery status, the simulated inbox, the race and idempotency proofs | Built |
 | M6 | Tier 2 if time allows, UI states and accessibility, web and end-to-end tests, CI completion | Planned |
 | M7 | Final documentation pass, clean-clone rehearsal, release tag | Planned |
-| AWS | Hosted demo: deploy role, budget and release record built; DNS, data and app stacks after M6 | Partly built |
+| AWS | Hosted demo: the deploy role, budget and release record, and the data and app stacks, deployed by hand on 2026-10-26 | Built |
 
 ## The full design
 
@@ -107,7 +107,7 @@ reaches a database adapter, or a transaction opened outside the application laye
   `secret-scan` and `deploy` start side by side; `infra` joins when `infra/` changes. Pull requests run `ci`,
   `secret-scan` and, for `infra/` changes, `infra`.
 - **Deploying:** `deploy` runs the CDK app's tests, signs in through OpenID Connect, deploys `BranchbookRelease` and
-  reads the recorded commit back. No application is hosted yet.
+  reads the recorded commit back. The hosted demo is deployed by hand, not by `deploy`.
 - **Not gated yet:** `deploy` does not wait for `ci`, and `main` requires no passing checks (it refuses only force-pushes and deletion) ([known gaps](docs/delivery.md#known-gaps)). Each numbered step in the image is explained in [docs/delivery.md](docs/delivery.md#at-a-glance).
 
 ## Technology
@@ -119,7 +119,7 @@ reaches a database adapter, or a transaction opened outside the application laye
 | Front end | React 19, TypeScript (strict), Vite; React Router, TanStack Query, react-hook-form with zod, CSS Modules |
 | API contract | OpenAPI 3.1, generated from the controllers by springdoc and committed; the web app's types are generated from it ([ADR-0005](docs/adr/0005-committed-openapi-contract.md)) |
 | Tests | JUnit, Testcontainers on real PostgreSQL, ArchUnit, Vitest; Playwright (planned, M6) |
-| Delivery | Docker Compose locally, GitHub Actions, AWS CDK (the deploy role and release record today; the hosted demo after M6) |
+| Delivery | Docker Compose locally, GitHub Actions, AWS CDK (the deploy role, the release record and the hosted demo) |
 
 ### Versions
 
@@ -234,7 +234,7 @@ Each part has its own guide: [api/README.md](api/README.md), [web/README.md](web
 ```text
 api/                     the Spring Boot application: the API, and serving the web app
 web/                     the React app
-infra/                   the AWS CDK app: the deploy role, budget and release record today
+infra/                   the AWS CDK app: the deploy role, budget, release record and hosted demo
 docs/                    architecture, delivery, decision records, domain rules, error codes, the API contract
 docs/assets/diagrams/    the SVG diagrams, their key and their rules
 scripts/                 smoke.sh, check-test-refs.sh, major-commits.sh
@@ -285,7 +285,7 @@ holiday also closes the Monday after it (section 2(1)), derived in code: 10 Augu
 
 No secret is stored here. An opt-in pre-commit hook scans each commit, GitHub push protection checks each push, and
 a workflow scans the full history after every push. GitHub Actions reaches AWS through OpenID Connect, so no AWS key
-exists; the hosted demo will read database credentials from AWS Secrets Manager (planned, after M6). All data is
+exists; the hosted demo reads its database credentials from AWS Secrets Manager. All data is
 synthetic. The details are in [SECURITY.md](SECURITY.md).
 
 ## AI assistance

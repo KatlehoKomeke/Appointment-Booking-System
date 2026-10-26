@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
   <title id="title">BranchBook at a glance</title>
-  <desc id="desc">BranchBook at a glance, read top to bottom. Upper band, what runs today with make up. A Customer, using a browser on a phone or laptop, reaches the app over HTTP, locally at 127.0.0.1:8080. Everything runs in one Spring Boot 4.1 jar, branchbook.jar, on Java 25. The main path runs from the Customer to the Web app, to the REST API, to PostgreSQL. The Web app is built (M4): React 19 and TypeScript, served by the jar from one origin, so there is no CORS. Its booking screens call the API through a typed client and TanStack Query. The Web app calls the REST API under /api/v1 with JSON whose types are generated from docs/openapi.yaml, and each request runs on a virtual thread. Built in the REST API: branches (M1), availability (M2), the OpenAPI 3.1 contract with Swagger UI (M2), and book and look up (M3). Planned: cancel (Tier 2). The REST API reaches PostgreSQL through JdbcClient and JPA, one transaction per use case. Modules: catalogue (built, M1), scheduling (built, M2), notification (built, M5: it writes the confirmation SMS from M3 and sends it from M5) and booking (built, M3). A flow from booking writes the appointment and its PENDING confirmation SMS row in one transaction. The shared module holds the packages problem, correlation, security, time, config and web. ArchitectureTest checks that the modules have no cycles and that only application code opens transactions. Background jobs: IdempotencyKeyPurgeJob (built) deletes expired idempotency keys every hour. HolidayCoverageCheck (built) runs at start-up and daily at 06:00 SAST. NotificationDispatcher (built, M5) runs every 2 s, claims due rows from PostgreSQL and sends through SimulatedSmsGateway (built, M5), which sends no real message. PostgreSQL 17 is migrated by Flyway with the btree_gist extension; it has 8 tables and 54 named constraints, and 2 exclusion constraints stop double booking. Lower band, how it ships, left to right: Laptop, where an opt-in pre-commit hook scans for secrets; GitHub, with the workflows ci, secret-scan, infra and deploy; the deploy workflow signs in to AWS through OpenID Connect, so no keys are stored; AWS us-east-1, where the BranchbookAccount stack holds the deploy role and the budget; AWS af-south-1, where the BranchbookRelease stack records the deployed commit; then, planned after M6, the hosted demo: the stacks BranchbookDns, BranchbookData and BranchbookApp for DNS, data and the app.</desc>
+  <desc id="desc">BranchBook at a glance, read top to bottom. Upper band, what runs today with make up. A Customer, using a browser on a phone or laptop, reaches the app over HTTP, locally at 127.0.0.1:8080. Everything runs in one Spring Boot 4.1 jar, branchbook.jar, on Java 25. The main path runs from the Customer to the Web app, to the REST API, to PostgreSQL. The Web app is built (M4): React 19 and TypeScript, served by the jar from one origin, so there is no CORS. Its booking screens call the API through a typed client and TanStack Query. The Web app calls the REST API under /api/v1 with JSON whose types are generated from docs/openapi.yaml, and each request runs on a virtual thread. Built in the REST API: branches (M1), availability (M2), the OpenAPI 3.1 contract with Swagger UI (M2), and book and look up (M3). Planned: cancel (Tier 2). The REST API reaches PostgreSQL through JdbcClient and JPA, one transaction per use case. Modules: catalogue (built, M1), scheduling (built, M2), notification (built, M5: it writes the confirmation SMS from M3 and sends it from M5) and booking (built, M3). A flow from booking writes the appointment and its PENDING confirmation SMS row in one transaction. The shared module holds the packages problem, correlation, security, time, config and web. ArchitectureTest checks that the modules have no cycles and that only application code opens transactions. Background jobs: IdempotencyKeyPurgeJob (built) deletes expired idempotency keys every hour. HolidayCoverageCheck (built) runs at start-up and daily at 06:00 SAST. NotificationDispatcher (built, M5) runs every 2 s, claims due rows from PostgreSQL and sends through SimulatedSmsGateway (built, M5), which sends no real message. PostgreSQL 17 is migrated by Flyway with the btree_gist extension; it has 8 tables and 54 named constraints, and 2 exclusion constraints stop double booking. Lower band, how it ships, left to right: Laptop, where an opt-in pre-commit hook scans for secrets; GitHub, with the workflows ci, secret-scan, infra and deploy; the deploy workflow signs in to AWS through OpenID Connect, so no keys are stored; AWS us-east-1, where the BranchbookAccount stack holds the deploy role and the budget; AWS af-south-1, where the BranchbookRelease stack records the deployed commit; and the hosted demo at branchbook.click, built and deployed by hand by the administrator rather than by the pipeline: the stacks BranchbookData, for the network and the database, and BranchbookApp, for the app behind AWS WAF and a load balancer.</desc>
   <!--
     Diagram id: system-at-a-glance
     Shown in: README.md (hero, under the fictional-bank notice); docs/architecture.md (2. System context and containers)
@@ -10,10 +10,11 @@
       V2__schema.sql; api/src/test/java/za/co/fynbos/branchbook/ArchitectureTest.java; web/package.json;
       web/src/routes.tsx; web/src/api/client.ts; web/src/api/queries.ts; compose.yaml; Makefile; Dockerfile; docs/domain-rules.md (Status lines);
       docs/architecture.md; .githooks/pre-commit; .github/workflows/ci.yml, secret-scan.yml, infra.yml, deploy.yml;
-      infra/bin/branchbook.ts; infra/lib/account-stack.ts; infra/lib/release-stack.ts; infra/README.md
-    Verified at 3985f40 (2026-10-26)
+      infra/bin/branchbook.ts; infra/lib/account-stack.ts; infra/lib/release-stack.ts; infra/lib/data-stack.ts;
+      infra/lib/app-stack.ts; infra/cdk.json; infra/README.md
+    Verified at 152b96f (2026-10-26)
     Conventions: docs/assets/diagrams/README.md
-    Planned elements carry class="planned" data-milestone="tier2|after-M6".
+    Planned elements carry class="planned" data-milestone="tier2".
   -->
   <style>
 :root{--bg:#F2F5F2;--surface:#FFFFFF;--surface-2:#E8EEE9;--ink:#15201A;--ink-2:#46534C;--ink-3:#69766E;--line:#D3DCD5;--line-strong:#AEBDB3;--accent:#1E6B52;--accent-strong:#164F3D;--accent-soft:#DCEDE4;--bad:#A63650;--bad-soft:#F6E0E6;--warn:#775C10;--warn-soft:#F5ECCD}
@@ -229,12 +230,12 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
       <text class="s mono" x="684" y="685" text-anchor="middle">BranchbookRelease</text>
       <text class="s" x="684" y="703" text-anchor="middle">the deployed commit</text>
     </g>
-    <g id="ship-hosted-demo" class="planned" data-milestone="after-M6">
-      <rect class="box-dash" x="788.5" y="644.5" width="147" height="75" rx="8"/>
-      <text class="t tp" x="862" y="666" text-anchor="middle">Hosted demo</text>
-      <rect class="pill-plan" x="796.5" y="673.5" width="131" height="19" rx="9.5"/>
-      <text class="pill-plan-t" x="862" y="687" text-anchor="middle">planned · after M6</text>
-      <text class="s" x="862" y="708" text-anchor="middle">DNS, data and app</text>
+    <g id="ship-hosted-demo">
+      <rect class="box" x="788.5" y="644.5" width="147" height="75" rx="8"/>
+      <text class="t" x="862" y="666" text-anchor="middle">Hosted demo</text>
+      <rect class="pill-built" x="804.5" y="673.5" width="115" height="19" rx="9.5"/>
+      <text class="pill-built-t" x="862" y="687" text-anchor="middle">built · by hand</text>
+      <text class="s mono" x="862" y="708" text-anchor="middle">branchbook.click</text>
     </g>
     <g id="ship-edges">
       <path class="edge" d="M128,682 H152" marker-end="url(#ah)"/>
@@ -244,7 +245,6 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
         <text class="l halo" x="354" y="698" text-anchor="middle">no stored keys</text>
       </g>
       <path class="edge" d="M572,682 H596" marker-end="url(#ah)"/>
-      <path class="edge-dash planned" data-milestone="after-M6" d="M764,682 H788" marker-end="url(#ah-dash)"/>
     </g>
   </g>
   <g id="legend">
@@ -256,8 +256,6 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <text class="tp" x="256" y="752" font-size="12">Planned, with milestone</text>
     <path class="edge-acc" d="M416,747.5 H440"/>
     <text class="tp" x="448" y="752" font-size="12">Main path</text>
-    <path class="edge-dash" d="M528,747.5 H552"/>
-    <text class="tp" x="560" y="752" font-size="12">Planned flow</text>
     <text class="tp" x="24" y="776" font-size="12">AWS category:</text>
     <rect class="aws-sec" x="128" y="765" width="4" height="14"/>
     <text class="tp" x="138" y="776" font-size="12">security</text>
