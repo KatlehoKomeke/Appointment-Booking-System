@@ -41,6 +41,15 @@ status_is() {
   [[ "$actual" == "$2" ]] || { printf '      %s answered %s, expected %s\n' "$1" "$actual" "$2"; return 1; }
 }
 
+# Succeeds if GET <path> answers 404 from the application or 403 from an edge firewall in front of it, such as the
+# hosted demo's WAF, which blocks every /actuator path before the app sees it. Either way the endpoint is closed.
+is_closed() {
+  local actual
+  actual="$(curl --silent --output /dev/null --write-out '%{http_code}' "$base_url$1")"
+  [[ "$actual" == 404 || "$actual" == 403 ]] \
+    || { printf '      %s answered %s, expected 404 or 403\n' "$1" "$actual"; return 1; }
+}
+
 # Succeeds if the body of GET <path> contains the given text.
 body_contains() {
   curl --silent --fail "$base_url$1" | grep --quiet --fixed-strings -- "$2"
@@ -151,7 +160,7 @@ check 'the correlation id is echoed' echoes_correlation_id /api/v1/branches smok
 check 'a rejected request is a 400' status_is '/api/v1/branches;x=1' 400
 check 'a rejected request is a problem' rejected_request_is_a_problem
 check 'an unknown path is a real 404' status_is /no-such-page 404
-check 'operational endpoints are closed' status_is /actuator/env 404
+check 'operational endpoints are closed' is_closed /actuator/env
 check 'content security policy is sent' header_is / Content-Security-Policy \
   "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 check 'framing is denied' header_is / X-Frame-Options DENY
