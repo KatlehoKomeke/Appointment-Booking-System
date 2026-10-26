@@ -19,6 +19,8 @@ each milestone. Where two disagree, the earlier one is right and the later one i
 | [../infra/README.md](../infra/README.md) | The AWS CDK app: what exists in AWS, how GitHub Actions connects without keys, and the first-time setup. | Written; grows with each stack |
 | [../web/README.md](../web/README.md#ui-design) | The UI design: the main Tier 1 screens and states as mockups, the colour, type and spacing tokens, the components, the accessibility decisions and the copy rules. Its images are in [assets/ui/](assets/ui/). | Designed; built in M4 and tested end to end in M6 |
 | [delivery.md](delivery.md) | How code gets from a laptop to AWS: the git hooks, the workflows, continuous deployment, Dependabot, the GitHub settings it relies on and the known gaps. | Written |
+| [production-notes.md](production-notes.md) | What a bank deployment would add or change, each beside where the repository stops today: identity and OTP, a real SMS provider, the database, more than one task, the pipeline, observability, retention under POPIA, and the hosted demo's open access. | Written in M7; nothing in it is planned for a milestone |
+| [porting.md](porting.md) | How the same design would be built on .NET and on Vue 3: what carries over unchanged (the schema, the contract, the rules and their tests) and what is rewritten. | Written in M7; a guide, not a plan |
 | [assets/diagrams/](assets/diagrams/README.md) | Every diagram: where it is shown, what it is drawn from and the commit it was last checked against, plus the rules for drawing one. | Written |
 
 Project-wide policies live at the repository root:
