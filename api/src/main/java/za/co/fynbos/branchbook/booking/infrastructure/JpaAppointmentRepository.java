@@ -20,8 +20,8 @@ import za.co.fynbos.branchbook.booking.domain.AppointmentStatus;
 import za.co.fynbos.branchbook.booking.domain.MobileNumber;
 
 /**
- * Stores appointments: inserts through JPA, the only entity, and the booking transaction's
- * questions as plain SQL.
+ * Stores appointments: inserts, and the cancel's version-checked update, through JPA, the only
+ * entity; the booking transaction's questions as plain SQL.
  *
  * <p>Every query that depends on time binds the instant from the caller and never calls the
  * database's {@code now()} (BR-20). Active means {@link AppointmentStatus#ACTIVE_SQL}, so
@@ -87,6 +87,14 @@ class JpaAppointmentRepository implements AppointmentRepository {
           entityManager.persist(appointment);
           entityManager.flush();
         });
+  }
+
+  @Override
+  public void update(Appointment appointment) {
+    // The appointment is managed, so Hibernate already tracks its changes; the flush writes them
+    // now
+    // with the version check. A cancel frees a seat, so it can break no exclusion constraint.
+    entityManager.flush();
   }
 
   @Override

@@ -16,6 +16,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.IllegalTransactionStateException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
+import za.co.fynbos.branchbook.booking.application.Cancellation;
 import za.co.fynbos.branchbook.booking.application.Confirmation;
 import za.co.fynbos.branchbook.booking.application.NotificationSummary;
 import za.co.fynbos.branchbook.booking.domain.MobileNumber;
@@ -102,6 +103,27 @@ class NotificationOutboxIT {
         .isZero();
   }
 
+  /**
+   * BR-16, BR-24: nor can a cancellation SMS, or the superseding of the confirmation that comes
+   * with it, be written outside the transaction that cancels the appointment. Each would otherwise
+   * commit on its own while the appointment stayed CONFIRMED.
+   */
+  @Test
+  void refusesToWriteTheCancellationOutsideATransaction() {
+    new TransactionTemplate(transactionManager)
+        .executeWithoutResult(status -> outbox.enqueueConfirmation(confirmation()));
+
+    assertThatExceptionOfType(IllegalTransactionStateException.class)
+        .isThrownBy(() -> outbox.enqueueCancellation(cancellation()));
+    assertThat(
+            jdbc.queryForList(
+                "SELECT kind || ' ' || status FROM notification_messages WHERE appointment_id = ?",
+                String.class,
+                APPOINTMENT))
+        .as("the confirmation is not superseded, and no cancellation is written")
+        .containsExactly("CONFIRMATION PENDING");
+  }
+
   @Test
   void summariesMaskTheRecipient() {
     new TransactionTemplate(transactionManager)
@@ -128,6 +150,18 @@ class NotificationOutboxIT {
         "Sandton Summit",
         "FICA update",
         BOOKED);
+  }
+
+  private static Cancellation cancellation() {
+    return new Cancellation(
+        APPOINTMENT,
+        "APT-7K3M-9Q2X",
+        MobileNumber.ofE164("+27825550191"),
+        Instant.parse("2026-10-27T07:30:00Z"),
+        ZoneId.of("Africa/Johannesburg"),
+        "Sandton Summit",
+        "FICA update",
+        BOOKED.plusSeconds(600));
   }
 
   private static Instant instant(Object timestamp) {

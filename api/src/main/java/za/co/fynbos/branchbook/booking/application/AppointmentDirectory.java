@@ -8,12 +8,15 @@ import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import za.co.fynbos.branchbook.booking.domain.Appointment;
+import za.co.fynbos.branchbook.booking.domain.AppointmentStatus;
 import za.co.fynbos.branchbook.catalogue.application.CatalogueLookup;
 
 /**
- * Names appointments for other modules, which may not read booking's tables: the simulated inbox
- * shows each message with its appointment's reference and its branch's times. One query finds the
- * appointments, and each distinct branch is looked up once.
+ * Answers other modules' questions about appointments, so no other module reads booking's tables.
+ * The simulated inbox shows each message with its appointment's reference and its branch's times;
+ * the dispatcher asks whether a confirmation's appointment is cancelled (BR-24). Every answer is a
+ * plain read that takes no lock, so a caller holding a message's row lock can never wait for a
+ * cancel that holds the appointment's.
  */
 @Service
 public class AppointmentDirectory {
@@ -27,7 +30,8 @@ public class AppointmentDirectory {
   }
 
   /**
-   * Labels appointments by id.
+   * Labels appointments by id. One query finds the appointments, and each distinct branch is looked
+   * up once.
    *
    * @param appointmentIds the appointments to label
    * @return a label for each appointment that exists, by its id
@@ -43,5 +47,21 @@ public class AppointmentDirectory {
       labels.put(appointment.id(), new AppointmentLabel(appointment.reference(), zone));
     }
     return labels;
+  }
+
+  /**
+   * Tells whether an appointment has been cancelled, as committed when the caller's statement runs.
+   * The dispatcher asks before it sends a confirmation, so one reset by hand after the cancellation
+   * is never delivered.
+   *
+   * @param appointmentId the appointment's id
+   * @return {@code true} if it exists and is cancelled
+   */
+  @Transactional(readOnly = true)
+  public boolean isCancelled(UUID appointmentId) {
+    return appointments
+        .findById(appointmentId)
+        .map(appointment -> appointment.status() == AppointmentStatus.CANCELLED)
+        .orElse(false);
   }
 }

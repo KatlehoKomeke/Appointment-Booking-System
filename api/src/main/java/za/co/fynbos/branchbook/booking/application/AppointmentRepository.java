@@ -30,6 +30,18 @@ public interface AppointmentRepository {
   void insert(Appointment appointment);
 
   /**
+   * Writes the changes made to an appointment loaded in this transaction, and flushes them at once:
+   * {@code UPDATE ... WHERE id = ? AND version = ?}. So a change another transaction committed
+   * since the appointment was loaded is reported by this call, while the caller can still act on
+   * it, not at commit (BR-14).
+   *
+   * @param appointment the appointment, loaded in this transaction and then changed
+   * @throws org.springframework.dao.OptimisticLockingFailureException if another transaction
+   *     changed the appointment after it was loaded
+   */
+  void update(Appointment appointment);
+
+  /**
    * Finds an appointment by id.
    *
    * @param id the appointment's id

@@ -182,22 +182,22 @@ How to read a rule:
 
 **Rule.** Viewing or cancelling requires the reference plus X-Mobile-Last4; the reference may be typed in lowercase and without hyphens; any mismatch, including an unknown or malformed reference, is 404 APPOINTMENT_NOT_FOUND (never 403), and the digits are compared in constant time; a missing or malformed header is 400 VALIDATION_FAILED and not counted; five wrong lookups of a reference block it, even for the right digits, with 429 LOOKUP_RATE_LIMITED and Retry-After until an hour after the first. The window opens with the first wrong lookup and does not slide. A lookup counts as a try from before the database is read until its digits are compared, and is released if they were right, so lookups that arrive together cannot pass the limit, and a customer's own lookups never lead to the hour-long block (a burst of them may be refused for a second, with Retry-After: 1, while the others are checked).
 
-**Enforced in.** application service (LookupAppointmentHandler + LookupAttemptLimiter: in memory, per instance, bounded to 100,000 references; docs/architecture.md, section 4)
+**Enforced in.** application service (AppointmentAccess, the one check that LookupAppointmentHandler and CancelAppointmentHandler share, + LookupAttemptLimiter: in memory, per instance, bounded to 100,000 references; docs/architecture.md, section 4)
 
-**Proven by.** `AppointmentApiIT.getWithWrongLast4Returns404NotForbidden`, `AppointmentApiIT.getReturnsTheAppointmentWithItsPendingConfirmation`, `AppointmentApiIT.malformedLast4Returns400AndIsNotCounted`, `AppointmentApiIT.sixthWrongLast4WithinHourReturns429`, `LookupAttemptLimiterTest.fifthFailureBlocksTheReferenceUntilAnHourAfterTheFirst`, `LookupAttemptLimiterTest.windowOpensAtTheFirstFailureAndDoesNotSlide`, `LookupAttemptLimiterTest.otherReferencesAreNotAffected`, `LookupAttemptLimiterTest.lookupsArrivingTogetherAdmitOnlyAsManyAsTheLimitLeaves`, `LookupAttemptLimiterTest.lookupsInFlightCountTowardsTheLimit`, `LookupAttemptLimiterTest.lookupsWithTheRightDigitsAreNeverCounted`, `LookupAttemptLimiterTest.staleLookupDoesNotFreeAPlaceInTheNextWindow`, `LookupAttemptLimiterTest.staleLookupDoesNotLoseAFailureInTheNextWindow`, `LookupAppointmentHandlerTest.lookupWhoseReadFailsIsNeitherCountedNorLeftInFlight`
+**Proven by.** `AppointmentApiIT.getWithWrongLast4Returns404NotForbidden`, `AppointmentApiIT.getReturnsTheAppointmentWithItsPendingConfirmation`, `AppointmentApiIT.malformedLast4Returns400AndIsNotCounted`, `AppointmentApiIT.sixthWrongLast4WithinHourReturns429`, `LookupAttemptLimiterTest.fifthFailureBlocksTheReferenceUntilAnHourAfterTheFirst`, `LookupAttemptLimiterTest.windowOpensAtTheFirstFailureAndDoesNotSlide`, `LookupAttemptLimiterTest.otherReferencesAreNotAffected`, `LookupAttemptLimiterTest.lookupsArrivingTogetherAdmitOnlyAsManyAsTheLimitLeaves`, `LookupAttemptLimiterTest.lookupsInFlightCountTowardsTheLimit`, `LookupAttemptLimiterTest.lookupsWithTheRightDigitsAreNeverCounted`, `LookupAttemptLimiterTest.staleLookupDoesNotFreeAPlaceInTheNextWindow`, `LookupAttemptLimiterTest.staleLookupDoesNotLoseAFailureInTheNextWindow`, `LookupAppointmentHandlerTest.lookupWhoseReadFailsIsNeitherCountedNorLeftInFlight`, `CancelAppointmentIT.wrongDigitsReturn404AreCountedAndFiveBlockTheReferenceEvenForTheRightDigits`, `CancelAppointmentIT.malformedOrMissingLast4Returns400AndIsNotCounted`
 
-**Status.** Proven for viewing, from M3. Cancelling, which needs the same proof, is BR-14 (Tier 2).
+**Status.** Proven for viewing, from M3, and for cancelling, from M6 (Tier 2). Wrong cancels and wrong lookups of a reference count towards the same five, and a cancel with the right digits is released like a lookup.
 
 <a id="br-14"></a>
 ## BR-14: Cancellation rules
 
-**Rule.** Cancellation: CONFIRMED -> CANCELLED only while now < starts_at (else 409 TOO_LATE_TO_CANCEL); a repeat cancel is a 200 no-op that queues nothing; the seat is released immediately and a CANCELLATION message is queued in the same transaction. Cancellation is the only status change the API offers.
+**Rule.** Cancellation: CONFIRMED -> CANCELLED only while now < starts_at (else 409 TOO_LATE_TO_CANCEL, and the appointment is left as it was); a repeat cancel is a 200 no-op that queues nothing, even after the start, because an already CANCELLED appointment is recognised first; the seat is released immediately and a CANCELLATION message is queued in the same transaction. Two concurrent cancels both answer 200 and write once: the loser's version check fails at the flush, and it re-reads once in a new transaction and finds the appointment CANCELLED. Cancellation is the only status change the API offers.
 
 **Enforced in.** domain (Appointment.cancel guard, @Version) + application service (CancelAppointmentHandler)
 
-**Proven by.** `CancelAppointmentIT.cancelFreesSeatForNewBooking`
+**Proven by.** `CancelAppointmentIT.cancelFreesSeatForNewBooking`, `CancelAppointmentIT.cancelReturnsTheCancelledAppointmentWithItsSupersededConfirmationAndPendingCancellation`, `CancelAppointmentIT.repeatCancelIsA200NoOpThatQueuesNothing`, `CancelAppointmentIT.cancelAtOrAfterTheStartReturns409TooLateToCancelAndChangesNothing`, `CancelAppointmentIT.twoConcurrentCancelsBothReturn200AndQueueOneCancellation`, `AppointmentTest.cancelBeforeTheStartCancelsAndRecordsWhen`, `AppointmentTest.cancelAtOrAfterTheStartIsTooLateAndChangesNothing`, `AppointmentTest.repeatCancelIsANoOpThatKeepsTheFirstCancellation`, `CancelAppointmentHandlerTest.secondVersionConflictReturns503TryAgain`
 
-**Status.** Planned for Tier 2 (cancellation).
+**Status.** Proven, from M6 (Tier 2). The concurrent cancels are forced, not hoped for: a test-only trigger holds the first at its UPDATE, with the row locked, until the second is seen waiting for that lock.
 
 <a id="br-15"></a>
 ## BR-15: Appointment lifecycle
@@ -215,11 +215,11 @@ How to read a rule:
 
 **Rule.** Every booking writes its PENDING CONFIRMATION rows (SMS always; EMAIL only if the Tier 3 email channel ships and an address was given) and every cancellation its CANCELLATION rows by direct call inside the same transaction; a rolled-back booking leaves no message; appointment status never depends on delivery status.
 
-**Enforced in.** application service (BookAppointmentHandler step 9 -> NotificationOutbox.enqueueConfirmation)
+**Enforced in.** application service (BookAppointmentHandler step 9 -> NotificationOutbox.enqueueConfirmation; CancelAppointmentHandler step 6 -> NotificationOutbox.enqueueCancellation)
 
-**Proven by.** `ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically`, `NotificationOutboxIT.refusesToWriteOutsideATransaction`, `AppointmentApiIT.postReturns201WithLocationReferenceAndPendingNotifications`, `BookAppointmentIT.failureAfterTheSmsIsWrittenRollsTheSmsBackWithTheBooking`, `NotificationDispatcherIT.retriesWithBackoffThenMarksFailedAfterFiveAttempts`
+**Proven by.** `ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically`, `NotificationOutboxIT.refusesToWriteOutsideATransaction`, `NotificationOutboxIT.refusesToWriteTheCancellationOutsideATransaction`, `AppointmentApiIT.postReturns201WithLocationReferenceAndPendingNotifications`, `BookAppointmentIT.failureAfterTheSmsIsWrittenRollsTheSmsBackWithTheBooking`, `NotificationDispatcherIT.retriesWithBackoffThenMarksFailedAfterFiveAttempts`, `CancelAppointmentIT.statusChangeAndCancellationCommitTogether`
 
-**Status.** Proven for confirmations. A booking held just before its commit shows neither row from outside, and both once committed (M5); a failed delivery leaves the appointment CONFIRMED (M5). Cancellation rows arrive with cancellation (BR-14, Tier 2).
+**Status.** Proven. A booking held just before its commit shows neither row from outside, and both once committed (M5); a failed delivery leaves the appointment CONFIRMED (M5). A cancel held as it inserts its CANCELLATION row shows neither the status change, nor the superseded confirmation, nor the new row from outside, and all three, written by one transaction, once committed (M6).
 
 <a id="br-17"></a>
 ## BR-17: Delivery with retries and a final FAILED state
@@ -228,7 +228,7 @@ How to read a rule:
 
 **Enforced in.** application service (NotificationDispatcher.runOnce, driven by notification.infrastructure.DispatcherLoop; the MessageGateway port, implemented by SimulatedSmsGateway) + database (partial index ix_notification_messages_due, row locks)
 
-**Proven by.** `NotificationDispatcherIT.retriesWithBackoffThenMarksFailedAfterFiveAttempts`, `NotificationDispatcherIT.marksSentWithProviderMessageId`, `NotificationDispatcherIT.twoDispatchersNeverSendTheSameMessageTwice`, `NotificationDispatcherIT.poisonedRowDoesNotBlockTheBatch`, `NotificationDispatcherIT.oneTickHandlesAtMostTwentyMessages`, `NotificationDispatcherIT.gatewayThatThrowsIsTriedAgain`, `NotificationDispatcherIT.gatewayErrorMarksTheMessageAndTheBatchCarriesOn`, `MessageGatewayTest.providerIdMustFitItsColumn`, `MessageGatewayTest.longErrorCodeIsCutToItsColumn`, `DispatcherLoopIT.theLoopDeliversOnItsOwnThreadAndLeavesBootsSchedulerInPlace`, `NotificationOutboxIT.writesOnePendingSmsWithTheBoundInstantAndCorrelationId`
+**Proven by.** `NotificationDispatcherIT.retriesWithBackoffThenMarksFailedAfterFiveAttempts`, `NotificationDispatcherIT.marksSentWithProviderMessageId`, `NotificationDispatcherIT.twoDispatchersNeverSendTheSameMessageTwice`, `NotificationDispatcherIT.poisonedRowDoesNotBlockTheBatch`, `NotificationDispatcherIT.oneTickHandlesAtMostTwentyMessages`, `NotificationDispatcherIT.gatewayThatThrowsIsTriedAgain`, `NotificationDispatcherIT.gatewayErrorMarksTheMessageAndTheBatchCarriesOn`, `MessageGatewayTest.providerIdMustFitItsColumn`, `MessageGatewayTest.longErrorCodeIsCutToItsColumn`, `DispatcherLoopIT.theLoopDeliversOnItsOwnThreadAndLeavesBootsSchedulerInPlace`, `NotificationOutboxIT.writesOnePendingSmsWithTheBoundInstantAndCorrelationId`, `NotificationDispatcherIT.confirmationWhoseCancellationCheckFailsStaysPendingForTheNextTick`
 
 **Status.** Proven, from M5. The dispatcher's tests drive runOnce with the clock's instant, so none sleeps; only DispatcherLoopIT waits, up to 5 seconds, for the real loop on its own thread. The retry endpoint is Tier 2; until it ships, docs/runbook.md holds the guarded SQL that replays a FAILED message.
 
@@ -250,9 +250,9 @@ How to read a rule:
 
 **Enforced in.** domain (MobileNumber, CustomerName, AppointmentReference: each toString is redacted) + database constraint (customer_mobile CHECK; log_error_verbosity=terse, log_min_error_statement=panic) + driver (pgjdbc logServerErrorDetail=false) + configuration (Hibernate's SQL error log off) + application service (ProblemDetailHandler never echoes input and logs failures without their messages; log lines carry appointment ids, codes and constraint names only)
 
-**Proven by.** `MobileNumberTest.sixInputFormatsNormaliseToPlus27825550101`, `MobileNumberTest.rejectsLandline021Voip087AndTollFree080`, `MobileNumberTest.rendersDisplayMaskedRedactedAndLastFour`, `MobileNumberTest.toStringNeverShowsTheDigits`, `SchemaConstraintIT.mobileCheckMatchesMobileNumberPattern`, `AppointmentApiIT.postWithLandlineReturns422MobileNumberRequiredFieldError`, `AppointmentApiIT.responsesNeverContainUnmaskedMobile`, `NotificationOutboxIT.summariesMaskTheRecipient`, `AppointmentReferenceTest.toStringNeverShowsTheReference`, `LookupAttemptLimiterTest.attemptNeverShowsTheReference`, `ResponseToStringTest.appointmentResponseShowsNeitherTheReferenceNorTheCustomerNorTheMessages`, `ResponseToStringTest.notificationSummaryShowsNeitherTheRecipientNorTheBody`, `InboxApiIT.listsTheNewestMessagesWithTheirReferencesAndRedactedRecipients`, `LogRedactionIT.bookingLogsContainNoCustomerNameOrMobile`
+**Proven by.** `MobileNumberTest.sixInputFormatsNormaliseToPlus27825550101`, `MobileNumberTest.rejectsLandline021Voip087AndTollFree080`, `MobileNumberTest.rendersDisplayMaskedRedactedAndLastFour`, `MobileNumberTest.toStringNeverShowsTheDigits`, `SchemaConstraintIT.mobileCheckMatchesMobileNumberPattern`, `AppointmentApiIT.postWithLandlineReturns422MobileNumberRequiredFieldError`, `AppointmentApiIT.responsesNeverContainUnmaskedMobile`, `NotificationOutboxIT.summariesMaskTheRecipient`, `AppointmentReferenceTest.toStringNeverShowsTheReference`, `LookupAttemptLimiterTest.attemptNeverShowsTheReference`, `ResponseToStringTest.appointmentResponseShowsNeitherTheReferenceNorTheCustomerNorTheMessages`, `ResponseToStringTest.notificationSummaryShowsNeitherTheRecipientNorTheBody`, `InboxApiIT.listsTheNewestMessagesWithTheirReferencesAndRedactedRecipients`, `LogRedactionIT.bookingLogsContainNoCustomerNameOrMobile`, `LogRedactionIT.cancelLogsContainNoCustomerNameMobileOrReference`
 
-**Status.** Proven for every surface that exists. The mobile number CHECK and the database and driver settings from M1; parsing, masking and the log proof from M3; the simulated inbox, which shows only the redacted form, from M4.
+**Status.** Proven for every surface that exists. The mobile number CHECK and the database and driver settings from M1; parsing, masking and the log proof from M3; the simulated inbox, which shows only the redacted form, from M4; cancel, whose log lines name the appointment by id, from M6.
 
 <a id="br-20"></a>
 ## BR-20: Time is stored in UTC and shown in SAST
@@ -294,20 +294,20 @@ How to read a rule:
 
 **Enforced in.** application service (each refusal's fixed detail; ProblemDetailHandler, ConstraintViolationTranslator)
 
-**Proven by.** `AppointmentApiIT.noProblemBodyEverContainsAnAppointmentReference`, `AppointmentApiIT.conflict409BodiesNeverContainReferenceOrStartsAt`, `BookAppointmentIT.sameMobileSameServiceSecondBookingReturns409WithoutRevealingReference`
+**Proven by.** `AppointmentApiIT.noProblemBodyEverContainsAnAppointmentReference`, `AppointmentApiIT.conflict409BodiesNeverContainReferenceOrStartsAt`, `BookAppointmentIT.sameMobileSameServiceSecondBookingReturns409WithoutRevealingReference`, `CancelAppointmentIT.cancelAtOrAfterTheStartReturns409TooLateToCancelAndChangesNothing`
 
-**Status.** Proven, for booking and lookup.
+**Status.** Proven, for booking, lookup and cancel; a cancel's 409 TOO_LATE_TO_CANCEL names no reference (M6).
 
 <a id="br-24"></a>
 ## BR-24: No confirmation after a cancellation
 
 **Rule.** A confirmation is never delivered after its appointment's cancellation: enqueueCancellation sets the appointment's PENDING or FAILED CONFIRMATION rows to FAILED with failure_reason SUPERSEDED_BY_CANCELLATION in the cancel transaction (waiting at most one in-flight send for the row lock), and retry refuses CONFIRMATION rows of a cancelled or started appointment (200 no-op returning the row unchanged).
 
-**Enforced in.** application service (NotificationOutbox.enqueueCancellation, RetryMessageHandler guard)
+**Enforced in.** application service (NotificationOutbox.enqueueCancellation; NotificationDispatcher, which asks booking's AppointmentDirectory before it sends a confirmation and supersedes one whose appointment is cancelled; RetryMessageHandler guard, with the retry endpoint) + database (row locks: the supersede waits for the dispatcher's lock on a message in flight)
 
-**Proven by.** `NotificationDispatcherIT.pendingConfirmationIsSupersededByCancellation`
+**Proven by.** `NotificationDispatcherIT.pendingConfirmationIsSupersededByCancellation`, `NotificationDispatcherIT.confirmationInFlightWhenTheCancelArrivesIsSentBeforeTheCancellation`, `NotificationDispatcherIT.confirmationOfACancelledAppointmentResetByHandIsSupersededAtTheClaimNotSent`, `CancelAppointmentIT.cancellationSupersedesPendingAndFailedConfirmationsAndLeavesASentOneAlone`, `NotificationDispatcherIT.confirmationWhoseCancellationCheckFailsStaysPendingForTheNextTick`
 
-**Status.** Planned for Tier 2 (cancellation).
+**Status.** Proven, from M6 (Tier 2). A confirmation is delivered before its cancellation or never: one already in the gateway when the cancel arrives is marked SENT first, and the cancel then leaves it alone and queues the cancellation behind it. The dispatcher never locks the appointment, so a cancel (appointment, then message) and a send (message only) cannot deadlock. A dispatcher that cannot ask whether the appointment is cancelled sends nothing and marks nothing: the message stays PENDING for the next tick. The retry's refusal arrives with the retry endpoint (FR-18).
 
 <a id="br-25"></a>
 ## BR-25: Past appointments never block a new booking
@@ -316,6 +316,6 @@ How to read a rule:
 
 **Enforced in.** application service (BookAppointmentHandler step 5: ends_at > :now) + domain (Appointment.canCancel(now))
 
-**Proven by.** `BookAppointmentIT.pastConfirmedAppointmentDoesNotBlockSameServiceBooking`, `AppointmentTest.canCancelOnlyBeforeTheStart`
+**Proven by.** `BookAppointmentIT.pastConfirmedAppointmentDoesNotBlockSameServiceBooking`, `AppointmentTest.canCancelOnlyBeforeTheStart`, `AppointmentTest.cancelAtOrAfterTheStartIsTooLateAndChangesNothing`, `CancelAppointmentIT.cancelAtOrAfterTheStartReturns409TooLateToCancelAndChangesNothing`
 
-**Status.** Proven. The response's `canCancel` comes from `Appointment.canCancel(now)`; the cancel endpoint and its 409 TOO_LATE_TO_CANCEL are BR-14 (Tier 2).
+**Status.** Proven. The response's `canCancel` comes from `Appointment.canCancel(now)`, and `Appointment.cancel(now)` applies the same rule: from M6, a cancel at or after the start is 409 TOO_LATE_TO_CANCEL and leaves the appointment CONFIRMED.

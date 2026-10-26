@@ -1,6 +1,7 @@
 /**
  * The booking domain: the {@link za.co.fynbos.branchbook.booking.domain.Appointment} aggregate, its
- * {@linkplain za.co.fynbos.branchbook.booking.domain.AppointmentStatus lifecycle}, the customer's
+ * {@linkplain za.co.fynbos.branchbook.booking.domain.AppointmentStatus lifecycle} and the {@link
+ * za.co.fynbos.branchbook.booking.domain.CancelOutcome outcome} of cancelling it, the customer's
  * details, and the values a booking is made of: {@link
  * za.co.fynbos.branchbook.booking.domain.MobileNumber}, {@link
  * za.co.fynbos.branchbook.booking.domain.CustomerName}, {@link

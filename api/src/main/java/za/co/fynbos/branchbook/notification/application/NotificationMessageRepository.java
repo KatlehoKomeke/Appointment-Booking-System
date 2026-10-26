@@ -73,6 +73,25 @@ public interface NotificationMessageRepository {
   void markFailed(UUID id, int attempts, String failureReason, String lastError);
 
   /**
+   * Marks FAILED with {@code SUPERSEDED_BY_CANCELLATION} every CONFIRMATION of an appointment that
+   * is still PENDING or FAILED, in the caller's transaction (BR-24). A confirmation the dispatcher
+   * is sending is locked, so this waits for that one send to be marked and then leaves the message
+   * alone if it went out: a confirmation is delivered before its cancellation, or never.
+   *
+   * @param appointmentId the appointment being cancelled
+   * @return how many confirmations were superseded
+   */
+  int supersedeConfirmations(UUID appointmentId);
+
+  /**
+   * Marks one message FAILED with {@code SUPERSEDED_BY_CANCELLATION}, for a confirmation the
+   * dispatcher claimed whose appointment is cancelled (BR-24).
+   *
+   * @param id the message, locked by the caller
+   */
+  void markSuperseded(UUID id);
+
+  /**
    * Marks a still-PENDING message FAILED with {@code DISPATCH_ERROR}, after marking its outcome
    * failed.
    *

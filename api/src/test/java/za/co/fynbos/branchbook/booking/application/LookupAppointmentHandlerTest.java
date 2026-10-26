@@ -29,10 +29,11 @@ class LookupAppointmentHandlerTest {
 
   private final LookupAppointmentHandler handler =
       new LookupAppointmentHandler(
-          appointments,
-          new LookupAttemptLimiter(
-              new BookingProperties(
-                  Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false)),
+          new AppointmentAccess(
+              appointments,
+              new LookupAttemptLimiter(
+                  new BookingProperties(
+                      Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false))),
           mock(AppointmentViews.class),
           Clock.fixed(Instant.parse("2026-10-26T06:00:00Z"), ZoneOffset.UTC));
 

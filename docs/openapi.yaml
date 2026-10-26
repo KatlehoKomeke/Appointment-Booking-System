@@ -19,7 +19,7 @@ tags:
   name: Simulated inbox
 - description: The slots a service can be booked in at a branch.
   name: Availability
-- description: "Book an appointment, and open it again."
+- description: "Book an appointment, open it again, and cancel it."
   name: Appointments
 paths:
   /api/v1/appointments:
@@ -162,6 +162,91 @@ paths:
                 type: integer
               style: simple
       summary: Open an appointment
+      tags:
+      - Appointments
+  /api/v1/appointments/{reference}/cancel:
+    post:
+      description: "Needs the reference and the last four digits, exactly as opening\
+        \ the appointment does, and counts wrong digits towards the same limit. Cancelling\
+        \ frees the seat at once and queues a cancellation SMS in the same transaction;\
+        \ a confirmation still PENDING or FAILED is marked FAILED with SUPERSEDED_BY_CANCELLATION\
+        \ and is not sent from then on. Cancelling again, or from two tabs at once,\
+        \ returns the same 200 and writes nothing more. Only possible before the appointment\
+        \ starts."
+      operationId: cancelAppointment
+      parameters:
+      - description: The reference; case and hyphens do not matter
+        example: APT-7K3M-9Q2X
+        in: path
+        name: reference
+        required: true
+        schema:
+          type: string
+      - description: The last four digits of the mobile number used to book
+        example: "0101"
+        in: header
+        name: X-Mobile-Last4
+        required: true
+        schema:
+          type: string
+          pattern: "^[0-9]{4}$"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+          description: "Cancelled now, or already cancelled"
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "VALIDATION_FAILED: X-Mobile-Last4 is missing or not four digits"
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "APPOINTMENT_NOT_FOUND: the reference and the digits match\
+            \ no appointment"
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "TOO_LATE_TO_CANCEL: the appointment has started; it is left\
+            \ as it was, still CONFIRMED"
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "LOOKUP_RATE_LIMITED: five wrong tries for this reference,\
+            \ lookups and cancels together, or too many of its tries at once"
+          headers:
+            Retry-After:
+              description: "Seconds until the reference can be tried again: what is\
+                \ left of the hour after five wrong tries, or 1 when other tries of\
+                \ it are being checked"
+              schema:
+                type: integer
+              style: simple
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "TRY_AGAIN: the appointment or its messages stayed locked for\
+            \ 2 seconds, another change of the appointment won the race twice, or\
+            \ the database is unavailable; the appointment is left as it was"
+          headers:
+            Retry-After:
+              description: Seconds to wait before trying again
+              schema:
+                type: integer
+              style: simple
+      summary: Cancel an appointment
       tags:
       - Appointments
   /api/v1/branches:

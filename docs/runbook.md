@@ -33,6 +33,10 @@ A message is in one of three states:
     `0000`, such as 082 555 0000, so this is how a failed delivery is shown.
   - `DISPATCH_ERROR` with `lastError` `MARK_FAILED`: the gateway was called, but the outcome could not be recorded,
     so the message was set FAILED rather than risk sending it again and again. It may have been delivered once.
+  - `SUPERSEDED_BY_CANCELLATION`: a confirmation that was still PENDING or FAILED when the customer cancelled. The
+    cancellation SMS replaces it, and it is not sent from then on ([BR-24](domain-rules.md#br-24)). Its `lastError`
+    is kept: if it is `MARK_FAILED`, the confirmation was handed to the gateway once before the cancel and may have
+    been delivered.
 
 An appointment never depends on its messages: a FAILED confirmation leaves the booking CONFIRMED.
 
@@ -63,7 +67,9 @@ WHERE m.id = '00000000-0000-0000-0000-000000000000'
 ```
 
 It reports `UPDATE 1` when the message was replayed, and `UPDATE 0` when the guard refused it. The dispatcher picks
-the message up within 2 seconds. A message to 082 555 0000 will fail again, by design.
+the message up within 2 seconds. Should a confirmation of a cancelled appointment ever be set PENDING by other
+means, the dispatcher marks it `SUPERSEDED_BY_CANCELLATION` instead of sending it. A message to 082 555 0000 will
+fail again, by design.
 
 ## Did the 48-hour purge run?
 

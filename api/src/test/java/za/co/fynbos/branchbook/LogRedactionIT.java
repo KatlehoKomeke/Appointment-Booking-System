@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static za.co.fynbos.branchbook.support.Bookings.body;
 import static za.co.fynbos.branchbook.support.Bookings.book;
+import static za.co.fynbos.branchbook.support.Bookings.cancel;
 import static za.co.fynbos.branchbook.support.Bookings.customer;
 import static za.co.fynbos.branchbook.support.Bookings.lookup;
 
@@ -33,13 +34,15 @@ import za.co.fynbos.branchbook.booking.domain.CustomerName;
 import za.co.fynbos.branchbook.booking.domain.MobileNumber;
 import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
+import za.co.fynbos.branchbook.support.MutableClock;
 import za.co.fynbos.branchbook.support.ScriptedReferenceGenerator;
 import za.co.fynbos.branchbook.support.SeedData;
 import za.co.fynbos.branchbook.support.TestClockConfiguration;
 
 /**
  * BR-19: a customer's name and mobile number, and the reference that opens their appointment, reach
- * neither the application's log nor the database's, whatever happens to a booking or a lookup.
+ * neither the application's log nor the database's, whatever happens to a booking, a lookup or a
+ * cancellation.
  *
  * <p>One synthetic customer goes through every outcome there is: booked, replayed, refused for each
  * reason, looked up right and wrong until blocked, caught by the database's exclusion constraint,
@@ -74,6 +77,8 @@ class LogRedactionIT {
   @Autowired private TransactionTemplate transaction;
 
   @Autowired private PostgreSQLContainer postgres;
+
+  @Autowired private MutableClock clock;
 
   @Test
   void bookingLogsContainNoCustomerNameOrMobile(CapturedOutput output) {
@@ -112,6 +117,35 @@ class LogRedactionIT {
         .doesNotContain("violates");
     assertHoldsNothingOfTheCustomer("the application's log", output.getAll(), reference);
     assertThat(postgres.getLogs()).contains("violates exclusion constraint");
+    assertHoldsNothingOfTheCustomer("the database's log", postgres.getLogs(), reference);
+  }
+
+  /**
+   * BR-19 for a cancellation: refused, cancelled, repeated, and finally too late. The log shows
+   * every step, by appointment id, and nothing of the customer.
+   */
+  @Test
+  void cancelLogsContainNoCustomerNameMobileOrReference(CapturedOutput output) {
+    String reference = string(book(mvc, ours("SAN", "FICA", TUESDAY_0930, MOBILE)), "$.reference");
+    clock.advance(Duration.ofMinutes(1));
+    List<MvcTestResult> results = new ArrayList<>();
+
+    results.add(cancel(mvc, reference, "0188"));
+    results.add(cancel(mvc, reference, "0187"));
+    results.add(cancel(mvc, reference, "0187"));
+    String later = string(book(mvc, ours("BEL", "CARD", TUESDAY_0930, MOBILE)), "$.reference");
+    clock.setInstant(OffsetDateTime.parse(TUESDAY_0930).toInstant());
+    results.add(cancel(mvc, later, "0187"));
+
+    assertThat(results)
+        .extracting(result -> result.getResponse().getStatus())
+        .containsExactly(404, 200, 200, 409);
+    assertThat(output.getAll())
+        .contains("cancel.refused code=APPOINTMENT_NOT_FOUND", "cancel.cancelled")
+        .contains("cancel.already_cancelled", "cancel.refused code=TOO_LATE_TO_CANCEL")
+        .contains("outbox.superseded");
+    assertHoldsNothingOfTheCustomer("the application's log", output.getAll(), reference);
+    assertHoldsNothingOfTheCustomer("the application's log", output.getAll(), later);
     assertHoldsNothingOfTheCustomer("the database's log", postgres.getLogs(), reference);
   }
 

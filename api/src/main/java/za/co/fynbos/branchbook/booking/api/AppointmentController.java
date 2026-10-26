@@ -27,16 +27,19 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import za.co.fynbos.branchbook.booking.application.BookAppointmentHandler;
 import za.co.fynbos.branchbook.booking.application.BookingResult;
+import za.co.fynbos.branchbook.booking.application.CancelAppointmentHandler;
 import za.co.fynbos.branchbook.booking.application.IdempotencyKeyRequiredException;
 import za.co.fynbos.branchbook.booking.application.LookupAppointmentHandler;
 import za.co.fynbos.branchbook.booking.domain.IdempotencyKey;
 import za.co.fynbos.branchbook.shared.config.BookingProperties;
 import za.co.fynbos.branchbook.shared.web.OpenApiConfig;
 
-/** The appointment endpoints: booking one, and opening it again with its reference. */
+/**
+ * The appointment endpoints: booking one, opening it again with its reference, and cancelling it.
+ */
 @RestController
 @RequestMapping(path = "/api/v1/appointments", produces = MediaType.APPLICATION_JSON_VALUE)
-@Tag(name = "Appointments", description = "Book an appointment, and open it again.")
+@Tag(name = "Appointments", description = "Book an appointment, open it again, and cancel it.")
 class AppointmentController {
 
   /** The response header that marks a replay of an earlier booking (BR-12). */
@@ -45,10 +48,14 @@ class AppointmentController {
   private static final String UUID_PATTERN =
       "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
 
+  /** The one shape of {@code X-Mobile-Last4}, for both the lookup and the cancel. */
+  private static final String LAST4_PATTERN = "^[0-9]{4}$";
+
   private static final Logger log = LoggerFactory.getLogger(AppointmentController.class);
 
   private final BookAppointmentHandler booking;
   private final LookupAppointmentHandler lookups;
+  private final CancelAppointmentHandler cancellations;
 
   /** Whether this deployment takes only the published demo numbers (ADR-0006). */
   private final boolean demoNumbersOnly;
@@ -56,9 +63,11 @@ class AppointmentController {
   AppointmentController(
       BookAppointmentHandler booking,
       LookupAppointmentHandler lookups,
+      CancelAppointmentHandler cancellations,
       BookingProperties bookingProperties) {
     this.booking = booking;
     this.lookups = lookups;
+    this.cancellations = cancellations;
     this.demoNumbersOnly = bookingProperties.demoNumbersOnly();
   }
 
@@ -231,8 +240,98 @@ class AppointmentController {
               description = "The last four digits of the mobile number used to book",
               example = "0101")
           @RequestHeader("X-Mobile-Last4")
-          @Pattern(regexp = "^[0-9]{4}$", message = "must be 4 digits")
+          @Pattern(regexp = LAST4_PATTERN, message = "must be 4 digits")
           String mobileLast4) {
     return AppointmentResponse.from(lookups.lookup(reference, mobileLast4));
+  }
+
+  /**
+   * Cancels an appointment with its reference and the last four digits of the mobile number. A
+   * repeat is answered as the first was, without writing anything.
+   *
+   * @param reference the reference; case and hyphens do not matter
+   * @param mobileLast4 the last four digits of the mobile number used to book
+   * @return the appointment, cancelled, as a lookup now shows it
+   */
+  @Operation(
+      operationId = "cancelAppointment",
+      summary = "Cancel an appointment",
+      description =
+          "Needs the reference and the last four digits, exactly as opening the appointment does,"
+              + " and counts wrong digits towards the same limit. Cancelling frees the seat at once"
+              + " and queues a cancellation SMS in the same transaction; a confirmation still PENDING"
+              + " or FAILED is marked FAILED with SUPERSEDED_BY_CANCELLATION and is not sent from"
+              + " then on. Cancelling"
+              + " again, or from two tabs at once, returns the same 200 and writes nothing more."
+              + " Only possible before the appointment starts.")
+  @ApiResponse(responseCode = "200", description = "Cancelled now, or already cancelled")
+  @ApiResponse(
+      responseCode = "400",
+      description = "VALIDATION_FAILED: X-Mobile-Last4 is missing or not four digits",
+      content =
+          @Content(
+              mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+              schema = @Schema(ref = OpenApiConfig.PROBLEM)))
+  @ApiResponse(
+      responseCode = "404",
+      description = "APPOINTMENT_NOT_FOUND: the reference and the digits match no appointment",
+      content =
+          @Content(
+              mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+              schema = @Schema(ref = OpenApiConfig.PROBLEM)))
+  @ApiResponse(
+      responseCode = "409",
+      description =
+          "TOO_LATE_TO_CANCEL: the appointment has started; it is left as it was, still"
+              + " CONFIRMED",
+      content =
+          @Content(
+              mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+              schema = @Schema(ref = OpenApiConfig.PROBLEM)))
+  @ApiResponse(
+      responseCode = "429",
+      description =
+          "LOOKUP_RATE_LIMITED: five wrong tries for this reference, lookups and cancels"
+              + " together, or too many of its tries at once",
+      headers =
+          @Header(
+              name = "Retry-After",
+              description =
+                  "Seconds until the reference can be tried again: what is left of the hour after"
+                      + " five wrong tries, or 1 when other tries of it are being checked",
+              schema = @Schema(type = "integer")),
+      content =
+          @Content(
+              mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+              schema = @Schema(ref = OpenApiConfig.PROBLEM)))
+  @ApiResponse(
+      responseCode = "503",
+      description =
+          "TRY_AGAIN: the appointment or its messages stayed locked for 2 seconds, another change"
+              + " of the appointment won the race twice, or the database is unavailable; the"
+              + " appointment is left as it was",
+      headers =
+          @Header(
+              name = "Retry-After",
+              description = "Seconds to wait before trying again",
+              schema = @Schema(type = "integer")),
+      content =
+          @Content(
+              mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
+              schema = @Schema(ref = OpenApiConfig.PROBLEM)))
+  @PostMapping("/{reference}/cancel")
+  AppointmentResponse cancel(
+      @Parameter(
+              description = "The reference; case and hyphens do not matter",
+              example = "APT-7K3M-9Q2X")
+          @PathVariable
+          String reference,
+      @Parameter(
+              description = "The last four digits of the mobile number used to book",
+              example = "0101")
+          @RequestHeader("X-Mobile-Last4")
+          @Pattern(regexp = LAST4_PATTERN, message = "must be 4 digits")
+          String mobileLast4) {
+    return AppointmentResponse.from(cancellations.cancel(reference, mobileLast4));
   }
 }

@@ -11,9 +11,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import za.co.fynbos.branchbook.booking.application.AppointmentDirectory;
 import za.co.fynbos.branchbook.notification.application.MessageGateway.Accepted;
 import za.co.fynbos.branchbook.notification.application.MessageGateway.Delivery;
 import za.co.fynbos.branchbook.notification.application.MessageGateway.Refused;
+import za.co.fynbos.branchbook.notification.domain.NotificationKind;
 import za.co.fynbos.branchbook.notification.domain.NotificationMessage;
 import za.co.fynbos.branchbook.shared.correlation.CorrelationIds;
 
@@ -29,6 +31,16 @@ import za.co.fynbos.branchbook.shared.correlation.CorrelationIds;
  * transaction of its own, so a poisoned row is sent at most once more and never loops, and the rest
  * of the batch carries on. An appointment never depends on its messages: delivery changes only the
  * message.
+ *
+ * <p>Before it sends a confirmation, it asks booking's {@link AppointmentDirectory} whether the
+ * appointment is cancelled, and if so marks the message FAILED with {@code
+ * SUPERSEDED_BY_CANCELLATION} instead (BR-24). The cancel transaction already supersedes every
+ * PENDING or FAILED confirmation, so this only catches one reset by hand afterwards. The question
+ * is a plain read: the dispatcher locks only its message's row, never the appointment's, while a
+ * cancel locks the appointment and then waits for the message, so the two can never deadlock. It is
+ * asked before the gateway is called, so a question that fails is a failed claim, not a failed
+ * send: the transaction rolls back, the message stays PENDING and untouched, and the tick ends, as
+ * it does when the claim itself fails; the next tick asks again.
  *
  * <p>Log lines carry the message's own correlation id, so they sit beside the booking that wrote
  * it, and name the message by id; never the recipient, the body or the reference.
@@ -53,17 +65,20 @@ public class NotificationDispatcher {
   private final TransactionTemplate transaction;
   private final NotificationMessageRepository messages;
   private final MessageGateway gateway;
+  private final AppointmentDirectory appointments;
 
   NotificationDispatcher(
       PlatformTransactionManager transactionManager,
       NotificationMessageRepository messages,
-      MessageGateway gateway) {
+      MessageGateway gateway,
+      AppointmentDirectory appointments) {
     TransactionTemplate template = new TransactionTemplate(transactionManager);
     template.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     template.setName("NotificationDispatcher.dispatchNext");
     this.transaction = template;
     this.messages = messages;
     this.gateway = gateway;
+    this.appointments = appointments;
   }
 
   /**
@@ -107,8 +122,16 @@ public class NotificationDispatcher {
       return false;
     }
     NotificationMessage message = due.get();
-    claimed.set(message);
     try (var _ = MDC.putCloseable(CorrelationIds.MDC_KEY, message.correlationId())) {
+      // Asked before the message counts as claimed: nothing has been sent yet, so if the question
+      // fails, the transaction rolls back and the message stays PENDING for the next tick.
+      if (message.kind() == NotificationKind.CONFIRMATION
+          && appointments.isCancelled(message.appointmentId())) {
+        messages.markSuperseded(message.id());
+        log.info("outbox.superseded messageId={}", message.id());
+        return true;
+      }
+      claimed.set(message);
       int attempts = message.attempts() + 1;
       switch (send(message)) {
         case Accepted accepted -> {

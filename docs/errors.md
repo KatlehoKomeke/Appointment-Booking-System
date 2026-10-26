@@ -75,6 +75,11 @@ One request yields exactly one code:
   reference at all is a `404` and is not counted, because it can never become a match. A lookup counts as a try
   while it is being checked and is released if its digits were right, so lookups of one reference that arrive
   together are refused with `429` and `Retry-After: 1` once the wrong ones and those still being checked reach five.
+- **Cancel** (`POST /api/v1/appointments/{reference}/cancel`): exactly as a lookup up to the `404`, and counted
+  towards the same five wrong tries of the reference. Then an appointment that is already cancelled is a `200` that
+  writes nothing, even after its start; then one that has started is `409 TOO_LATE_TO_CANCEL` and is left as it
+  was. A second cancel of the same appointment at the same moment is not an error: its version check fails, it
+  reads the appointment once more and returns the same `200`. A lock not granted within 2 s is `503 TRY_AGAIN`.
 
 ## Field codes
 
@@ -103,9 +108,9 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 
 | Status | Seconds | When |
 |---|---|---|
-| `429 LOOKUP_RATE_LIMITED` | Up to 3600 | The seconds left until an hour after the reference's first wrong lookup, rounded up. |
+| `429 LOOKUP_RATE_LIMITED` | Up to 3600 | The seconds left until an hour after the reference's first wrong lookup or cancel, rounded up. |
 | `429 LOOKUP_RATE_LIMITED` | 1 | Fewer than five wrong lookups, but the wrong lookups and the lookups of the reference still being checked together reach five. |
-| `503 TRY_AGAIN` | 2 | A lock not granted within 2 s, a statement over 5 s, or a deadlock or serialisation failure that happened again after the one automatic re-run. |
+| `503 TRY_AGAIN` | 2 | A lock not granted within 2 s, a statement over 5 s, a deadlock or serialisation failure that happened again after the one automatic re-run, or a cancel whose version check failed again after its one re-read. |
 | `503 TRY_AGAIN` | 5 | No database connection within 3 s, or any other temporary failure. |
 
 ## Codes
@@ -129,8 +134,8 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 | `DUPLICATE_APPOINTMENT` | 409 | This mobile already has an upcoming appointment for this service. The body names no reference, branch or time. | "You already have an upcoming appointment for this service." |
 | `CUSTOMER_OVERLAP` | 409 | This mobile already has an appointment at an overlapping time, at any branch. | "You already have an appointment at that time." |
 | `SLOT_FULL` | 409 | The last seat was taken while the customer was filling in their details. Carries up to three `alternatives[]`. | "That time was just taken", with the alternatives and the details kept. |
-| `TOO_LATE_TO_CANCEL` | 409 | Cancellation was requested at or after the appointment's start time. | "This appointment has already started." |
-| `LOOKUP_RATE_LIMITED` | 429 | Five wrong lookups of one reference block it, even for the right digits, until an hour after the first. Carries `Retry-After`. | "Too many attempts. Try again later." |
+| `TOO_LATE_TO_CANCEL` | 409 | Cancellation was requested at or after the appointment's start time. The appointment is left as it was, still `CONFIRMED`. Cancelling an appointment that is already cancelled is a `200`, never this. | "This appointment has already started." |
+| `LOOKUP_RATE_LIMITED` | 429 | Five wrong tries of one reference, lookups and cancels together, block it, even for the right digits, until an hour after the first. Carries `Retry-After`. | "Too many attempts. Try again later." |
 | `INTERNAL_ERROR` | 500 | An unexpected failure, such as a second reference collision in one booking. Only the correlation id is returned. | A generic error with the correlation id to quote. |
 | `TRY_AGAIN` | 503 | A lock or statement timeout, a deadlock after one automatic retry, no database connection, or any other temporary failure. Always carries `Retry-After`. | The web app retries once with the same idempotency key, then asks the customer to try again. |
 

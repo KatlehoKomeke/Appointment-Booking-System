@@ -10,6 +10,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -25,6 +26,8 @@ import za.co.fynbos.branchbook.shared.problem.ProblemCode;
 import za.co.fynbos.branchbook.support.Bookings;
 import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
+import za.co.fynbos.branchbook.support.MutableClock;
+import za.co.fynbos.branchbook.support.TestClockConfiguration;
 
 /**
  * ADR-0005: {@code docs/openapi.yaml}, the committed contract the web app's types are generated
@@ -43,6 +46,8 @@ class OpenApiContractIT {
   private static final Path COMMITTED = Path.of("..", "docs", "openapi.yaml");
 
   @Autowired private MockMvcTester mvc;
+
+  @Autowired private MutableClock clock;
 
   @Test
   void committedContractMatchesTheRunningApi() throws IOException {
@@ -145,9 +150,9 @@ class OpenApiContractIT {
   /**
    * The document must describe what the API really sends, not only agree with itself. Each real
    * body below carries every property its schema requires and none the schema does not declare:
-   * successes, problems with a code (among them a lookup's 400, 404 and 429), and the HTTP-level
-   * problems that have none. On the default test clock, Monday 26 October 2026, 27 October is
-   * bookable.
+   * successes (among them a cancel), problems with a code (among them a lookup's 400, 404 and 429,
+   * and a cancel's 409), and the HTTP-level problems that have none. On the default test clock,
+   * Monday 26 October 2026, 27 October is bookable.
    */
   @Test
   void realResponsesHaveExactlyThePropertiesTheirSchemasDeclare() {
@@ -191,6 +196,14 @@ class OpenApiContractIT {
     String inbox = body(mvc.get().uri("/api/v1/messages").exchange());
     check(document, "Inbox", inbox, "$", mismatches);
     check(document, "InboxMessage", inbox, "$.messages[0]", mismatches);
+    String cancelled = body(Bookings.cancel(mvc, booked(mvc, "BEL", "082 555 0198"), "0198"));
+    check(document, "Appointment", cancelled, "$", mismatches);
+    check(document, "Notification", cancelled, "$.notifications[0]", mismatches);
+    check(document, "Notification", cancelled, "$.notifications[1]", mismatches);
+    String started = booked(mvc, "UMH", "082 555 0199");
+    clock.setInstant(Instant.parse("2026-10-27T08:00:00Z"));
+    MvcTestResult tooLate = Bookings.cancel(mvc, started, "0199");
+    clock.setInstant(TestClockConfiguration.DEFAULT_INSTANT);
     List<MvcTestResult> wrongDigits = new ArrayList<>();
     for (int attempt = 0; attempt < 6; attempt++) {
       wrongDigits.add(lookup(mvc, reference, "9999"));
@@ -209,6 +222,7 @@ class OpenApiContractIT {
                 .uri("/api/v1/branches/GQE/availability?service=HOME&date=2026-10-27")
                 .exchange(),
             lookup(mvc, reference, "95"),
+            tooLate,
             mvc.get().uri("/api/v1/messages?limit=0").exchange(),
             wrongDigits.getFirst(),
             wrongDigits.getLast(),
@@ -241,6 +255,13 @@ class OpenApiContractIT {
         .filter(name -> !properties.containsKey(name))
         .forEach(
             name -> mismatches.add(schema + " does not declare " + name + ", sent in " + json));
+  }
+
+  /** Books a card replacement at 10:00 on 27 October and returns its reference. */
+  private static String booked(MockMvcTester mvc, String branch, String mobile) {
+    return JsonPath.read(
+        body(book(mvc, Bookings.body(branch, "CARD", "2026-10-27T10:00:00+02:00", mobile))),
+        "$.reference");
   }
 
   private static String body(MvcTestResult result) {

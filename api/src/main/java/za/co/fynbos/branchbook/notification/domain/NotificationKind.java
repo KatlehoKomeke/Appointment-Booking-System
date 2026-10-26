@@ -4,6 +4,6 @@ package za.co.fynbos.branchbook.notification.domain;
 public enum NotificationKind {
   /** The appointment was booked. */
   CONFIRMATION,
-  /** The appointment was cancelled; sent once cancellation is built. */
+  /** The appointment was cancelled; written by the cancel transaction (BR-14). */
   CANCELLATION
 }

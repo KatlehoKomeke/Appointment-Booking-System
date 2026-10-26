@@ -51,6 +51,13 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
           + " WHERE status = 'PENDING' AND next_attempt_at <= :now"
           + " ORDER BY next_attempt_at, id LIMIT 1 FOR UPDATE SKIP LOCKED";
 
+  private static final String SUPERSEDE_CONFIRMATIONS =
+      """
+      UPDATE notification_messages
+      SET status = 'FAILED', failure_reason = 'SUPERSEDED_BY_CANCELLATION'
+      WHERE appointment_id = :appointmentId AND kind = 'CONFIRMATION'
+        AND status IN ('PENDING', 'FAILED')""";
+
   private static final String NEWEST =
       "SELECT "
           + COLUMNS
@@ -144,6 +151,22 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
         .param("attempts", attempts)
         .param("failureReason", failureReason)
         .param("lastError", lastError)
+        .param("id", id)
+        .update();
+  }
+
+  @Override
+  public int supersedeConfirmations(UUID appointmentId) {
+    return jdbc.sql(SUPERSEDE_CONFIRMATIONS).param("appointmentId", appointmentId).update();
+  }
+
+  @Override
+  public void markSuperseded(UUID id) {
+    jdbc.sql(
+            """
+            UPDATE notification_messages
+            SET status = 'FAILED', failure_reason = 'SUPERSEDED_BY_CANCELLATION'
+            WHERE id = :id""")
         .param("id", id)
         .update();
   }

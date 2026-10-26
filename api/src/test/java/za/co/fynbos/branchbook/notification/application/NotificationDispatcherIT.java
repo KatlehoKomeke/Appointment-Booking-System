@@ -1,8 +1,12 @@
 package za.co.fynbos.branchbook.notification.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static za.co.fynbos.branchbook.support.Bookings.body;
 import static za.co.fynbos.branchbook.support.Bookings.book;
+import static za.co.fynbos.branchbook.support.Bookings.cancel;
 import static za.co.fynbos.branchbook.support.Bookings.lookup;
 
 import com.jayway.jsonpath.JsonPath;
@@ -21,19 +25,24 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.QueryTimeoutException;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import org.springframework.transaction.PlatformTransactionManager;
+import za.co.fynbos.branchbook.booking.application.AppointmentDirectory;
 import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
+import za.co.fynbos.branchbook.support.LockWaits;
 import za.co.fynbos.branchbook.support.MutableClock;
 
 /**
  * BR-17, FR-15, NFR-13: the dispatcher delivers PENDING messages through the gateway, one
- * transaction each. Its own loop is off in the tests, so each test calls {@link
- * NotificationDispatcher#runOnce} with the instant it wants: no test sleeps. The numbers are
- * synthetic; the simulated gateway refuses those ending 0000.
+ * transaction each. BR-24: it never delivers a confirmation after its appointment's cancellation.
+ * Its own loop is off in the tests, so each test calls {@link NotificationDispatcher#runOnce} with
+ * the instant it wants: no test sleeps. The numbers are synthetic; the simulated gateway refuses
+ * those ending 0000.
  */
 @IntegrationTest
 @ExtendWith(DatabaseReset.class)
@@ -50,6 +59,8 @@ class NotificationDispatcherIT {
   @Autowired private NotificationMessageRepository messages;
 
   @Autowired private PlatformTransactionManager transactionManager;
+
+  @Autowired private AppointmentDirectory appointments;
 
   /** FR-15, FR-16: a delivered SMS is SENT with the gateway's id, and the appointment says so. */
   @Test
@@ -140,8 +151,8 @@ class NotificationDispatcherIT {
           sent.add(message.id());
           return new MessageGateway.Accepted("quick-" + message.id());
         };
-    NotificationDispatcher first = new NotificationDispatcher(transactionManager, messages, slow);
-    NotificationDispatcher second = new NotificationDispatcher(transactionManager, messages, quick);
+    NotificationDispatcher first = dispatcherWith(slow);
+    NotificationDispatcher second = dispatcherWith(quick);
     Instant now = clock.instant();
 
     CompletableFuture<Integer> firstTick = CompletableFuture.supplyAsync(() -> first.runOnce(now));
@@ -212,8 +223,7 @@ class NotificationDispatcherIT {
           throw new IllegalStateException("test: the provider is down");
         };
 
-    int handled =
-        new NotificationDispatcher(transactionManager, messages, broken).runOnce(clock.instant());
+    int handled = dispatcherWith(broken).runOnce(clock.instant());
 
     assertThat(handled).isOne();
     assertThat(onlyMessage())
@@ -242,9 +252,7 @@ class NotificationDispatcherIT {
           return new MessageGateway.Accepted("sim-" + message.id());
         };
 
-    int handled =
-        new NotificationDispatcher(transactionManager, messages, failsOnce)
-            .runOnce(clock.instant());
+    int handled = dispatcherWith(failsOnce).runOnce(clock.instant());
 
     assertThat(handled).isEqualTo(2);
     assertThat(
@@ -272,6 +280,151 @@ class NotificationDispatcherIT {
 
     assertThat(dispatcher.runOnce(clock.instant())).isEqualTo(20);
     assertThat(dispatcher.runOnce(clock.instant())).isOne();
+  }
+
+  /**
+   * BR-24: once an appointment is cancelled, the next tick sends only its cancellation. The cancel
+   * already marked the PENDING confirmation superseded, so the tick never even claims it.
+   */
+  @Test
+  void pendingConfirmationIsSupersededByCancellation() {
+    String reference =
+        reference(book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0103")));
+    assertThat(cancel(mvc, reference, "0103")).hasStatus(HttpStatus.OK);
+    ConcurrentLinkedQueue<UUID> sent = new ConcurrentLinkedQueue<>();
+
+    int handled = dispatcherWith(recordingInto(sent)).runOnce(clock.instant());
+
+    assertThat(handled).as("the cancellation, and nothing else").isOne();
+    assertThat(sent).containsExactly(messageId("CANCELLATION"));
+    assertThat(statusOf("CONFIRMATION")).isEqualTo("FAILED SUPERSEDED_BY_CANCELLATION");
+    assertThat(statusOf("CANCELLATION")).isEqualTo("SENT null");
+  }
+
+  /**
+   * BR-24: a confirmation already in the gateway when the cancel arrives is delivered before its
+   * cancellation, never after it. The cancel waits for the message's row lock; once the send is
+   * marked SENT, it leaves that message alone and queues the cancellation behind it.
+   */
+  @Test
+  void confirmationInFlightWhenTheCancelArrivesIsSentBeforeTheCancellation() throws Exception {
+    String reference =
+        reference(book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0104")));
+    ConcurrentLinkedQueue<UUID> sent = new ConcurrentLinkedQueue<>();
+    CountDownLatch holding = new CountDownLatch(1);
+    CountDownLatch letGo = new CountDownLatch(1);
+    MessageGateway held =
+        message -> {
+          sent.add(message.id());
+          holding.countDown();
+          await(letGo);
+          return new MessageGateway.Accepted("held-" + message.id());
+        };
+    NotificationDispatcher holder = dispatcherWith(held);
+    Instant now = clock.instant();
+
+    CompletableFuture<Integer> tick = CompletableFuture.supplyAsync(() -> holder.runOnce(now));
+    CompletableFuture<MvcTestResult> cancelling;
+    try {
+      assertThat(holding.await(5, TimeUnit.SECONDS)).isTrue();
+      cancelling = CompletableFuture.supplyAsync(() -> cancel(mvc, reference, "0104"));
+      LockWaits.await(jdbc, 0, 1);
+    } finally {
+      // Released even if the test fails, so no held transaction outlives it.
+      letGo.countDown();
+    }
+
+    assertThat(tick.get(5, TimeUnit.SECONDS)).isPositive();
+    assertThat(cancelling.get(5, TimeUnit.SECONDS)).hasStatus(HttpStatus.OK);
+    holder.runOnce(now);
+    assertThat(statusOf("CONFIRMATION")).isEqualTo("SENT null");
+    assertThat(statusOf("CANCELLATION")).isEqualTo("SENT null");
+    assertThat(sent).containsExactly(messageId("CONFIRMATION"), messageId("CANCELLATION"));
+  }
+
+  /**
+   * BR-24, defence in depth: a confirmation of a cancelled appointment set PENDING again by hand,
+   * as a careless replay would, is marked superseded when the dispatcher claims it, and never
+   * reaches the gateway.
+   */
+  @Test
+  void confirmationOfACancelledAppointmentResetByHandIsSupersededAtTheClaimNotSent() {
+    String reference =
+        reference(book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0105")));
+    assertThat(cancel(mvc, reference, "0105")).hasStatus(HttpStatus.OK);
+    jdbc.update(
+        "UPDATE notification_messages SET status = 'PENDING', failure_reason = NULL"
+            + " WHERE kind = 'CONFIRMATION'");
+    ConcurrentLinkedQueue<UUID> sent = new ConcurrentLinkedQueue<>();
+
+    int handled = dispatcherWith(recordingInto(sent)).runOnce(clock.instant());
+
+    assertThat(handled).isEqualTo(2);
+    assertThat(sent).containsExactly(messageId("CANCELLATION"));
+    assertThat(statusOf("CONFIRMATION")).isEqualTo("FAILED SUPERSEDED_BY_CANCELLATION");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT attempts FROM notification_messages WHERE kind = 'CONFIRMATION'",
+                Integer.class))
+        .as("no attempt was made")
+        .isZero();
+  }
+
+  /**
+   * BR-24, BR-17: when the dispatcher cannot ask whether a confirmation's appointment is cancelled,
+   * it has sent nothing, so it marks nothing: the claim rolls back, the message stays PENDING with
+   * no attempt and no error, and the next tick sends it. Marking it FAILED would record a failure
+   * that never happened and leave the customer without a confirmation.
+   */
+  @Test
+  void confirmationWhoseCancellationCheckFailsStaysPendingForTheNextTick() {
+    book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0186"));
+    AppointmentDirectory unanswering = mock(AppointmentDirectory.class);
+    when(unanswering.isCancelled(any()))
+        .thenThrow(new QueryTimeoutException("test: the appointments table is locked"));
+    ConcurrentLinkedQueue<UUID> sent = new ConcurrentLinkedQueue<>();
+
+    int handled =
+        new NotificationDispatcher(transactionManager, messages, recordingInto(sent), unanswering)
+            .runOnce(clock.instant());
+
+    assertThat(handled).as("the tick ends at the failed check").isZero();
+    assertThat(sent).isEmpty();
+    assertThat(onlyMessage())
+        .containsEntry("status", "PENDING")
+        .containsEntry("attempts", 0)
+        .containsEntry("last_error", null)
+        .containsEntry("failure_reason", null);
+    assertThat(dispatcher.runOnce(clock.instant())).isOne();
+    assertThat(onlyMessage()).containsEntry("status", "SENT");
+  }
+
+  /** A gateway that accepts every message and records the order it was handed them in. */
+  private static MessageGateway recordingInto(ConcurrentLinkedQueue<UUID> sent) {
+    return message -> {
+      sent.add(message.id());
+      return new MessageGateway.Accepted("rec-" + message.id());
+    };
+  }
+
+  /** The id of the one message of a kind. */
+  private UUID messageId(String kind) {
+    return jdbc.queryForObject(
+        "SELECT id FROM notification_messages WHERE kind = ?", UUID.class, kind);
+  }
+
+  /** The status and failure reason of the one message of a kind, such as "SENT null". */
+  private String statusOf(String kind) {
+    return jdbc.queryForObject(
+        "SELECT status || ' ' || coalesce(failure_reason, 'null') FROM notification_messages"
+            + " WHERE kind = ?",
+        String.class,
+        kind);
+  }
+
+  /** A dispatcher like the application's, with a gateway of the test's own. */
+  private NotificationDispatcher dispatcherWith(MessageGateway gateway) {
+    return new NotificationDispatcher(transactionManager, messages, gateway, appointments);
   }
 
   private Map<String, Object> onlyMessage() {
