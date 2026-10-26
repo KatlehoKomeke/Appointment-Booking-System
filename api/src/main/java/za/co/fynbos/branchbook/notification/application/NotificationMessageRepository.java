@@ -21,4 +21,12 @@ public interface NotificationMessageRepository {
    * @return its messages; empty if there are none
    */
   List<NotificationMessage> forAppointment(UUID appointmentId);
+
+  /**
+   * Lists the newest messages of every appointment, for the simulated inbox.
+   *
+   * @param limit the most messages to return
+   * @return the messages, newest first
+   */
+  List<NotificationMessage> newest(int limit);
 }

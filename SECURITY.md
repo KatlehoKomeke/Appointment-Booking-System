@@ -93,8 +93,10 @@ BranchBook is designed around the Protection of Personal Information Act, even t
   number. No ID number, address, date of birth or account number is collected
   ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)).
 - **No exposure.** *Built in M3.* Once an appointment exists, the API never returns its full mobile number: the
-  caller who booked it, or who has just proved its last four digits, sees `082 *** 0101`. The simulated inbox (M5)
-  will show only `082 *** ****` ([BR-19](docs/domain-rules.md#br-19); `AppointmentApiIT.responsesNeverContainUnmaskedMobile`).
+  caller who booked it, or who has just proved its last four digits, sees `082 *** 0101`. The simulated inbox,
+  built in M4, shows only `082 *** ****`, and is off unless a deployment switches it on (`branchbook.inbox.enabled`)
+  ([BR-19](docs/domain-rules.md#br-19); `AppointmentApiIT.responsesNeverContainUnmaskedMobile`,
+  `InboxApiIT.listsTheNewestMessagesWithTheirReferencesAndRedactedRecipients`).
   Error bodies never contain personal data or another booking's details ([BR-23](docs/domain-rules.md#br-23)).
 - **No personal data in logs.** *Built: the database and driver settings in M1, the log proof in M3.* Application
   logs and PostgreSQL's own error logs carry no names or numbers:

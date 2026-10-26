@@ -104,6 +104,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the simulated messages
+         * @description The newest messages of every appointment, with recipients redacted to 082 *** ****. Switched off unless branchbook.inbox.enabled is true; then the path is a 404.
+         */
+        get: operations["listMessages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -277,6 +297,41 @@ export interface components {
             name: string | null;
             /** @enum {string} */
             reason: "CLOSED_DAY" | "PUBLIC_HOLIDAY";
+        };
+        Inbox: {
+            messages: components["schemas"]["InboxMessage"][];
+        };
+        InboxMessage: {
+            /** Format: int32 */
+            attempts: number;
+            body: string;
+            /** @enum {string} */
+            channel: "SMS" | "EMAIL";
+            /**
+             * Format: date-time
+             * @example 2026-10-26T08:00:00+02:00
+             */
+            createdAt: string;
+            /** @enum {string|null} */
+            failureReason: "DELIVERY_FAILED" | "SUPERSEDED_BY_CANCELLATION" | "RECIPIENT_DAILY_CAP" | "DISPATCH_ERROR" | null;
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "CONFIRMATION" | "CANCELLATION";
+            lastError: string | null;
+            /** Format: date-time */
+            nextAttemptAt: string | null;
+            /** @example 082 *** **** */
+            recipientMasked: string;
+            /** @example APT-7K3M-9Q2X */
+            reference: string;
+            /** @description True only for FAILED with DELIVERY_FAILED or DISPATCH_ERROR */
+            retryable: boolean;
+            /** Format: date-time */
+            sentAt: string | null;
+            /** @enum {string} */
+            status: "PENDING" | "SENT" | "FAILED";
+            subject: string | null;
         };
         Notification: {
             /** Format: int32 */
@@ -627,6 +682,41 @@ export interface operations {
             };
             /** @description SERVICE_NOT_OFFERED_AT_BRANCH: the branch does not offer the service; DATE_OUTSIDE_BOOKING_WINDOW: the date is not one of the bookable days */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    listMessages: {
+        parameters: {
+            query?: {
+                /**
+                 * @description How many messages to return, from 1 to 200
+                 * @example 50
+                 */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The messages, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Inbox"];
+                };
+            };
+            /** @description VALIDATION_FAILED: limit is not from 1 to 200 */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -16,10 +16,13 @@ import org.jspecify.annotations.Nullable;
  * @param kind what it tells the customer
  * @param channel how it reaches them
  * @param recipient the mobile number in E.164 form (or the e-mail address)
+ * @param subject the e-mail subject; {@code null} for an SMS
  * @param body the text
  * @param status where it is in its delivery
  * @param attempts how many times delivery has been tried
  * @param nextAttemptAt when the dispatcher may next try it
+ * @param lastError a short code for why the last attempt failed, or {@code null}; never recipient
+ *     data
  * @param failureReason why it failed, or {@code null}
  * @param sentAt when the gateway accepted it, or {@code null}
  * @param correlationId the id of the request that wrote it, so its lines can be found in the logs
@@ -31,10 +34,12 @@ public record NotificationMessage(
     NotificationKind kind,
     NotificationChannel channel,
     String recipient,
+    @Nullable String subject,
     String body,
     NotificationStatus status,
     int attempts,
     Instant nextAttemptAt,
+    @Nullable String lastError,
     @Nullable String failureReason,
     @Nullable Instant sentAt,
     String correlationId,
@@ -78,10 +83,12 @@ public record NotificationMessage(
         kind,
         NotificationChannel.SMS,
         recipient,
+        null,
         body,
         NotificationStatus.PENDING,
         0,
         now,
+        null,
         null,
         null,
         correlationId,

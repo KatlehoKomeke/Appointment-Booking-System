@@ -83,6 +83,7 @@ environment supplies the rest:
 | `DB_URL` | JDBC URL of the PostgreSQL database | `compose.yaml` locally; planned for the hosted demo (after M6): the ECS task definition |
 | `DB_USER`, `DB_PASSWORD` | Database credentials | `compose.yaml` locally; planned for the hosted demo (after M6): AWS Secrets Manager |
 | `PORT` | HTTP port, 8080 by default | Optional |
+| `BRANCHBOOK_INBOX_ENABLED` | Switches on the simulated inbox, `GET /api/v1/messages`, an operator view of every booking's messages. `false` by default. | `compose.yaml` and `make dev-api` set it to `true`, and so do the tests |
 | `PUBLIC_BASE_URL` | The address customers reach the app at, which ends the confirmation SMS's `/manage` link. At most 28 characters with no trailing slash, so the longest SMS fits one segment; a longer value stops start-up. `http://localhost:8080` by default. | `compose.yaml` locally (it follows `APP_PORT`); planned for the hosted demo (after M6): the ECS task definition |
 
 The booking rules that are settings rather than code are under `branchbook.booking` in application.yml: the
@@ -100,6 +101,7 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 | `GET /api/v1/branches/{code}/availability?service=&date=` | One day's slots for one service at one branch, each with the seats left, or why the branch is closed that day |
 | `POST /api/v1/appointments` | Book a slot, with an `Idempotency-Key`. `201` with the appointment, its `Location` and its PENDING SMS |
 | `GET /api/v1/appointments/{reference}` | Open an appointment again, with `X-Mobile-Last4` |
+| `GET /api/v1/messages?limit=` | The simulated inbox: the newest messages of every booking, recipients redacted to `082 *** ****`. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
 | `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml) |
 | `/swagger-ui.html` | Swagger UI, to read and try the API |
 | `/` and the app's routes (`/book`, `/manage`, `/messages`, `/privacy`, `/appointments/{reference}`) | The React app |
@@ -231,8 +233,9 @@ api/
     │   │   ├── application/             the booking transaction, lookup, the limiter, and the ports it declares
     │   │   ├── domain/                  plain Java: Appointment, MobileNumber, CustomerName, AppointmentReference
     │   │   └── infrastructure/          JPA and SQL adapters, the constraint translator, the key purge
-    │   ├── notification/                the confirmation SMS
-    │   │   ├── application/             the outbox writer and the message read, implementing booking's ports
+    │   ├── notification/                the confirmation SMS and the simulated inbox
+    │   │   ├── api/                     the inbox endpoint, which exists only while switched on
+    │   │   ├── application/             the outbox writer, the message reads and the inbox query
     │   │   ├── domain/                  plain Java: NotificationTemplates, Gsm7
     │   │   └── infrastructure/          SQL for notification_messages
     │   └── shared/                      cross-cutting concerns

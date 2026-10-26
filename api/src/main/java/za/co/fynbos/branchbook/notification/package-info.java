@@ -8,8 +8,9 @@
  * port and on {@code shared}; {@code booking} never depends on it (docs/architecture.md, section
  * 3).
  *
- * <p>Built: the message templates, the check that the confirmation fits one SMS, the outbox writer
- * and the read of an appointment's messages. The dispatcher that delivers PENDING messages through
- * a simulated gateway arrives in milestone M5.
+ * <p>Built: the message templates, the check that the confirmation fits one SMS, the outbox writer,
+ * the read of an appointment's messages, and the simulated inbox ({@code api}), which names each
+ * message's appointment through booking's {@code AppointmentDirectory}. The dispatcher that
+ * delivers PENDING messages through a simulated gateway arrives in milestone M5.
  */
 package za.co.fynbos.branchbook.notification;

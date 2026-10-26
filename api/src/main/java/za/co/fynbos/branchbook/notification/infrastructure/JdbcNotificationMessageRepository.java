@@ -28,16 +28,25 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
       INSERT INTO notification_messages
           (id, appointment_id, kind, channel, recipient, subject, body, status, attempts,
            next_attempt_at, failure_reason, sent_at, correlation_id, created_at)
-      VALUES (:id, :appointmentId, :kind, :channel, :recipient, NULL, :body, :status, :attempts,
+      VALUES (:id, :appointmentId, :kind, :channel, :recipient, :subject, :body, :status, :attempts,
               :nextAttemptAt, :failureReason, :sentAt, :correlationId, :createdAt)""";
 
-  private static final String FOR_APPOINTMENT =
+  private static final String COLUMNS =
       """
-      SELECT id, appointment_id, kind, channel, recipient, body, status, attempts, next_attempt_at,
-             failure_reason, sent_at, correlation_id, created_at
-      FROM notification_messages
-      WHERE appointment_id = :appointmentId
-      ORDER BY created_at, id""";
+      id, appointment_id, kind, channel, recipient, subject, body, status, attempts, next_attempt_at,
+      last_error, failure_reason, sent_at, correlation_id, created_at""";
+
+  private static final String FOR_APPOINTMENT =
+      "SELECT "
+          + COLUMNS
+          + " FROM notification_messages WHERE appointment_id = :appointmentId"
+          + " ORDER BY created_at, id";
+
+  private static final String NEWEST =
+      "SELECT "
+          + COLUMNS
+          + " FROM notification_messages ORDER BY created_at DESC, id DESC"
+          + " LIMIT :limit";
 
   private final JdbcClient jdbc;
 
@@ -53,6 +62,7 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
         .param("kind", message.kind().name())
         .param("channel", message.channel().name())
         .param("recipient", message.recipient())
+        .param("subject", message.subject())
         .param("body", message.body())
         .param("status", message.status().name())
         .param("attempts", message.attempts())
@@ -72,6 +82,11 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
         .list();
   }
 
+  @Override
+  public List<NotificationMessage> newest(int limit) {
+    return jdbc.sql(NEWEST).param("limit", limit).query((rs, row) -> message(rs)).list();
+  }
+
   private static NotificationMessage message(ResultSet rs) throws SQLException {
     return new NotificationMessage(
         rs.getObject("id", UUID.class),
@@ -79,10 +94,12 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
         NotificationKind.valueOf(rs.getString("kind")),
         NotificationChannel.valueOf(rs.getString("channel")),
         rs.getString("recipient"),
+        rs.getString("subject"),
         rs.getString("body"),
         NotificationStatus.valueOf(rs.getString("status")),
         rs.getInt("attempts"),
         instant(rs, "next_attempt_at"),
+        rs.getString("last_error"),
         rs.getString("failure_reason"),
         rs.getObject("sent_at", OffsetDateTime.class) == null ? null : instant(rs, "sent_at"),
         rs.getString("correlation_id"),

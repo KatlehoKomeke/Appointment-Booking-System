@@ -6,6 +6,8 @@ import jakarta.persistence.EntityManager;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.UUID;
@@ -89,6 +91,17 @@ class JpaAppointmentRepository implements AppointmentRepository {
         .setParameter("reference", reference.value())
         .getResultStream()
         .findFirst();
+  }
+
+  @Override
+  public List<Appointment> findAllById(Collection<UUID> ids) {
+    if (ids.isEmpty()) {
+      return List.of();
+    }
+    return entityManager
+        .createQuery("select a from Appointment a where a.id in :ids", Appointment.class)
+        .setParameter("ids", ids)
+        .getResultList();
   }
 
   @Override

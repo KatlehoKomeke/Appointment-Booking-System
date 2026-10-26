@@ -1,6 +1,8 @@
 package za.co.fynbos.branchbook.booking.application;
 
 import java.time.Instant;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.UUID;
@@ -42,6 +44,14 @@ public interface AppointmentRepository {
    * @return the appointment, or empty
    */
   Optional<Appointment> findByReference(AppointmentReference reference);
+
+  /**
+   * Finds the appointments with the given ids, in no particular order.
+   *
+   * @param ids the appointments' ids
+   * @return those that exist
+   */
+  List<Appointment> findAllById(Collection<UUID> ids);
 
   /**
    * Finds the lowest seat that no active appointment of the service holds during a period.

@@ -188,6 +188,9 @@ class OpenApiContractIT {
     check(document, "Notification", booked, "$.notifications[0]", mismatches);
     String reference = JsonPath.read(booked, "$.reference");
     check(document, "Appointment", body(lookup(mvc, reference, "0195")), "$", mismatches);
+    String inbox = body(mvc.get().uri("/api/v1/messages").exchange());
+    check(document, "Inbox", inbox, "$", mismatches);
+    check(document, "InboxMessage", inbox, "$.messages[0]", mismatches);
     List<MvcTestResult> wrongDigits = new ArrayList<>();
     for (int attempt = 0; attempt < 6; attempt++) {
       wrongDigits.add(lookup(mvc, reference, "9999"));
@@ -206,6 +209,7 @@ class OpenApiContractIT {
                 .uri("/api/v1/branches/GQE/availability?service=HOME&date=2026-10-27")
                 .exchange(),
             lookup(mvc, reference, "95"),
+            mvc.get().uri("/api/v1/messages?limit=0").exchange(),
             wrongDigits.getFirst(),
             wrongDigits.getLast(),
             mvc.get().uri("/api/v1/no-such-path").exchange(),

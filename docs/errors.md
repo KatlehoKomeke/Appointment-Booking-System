@@ -90,6 +90,7 @@ name such as `X-Mobile-Last4`, or the name of a path or query parameter such as 
 | `OFFSET_REQUIRED` | `startsAt` | Not an ISO-8601 date and time with an offset, such as `2026-10-27T09:30:00+02:00`. |
 | `UNKNOWN_FIELD` | the unknown field, or `(body)` | The request does not define it, such as `endsAt`, which the server computes. Only the first is reported. |
 | `TYPE_MISMATCH` | a query parameter | It cannot be read as its type, such as a date. |
+| `MIN`, `MAX` | `limit` in a query | Below or above its range: 1 to 200 for the inbox. |
 | `MOBILE_NUMBER_REQUIRED` | `customer.mobile` | The same as the problem's code. |
 | a slot code | `startsAt` | The same as the problem's code: `SLOT_OFF_GRID`, for example. |
 
