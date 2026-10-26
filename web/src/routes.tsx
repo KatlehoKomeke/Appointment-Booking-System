@@ -11,6 +11,7 @@ import type { RouteObject } from 'react-router';
 
 import { BookPage } from './booking/BookPage';
 import { ConfirmationPage } from './pages/ConfirmationPage';
+import { ErrorPage } from './pages/ErrorPage';
 import { InboxPage } from './pages/InboxPage';
 import { LandingPage } from './pages/LandingPage';
 import { ManagePage } from './pages/ManagePage';
@@ -18,18 +19,26 @@ import { NotFoundPage } from './pages/NotFoundPage';
 import { PrivacyPage } from './pages/PrivacyPage';
 import { Shell } from './ui/Shell';
 
-/** The route table, shared by the browser router in `App.tsx` and the memory router the tests use. */
+/**
+ * The route table, shared by the browser router in `App.tsx` and the memory router the tests use. A page that fails
+ * to render is replaced by the error page inside the shell, so the banner and footer stay.
+ */
 export const routes: RouteObject[] = [
   {
     element: <Shell />,
     children: [
-      { index: true, element: <LandingPage /> },
-      { path: 'book', element: <BookPage /> },
-      { path: 'appointments/:reference', element: <ConfirmationPage /> },
-      { path: 'manage', element: <ManagePage /> },
-      { path: 'messages', element: <InboxPage /> },
-      { path: 'privacy', element: <PrivacyPage /> },
-      { path: '*', element: <NotFoundPage /> },
+      {
+        errorElement: <ErrorPage />,
+        children: [
+          { index: true, element: <LandingPage /> },
+          { path: 'book', element: <BookPage /> },
+          { path: 'appointments/:reference', element: <ConfirmationPage /> },
+          { path: 'manage', element: <ManagePage /> },
+          { path: 'messages', element: <InboxPage /> },
+          { path: 'privacy', element: <PrivacyPage /> },
+          { path: '*', element: <NotFoundPage /> },
+        ],
+      },
     ],
   },
 ];

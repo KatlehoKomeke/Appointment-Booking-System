@@ -557,7 +557,7 @@ export const inboxMessages: InboxMessage[] = [
     failureReason: 'DELIVERY_FAILED',
     retryable: true,
     attempts: 5,
-    lastError: 'SIMULATED_OUTAGE',
+    lastError: 'SIMULATED_FAILURE',
     createdAt: '2026-10-26T10:40:00+02:00',
     sentAt: null,
   }),

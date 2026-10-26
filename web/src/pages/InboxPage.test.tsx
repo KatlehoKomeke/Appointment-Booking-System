@@ -36,9 +36,7 @@ describe('InboxPage', () => {
 
     expect(failed).toHaveTextContent('Failed');
     expect(failed).toHaveTextContent('ReasonDelivery failed after 5 attempts');
-    expect(failed).toHaveTextContent(
-      'Last errorSimulated gateway outage (deterministic failure recipient)',
-    );
+    expect(failed).toHaveTextContent('Last errorThe simulated gateway refuses numbers ending 0000');
     expect(failed).toHaveTextContent('Created 10:40 SAST · 5 attempts');
 
     // Retrying and cancelling are Tier 2.
@@ -58,7 +56,7 @@ describe('InboxPage', () => {
               status: 'PENDING',
               attempts: 2,
               sentAt: null,
-              lastError: 'SIMULATED_OUTAGE',
+              lastError: 'SIMULATED_FAILURE',
               nextAttemptAt: '2026-10-26T10:43:00+02:00',
             }),
           ],
@@ -73,7 +71,7 @@ describe('InboxPage', () => {
     expect(first).toHaveTextContent('Created 10:42 SAST · 0 attempts');
     expect(first).not.toHaveTextContent('next attempt');
     expect(second).toHaveTextContent('Created 10:42 SAST · 2 attempts · next attempt 10:43 SAST');
-    expect(second).toHaveTextContent('Last errorSimulated gateway outage');
+    expect(second).toHaveTextContent('Last errorThe simulated gateway refuses numbers ending 0000');
   });
 
   it('says calmly that the inbox is switched off on this deployment', async () => {

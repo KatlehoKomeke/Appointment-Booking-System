@@ -8,6 +8,7 @@ import '@fontsource/nunito-sans/latin-600.css';
 import '@fontsource/nunito-sans/latin-700.css';
 import './ui/tokens.css';
 import './ui/global.css';
+import './lib/zodConfig';
 
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';

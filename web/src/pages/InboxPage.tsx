@@ -122,7 +122,7 @@ function failureReasonText(message: InboxMessage): string | undefined {
 
 // The short codes the simulated gateway and the dispatcher write as the last error, in words.
 const LAST_ERROR: Readonly<Record<string, string>> = {
-  SIMULATED_OUTAGE: 'Simulated gateway outage (deterministic failure recipient)',
+  SIMULATED_FAILURE: 'The simulated gateway refuses numbers ending 0000',
   MARK_FAILED: 'The send could not be marked as done',
 };
 
