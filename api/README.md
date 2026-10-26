@@ -121,7 +121,7 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 | `GET /api/v1/appointments/{reference}` | Open an appointment again, with `X-Mobile-Last4` |
 | `POST /api/v1/appointments/{reference}/cancel` | Cancel an appointment before it starts, with `X-Mobile-Last4`. `200` with the appointment as a lookup now shows it: `CANCELLED`, its PENDING or FAILED confirmation superseded and its cancellation SMS PENDING |
 | `GET /api/v1/messages?limit=` | The simulated inbox: the newest messages of every booking, recipients redacted to `082 *** ****`, and references to `APT-****-****` while `branchbook.inbox.redact-references` is true. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
-| `POST /api/v1/messages/{id}/retry` | Make a FAILED message due again, as the inbox's Retry button does; any other message is returned unchanged. The answer is the message as the inbox shows it, its reference redacted the same way. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
+| `POST /api/v1/messages/{id}/retry` | Make a FAILED message due again (the web inbox's Retry button, arriving with the web Tier 2 change, calls it); any other message is returned unchanged. The answer is the message as the inbox shows it, its reference redacted the same way. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
 | `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml) |
 | `/swagger-ui.html` | Swagger UI, to read and try the API |
 | `/` and the app's routes (`/book`, `/manage`, `/messages`, `/privacy`, `/appointments/{reference}`) | The React app |
@@ -324,7 +324,8 @@ the stack starts. It never books at Polokwane, whose single seats `make demo-409
 smoke test and the README's walkthrough use. The three confirmations carry one correlation id, `sys-<uuid>`; the one
 to the number ending 0000 fails all five attempts by design and shows as FAILED in the inbox about 30 seconds after
 start-up. The load runs on a virtual thread of its own, `demo-data`, so it never delays readiness, and a fixture that
-cannot be booked is logged as a warning by its branch and service only (`demo_data.fixture_failed`); the application
+cannot be booked is logged as a warning naming its branch and service only (`demo_data.no_free_slot`,
+`demo_data.fixture_refused` or `demo_data.fixture_failed`); the application
 carries on. A restart books nothing more while any appointment exists. While
 `branchbook.booking.demo-numbers-only` is on, the loader books nothing and logs one INFO line,
 `demo_data.skipped reason=demo_numbers_only`, before it reads the database. Its `+27 60 000` numbers are outside the
