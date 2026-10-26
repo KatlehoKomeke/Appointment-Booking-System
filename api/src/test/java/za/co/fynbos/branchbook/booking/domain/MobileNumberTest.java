@@ -104,6 +104,45 @@ class MobileNumberTest {
     assertThatIllegalArgumentException().isThrownBy(() -> MobileNumber.ofE164("+27215550101"));
   }
 
+  /**
+   * ADR-0006: the published demo block is 082 555 0000 to 082 555 0199, both ends included, and
+   * nothing either side of it.
+   */
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(strings = {"+27825550000", "+27825550001", "+27825550100", "+27825550199"})
+  void theDemoBlockRunsFrom0825550000To0825550199(String e164) {
+    assertThat(MobileNumber.ofE164(e164).isPublishedDemoNumber()).isTrue();
+  }
+
+  /** Every other South African mobile is outside the block, however close to it. */
+  @ParameterizedTest(name = "{0}")
+  @ValueSource(
+      strings = {
+        "+27825549999",
+        "+27825550200",
+        "+27825559999",
+        "+27835550100",
+        "+27600000001",
+        "+27845550100"
+      })
+  void numbersOutsideTheDemoBlockAreNotDemoNumbers(String e164) {
+    assertThat(MobileNumber.ofE164(e164).isPublishedDemoNumber()).isFalse();
+  }
+
+  /** A number as people type it is judged by the number it is, not by how it was typed. */
+  @Test
+  void aTypedNumberIsJudgedAfterParsing() {
+    assertThat(MobileNumber.parse("+27 82 555 0199"))
+        .map(MobileNumber::isPublishedDemoNumber)
+        .contains(true);
+    assertThat(MobileNumber.parse("0027 82 555 0000"))
+        .map(MobileNumber::isPublishedDemoNumber)
+        .contains(true);
+    assertThat(MobileNumber.parse("072 345 6789"))
+        .map(MobileNumber::isPublishedDemoNumber)
+        .contains(false);
+  }
+
   @Test
   void toStringNeverShowsTheDigits() {
     String text = "number " + MobileNumber.ofE164("+27825550101");

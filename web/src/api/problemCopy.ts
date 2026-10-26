@@ -18,6 +18,18 @@ export interface ProblemMessage {
 /** Every code the API returns on purpose. */
 export type ProblemCode = NonNullable<Problem['code']>;
 
+/**
+ * What the public demo asks for instead of a real number (docs/errors.md, DEMO_NUMBER_REQUIRED): the range of
+ * published demo numbers and one to try, because a customer cannot guess what "a demo number" is. Nobody's own number
+ * is then stored or sent an SMS.
+ */
+export const DEMO_NUMBER_COPY =
+  'This demo accepts only the numbers 082 555 0000 to 082 555 0199. Try 082 555 0101.';
+
+/** The same request, worded for the cellphone field it is shown under. */
+export const DEMO_NUMBER_FIELD_COPY =
+  'This demo accepts only 082 555 0000 to 082 555 0199, for example 082 555 0101.';
+
 // The copy for a failure the customer cannot fix, with the id support needs.
 function somethingWentWrong(correlationId: string | undefined): ProblemMessage {
   return {
@@ -78,6 +90,10 @@ const COPY: Record<ProblemCode, (correlationId: string | undefined) => ProblemMe
   MOBILE_NUMBER_REQUIRED: () => ({
     title: 'We need a cellphone number to SMS your confirmation.',
     body: 'Enter a South African cellphone number, for example 082 555 0101.',
+  }),
+  DEMO_NUMBER_REQUIRED: () => ({
+    title: 'Use a demo number',
+    body: DEMO_NUMBER_COPY,
   }),
   IDEMPOTENCY_KEY_REUSED: somethingWentWrong,
   DUPLICATE_APPOINTMENT: () => ({
@@ -177,7 +193,9 @@ function fieldCopy(field: BookingFormField, code: string): string {
         ? 'Enter your last name using letters, spaces, hyphens or apostrophes.'
         : 'Enter your last name.';
     case 'mobile':
-      return 'We need a cellphone number to SMS your confirmation.';
+      return code === 'DEMO_NUMBER_REQUIRED'
+        ? DEMO_NUMBER_FIELD_COPY
+        : 'We need a cellphone number to SMS your confirmation.';
     case 'slot':
       return code === 'SLOT_WITHIN_LEAD_TIME'
         ? 'That time is too soon. Please choose a later slot.'

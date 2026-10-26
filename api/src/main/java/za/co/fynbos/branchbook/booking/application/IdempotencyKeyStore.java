@@ -1,6 +1,7 @@
 package za.co.fynbos.branchbook.booking.application;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.UUID;
 import za.co.fynbos.branchbook.booking.domain.IdempotencyKey;
 
@@ -41,6 +42,16 @@ public interface IdempotencyKeyStore {
    * @return how many keys were deleted
    */
   int purgeExpired(Instant now);
+
+  /**
+   * Deletes the keys that booked the given appointments, in the caller's transaction, so the
+   * retention purge can delete the appointments. By then each key has expired, because the purge's
+   * max-age is never shorter than a key's 24 hours, so no retry loses a replay.
+   *
+   * @param appointmentIds the appointments being deleted; may be empty
+   * @return how many keys were deleted
+   */
+  int deleteForAppointments(Collection<UUID> appointmentIds);
 
   /** What {@link #reserve} found. */
   sealed interface Reservation permits New, Replay, Reused {}

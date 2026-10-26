@@ -15,7 +15,12 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, Navigate, useNavigate } from 'react-router';
 
 import { ApiProblem, type Problem } from '../api/client';
-import { fieldErrors, problemMessage, type ProblemMessage } from '../api/problemCopy';
+import {
+  DEMO_NUMBER_FIELD_COPY,
+  fieldErrors,
+  problemMessage,
+  type ProblemMessage,
+} from '../api/problemCopy';
 import {
   type BookingRequest,
   type BranchDetail,
@@ -94,17 +99,23 @@ function withReference(message: ProblemMessage, correlationId: string | undefine
 }
 
 // What the details step is sent when the server refused one of the customer's details, or `undefined` when the
-// refusal is about something else. A number the API does not read as a cellphone always belongs on its field.
+// refusal is about something else. A number the API does not read as a cellphone, or one a demo that takes only its
+// demo numbers will not take, always belongs on its field.
 function detailsHandOff(error: unknown): DetailsHandOff | undefined {
   if (
     !(error instanceof ApiProblem) ||
-    (error.code !== 'VALIDATION_FAILED' && error.code !== 'MOBILE_NUMBER_REQUIRED')
+    (error.code !== 'VALIDATION_FAILED' &&
+      error.code !== 'MOBILE_NUMBER_REQUIRED' &&
+      error.code !== 'DEMO_NUMBER_REQUIRED')
   ) {
     return undefined;
   }
   const serverErrors = detailsErrors(fieldErrors(error));
   if (error.code === 'MOBILE_NUMBER_REQUIRED') {
     serverErrors.mobile ??= MOBILE_ERROR;
+  }
+  if (error.code === 'DEMO_NUMBER_REQUIRED') {
+    serverErrors.mobile ??= DEMO_NUMBER_FIELD_COPY;
   }
   return Object.keys(serverErrors).length === 0
     ? undefined
@@ -144,7 +155,8 @@ function refusalOf(error: unknown, { hrefFor, hrefForStep }: Links): Refusal {
     case 'TRY_AGAIN':
       return { message: withReference(message, error.correlationId) };
     case 'VALIDATION_FAILED':
-    case 'MOBILE_NUMBER_REQUIRED': {
+    case 'MOBILE_NUMBER_REQUIRED':
+    case 'DEMO_NUMBER_REQUIRED': {
       // A refused detail has gone back to its field; what is left is the start, or a request the app built wrongly.
       const slotError = fieldErrors(error).slot;
       return slotError === undefined

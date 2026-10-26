@@ -6,6 +6,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import za.co.fynbos.branchbook.booking.application.AppointmentDirectory;
 import za.co.fynbos.branchbook.booking.application.AppointmentLabel;
@@ -39,10 +40,15 @@ public class InboxQueries {
   /**
    * Lists the newest messages.
    *
+   * <p>The messages and their appointments are read in two statements, so both run in one
+   * REPEATABLE READ snapshot. Under READ COMMITTED each statement sees the latest commit, and a
+   * retention purge committing between the two would leave a message whose appointment is gone. A
+   * read-only REPEATABLE READ transaction never fails to serialize, so it costs nothing.
+   *
    * @param limit the most messages to return, already checked to be from 1 to 200
    * @return the messages, newest first
    */
-  @Transactional(readOnly = true)
+  @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
   public List<InboxMessage> newest(int limit) {
     List<NotificationMessage> newest = messages.newest(limit);
     Map<UUID, AppointmentLabel> labels =

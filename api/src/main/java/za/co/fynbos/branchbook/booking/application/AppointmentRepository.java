@@ -86,4 +86,25 @@ public interface AppointmentRepository {
    * @return {@code true} if one exists
    */
   boolean hasOverlappingActive(MobileNumber mobile, Instant startsAt, Instant endsAt);
+
+  /**
+   * Locks, for the caller's transaction, the oldest appointments booked no later than an instant,
+   * whatever their status, for the retention purge. An appointment another transaction has locked
+   * is skipped, not waited for, and found again on a later run.
+   *
+   * @param cutoff the latest booking instant to include; one booked at exactly this instant is
+   *     included
+   * @param limit the most appointments to lock
+   * @return their ids, oldest first
+   */
+  List<UUID> lockCreatedNoLaterThan(Instant cutoff, int limit);
+
+  /**
+   * Deletes appointments, in the caller's transaction, once their messages and idempotency keys
+   * have gone; while either remains, the foreign keys refuse the delete.
+   *
+   * @param ids the appointments' ids; may be empty
+   * @return how many were deleted
+   */
+  int deleteAllById(Collection<UUID> ids);
 }

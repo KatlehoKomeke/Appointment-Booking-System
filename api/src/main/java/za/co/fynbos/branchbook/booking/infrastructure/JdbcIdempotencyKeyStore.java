@@ -6,6 +6,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Collection;
 import java.util.Optional;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
@@ -104,6 +105,16 @@ class JdbcIdempotencyKeyStore implements IdempotencyKeyStore {
   public int purgeExpired(Instant now) {
     return jdbc.sql("DELETE FROM idempotency_keys WHERE expires_at <= :now")
         .param("now", utc(now))
+        .update();
+  }
+
+  @Override
+  public int deleteForAppointments(Collection<UUID> appointmentIds) {
+    if (appointmentIds.isEmpty()) {
+      return 0;
+    }
+    return jdbc.sql("DELETE FROM idempotency_keys WHERE appointment_id IN (:appointmentIds)")
+        .param("appointmentIds", appointmentIds)
         .update();
   }
 

@@ -74,6 +74,13 @@ branchbook:
     # block that reference for an hour from the first, so the 10,000 combinations cannot be tried (BR-13).
     lookup-max-failures: 5
     lookup-window: PT1H
+    # A public demo must never be given a real person's number (ADR-0006). Switched on, a booking whose number is a
+    # South African mobile outside the published demo block, 082 555 0000 to 0199, is refused with
+    # 422 DEMO_NUMBER_REQUIRED before anything is written. Off by default; docker compose and make dev-api leave it off,
+    # and the shared test configuration sets it off (DemoNumbersOnlyIT alone switches it on). The hosted demo's task
+    # definition is to switch it on with BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true; the start-up log says which numbers
+    # bookings take, and EXPECT_DEMO_NUMBERS_ONLY=1 scripts/smoke.sh fails while it is off.
+    demo-numbers-only: false
   notification:
     # The address customers reach the app at, which ends the confirmation SMS's link to /manage. At most 28
     # characters with no trailing slash, so the longest confirmation fits one SMS; a longer value stops start-up
@@ -91,6 +98,16 @@ branchbook:
     # recipient redacted (FR-17). It is an operator view for the demo, so it is off unless a deployment asks for it:
     # docker compose, make dev-api and the tests switch it on; off, the path is a plain 404.
     enabled: false
+  retention:
+    # Deletes every booking older than max-age, with its messages and idempotency keys, every hour from a minute after
+    # start-up, which keeps the hosted demo's promise to delete each booking, with the name and number, after 48 hours
+    # (SECURITY.md, ADR-0006). Off by default, and so off in docker compose, make dev-api and the tests: a copy run
+    # locally keeps its bookings until you delete them. Only the hosted demo's task definition switches it on
+    # (BRANCHBOOK_RETENTION_ENABLED=true).
+    enabled: false
+    # How long after its booking an appointment is deleted. At least PT24H, the life of an Idempotency-Key (BR-12), so
+    # a retry can never book again a booking that was purged; a shorter value stops start-up.
+    max-age: PT48H
 
 logging:
   pattern:

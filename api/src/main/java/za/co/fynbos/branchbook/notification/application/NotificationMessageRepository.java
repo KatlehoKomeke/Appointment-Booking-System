@@ -1,6 +1,7 @@
 package za.co.fynbos.branchbook.notification.application;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -79,4 +80,14 @@ public interface NotificationMessageRepository {
    * @param lastError what to record, {@code MARK_FAILED}
    */
   void markDispatchError(UUID id, String lastError);
+
+  /**
+   * Deletes every message of the given appointments, in the caller's transaction, for booking's
+   * retention purge. A message another transaction has locked is waited for, at most the session's
+   * {@code lock_timeout}.
+   *
+   * @param appointmentIds the appointments; may be empty
+   * @return how many messages were deleted
+   */
+  int deleteForAppointments(Collection<UUID> appointmentIds);
 }

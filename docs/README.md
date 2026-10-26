@@ -53,4 +53,5 @@ module, such as booking's `AppointmentRepository`, are left out.
 | `BookedIntervalsPort` | `scheduling` | `JdbcBookedIntervals` (`booking`) | Built (M2) |
 | `ConfirmationOutbox` | `booking` | `NotificationOutbox` (`notification`), which writes the PENDING SMS | Built (M3) |
 | `AppointmentNotifications` | `booking` | `MessageQueries` (`notification`), which reads a booking's SMS | Built (M3) |
+| `NotificationEraser` | `booking` | `MessageEraser` (`notification`), which deletes a purged booking's messages in the purge's transaction | Built |
 | `MessageGateway` | `notification` | `SimulatedSmsGateway`, which sends nothing real | Planned (M5) |

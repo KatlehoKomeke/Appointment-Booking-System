@@ -129,6 +129,22 @@ class ApplicationStartsIT {
         .contains("Public holidays are known up to 2027-12-31 but bookings open up to 2028-01-08");
   }
 
+  /**
+   * ADR-0006: once the application is ready, the log says which numbers bookings take. Everywhere
+   * but the hosted demo that is any South African mobile; DemoNumbersOnlyIT proves the hosted
+   * demo's line.
+   */
+  @Test
+  void theLogSaysBookingsTakeAnyMobile(CapturedOutput output) {
+    context.publishEvent(
+        new ApplicationReadyEvent(new SpringApplication(), new String[0], context, Duration.ZERO));
+
+    assertThat(output)
+        .contains(
+            "Bookings take any South African mobile number"
+                + " (branchbook.booking.demo-numbers-only is off).");
+  }
+
   @Test
   void healthRevealsNoComponentDetails() {
     assertThat(mvc.get().uri("/actuator/health"))

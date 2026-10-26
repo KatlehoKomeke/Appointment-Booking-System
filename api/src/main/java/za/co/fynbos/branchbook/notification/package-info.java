@@ -4,9 +4,10 @@
  * <p>It owns the {@code notification_messages} table. The booking transaction writes the
  * confirmation SMS as a PENDING row through the port the booking module declares, which this module
  * implements, so a booking and its confirmation commit or roll back together and a confirmation can
- * never be lost or sent for a booking that did not happen. It depends on {@code booking} for that
- * port and on {@code shared}; {@code booking} never depends on it (docs/architecture.md, section
- * 3).
+ * never be lost or sent for a booking that did not happen. In the same way, booking's retention
+ * purge deletes an appointment's messages through a port of booking's that this module implements,
+ * in the transaction that deletes the appointment. It depends on {@code booking} for those ports
+ * and on {@code shared}; {@code booking} never depends on it (docs/architecture.md, section 3).
  *
  * <p>Built: the message templates, the check that the confirmation fits one SMS, the outbox writer,
  * the read of an appointment's messages, and the simulated inbox ({@code api}), which names each

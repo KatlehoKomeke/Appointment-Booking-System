@@ -1,8 +1,9 @@
 # Runbook
 
 How to look after a running BranchBook: whether it is healthy, what happened to a message, how to replay one that
-failed, and how to follow one request through the logs. The commands are for the local stack that `make up` starts;
-`make psql` opens a SQL prompt on its database. Every number in this file is a synthetic demo number.
+failed, whether the hosted demo's 48-hour purge ran, and how to follow one request through the logs. The commands
+are for the local stack that `make up` starts; `make psql` opens a SQL prompt on its database. Every number in this
+file is a synthetic demo number.
 
 ## Is it healthy?
 
@@ -63,6 +64,63 @@ WHERE m.id = '00000000-0000-0000-0000-000000000000'
 
 It reports `UPDATE 1` when the message was replayed, and `UPDATE 0` when the guard refused it. The dispatcher picks
 the message up within 2 seconds. A message to 082 555 0000 will fail again, by design.
+
+## Did the 48-hour purge run?
+
+The hosted demo deletes every booking 48 hours after it was made, with its messages and idempotency keys
+([SECURITY.md](../SECURITY.md#personal-information-popia)). The retention job does it: a minute after start-up, then
+every hour. Each run writes one INFO line with what it deleted, and nothing else:
+
+```text
+retention.purged appointments=12 messages=12 keys=3
+```
+
+`appointments=0 messages=0 keys=0` means nothing was old enough. No such line at all means the job is not running:
+`branchbook.retention.enabled` is not true in that deployment. `keys` is usually lower than `appointments`: the
+hourly key purge has normally removed a key by the time its booking is 48 hours old.
+
+A WARN line means a batch of up to 500 appointments could not be deleted and was rolled back:
+
+```text
+retention.batch_failed appointments=500 messages=500 keys=12 cause=UncategorizedSQLException
+```
+
+The counts are what the run had already deleted, and stay deleted; the rest wait for the next run, an hour later.
+A batch fails when another transaction holds one of its message or key rows for longer than the 2-second
+`lock_timeout`, or when one of its statements runs past the 5-second `statement_timeout`; `cause` is the exception's
+type, and a lock timeout shows as `UncategorizedSQLException`. The dispatcher is an unlikely culprit: it locks only
+PENDING messages, and a booking's messages have long been sent or failed by the time it is 48 hours old. One WARN
+needs nothing. If the same WARN comes back hour after hour, look at what is holding locks or running long while the
+job runs:
+
+```sql
+SELECT pid, state, wait_event_type, now() - xact_start AS open_for, left(query, 80) AS query
+FROM pg_stat_activity
+WHERE datname = current_database() AND state <> 'idle'
+ORDER BY xact_start;
+```
+
+An appointment that another transaction held at that moment is skipped without a WARN and taken on the next run.
+
+To see what the next run will delete, on the database:
+
+```sql
+SELECT count(*) FROM appointments WHERE created_at <= now() - interval '48 hours';
+```
+
+Right after a run it is 0, apart from what a failed batch or a held appointment left for the next run.
+
+### Switch it on
+
+It is off unless the deployment sets `BRANCHBOOK_RETENTION_ENABLED=true`, which only the hosted demo's ECS task
+definition does. `BRANCHBOOK_RETENTION_MAX_AGE` changes the 48 hours (`PT48H`); anything under `PT24H` stops
+start-up. To watch the job locally, start the API with the variable set and look for the line a minute later:
+
+```bash
+BRANCHBOOK_RETENTION_ENABLED=true make dev-api
+```
+
+`make up` leaves it off, so a local stack keeps its bookings until you delete them.
 
 ## Follow one request
 

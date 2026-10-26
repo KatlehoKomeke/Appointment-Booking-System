@@ -28,6 +28,9 @@ import za.co.fynbos.branchbook.booking.domain.MobileNumber;
  * cancelled, completed and no-show appointments never block a booking. The seat query reads one day
  * of {@code ix_appointments_slot_lookup}, bounded below by the longest possible appointment, like
  * {@link JdbcBookedIntervals}.
+ *
+ * <p>The retention purge's lock and delete are plain SQL too, and deliberately left untranslated:
+ * they are not part of a booking, and the purge handles any failure itself.
  */
 @Repository
 class JpaAppointmentRepository implements AppointmentRepository {
@@ -60,6 +63,14 @@ class JpaAppointmentRepository implements AppointmentRepository {
           WHERE customer_mobile = :mobile
             AND status IN %s AND starts_at < :endsAt AND ends_at > :startsAt)"""
           .formatted(AppointmentStatus.ACTIVE_SQL);
+
+  private static final String LOCK_CREATED_NO_LATER_THAN =
+      """
+      SELECT id FROM appointments
+      WHERE created_at <= :cutoff
+      ORDER BY created_at, id
+      LIMIT :limit
+      FOR UPDATE SKIP LOCKED""";
 
   private final EntityManager entityManager;
   private final JdbcClient jdbc;
@@ -146,6 +157,23 @@ class JpaAppointmentRepository implements AppointmentRepository {
                 .param("endsAt", utc(endsAt))
                 .query(Boolean.class)
                 .single());
+  }
+
+  @Override
+  public List<UUID> lockCreatedNoLaterThan(Instant cutoff, int limit) {
+    return jdbc.sql(LOCK_CREATED_NO_LATER_THAN)
+        .param("cutoff", utc(cutoff))
+        .param("limit", limit)
+        .query(UUID.class)
+        .list();
+  }
+
+  @Override
+  public int deleteAllById(Collection<UUID> ids) {
+    if (ids.isEmpty()) {
+      return 0;
+    }
+    return jdbc.sql("DELETE FROM appointments WHERE id IN (:ids)").param("ids", ids).update();
   }
 
   private static OffsetDateTime utc(Instant instant) {

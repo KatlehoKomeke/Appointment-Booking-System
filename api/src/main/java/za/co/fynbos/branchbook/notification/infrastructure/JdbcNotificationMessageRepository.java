@@ -5,6 +5,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -156,6 +157,16 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
             WHERE id = :id AND status = 'PENDING'""")
         .param("lastError", lastError)
         .param("id", id)
+        .update();
+  }
+
+  @Override
+  public int deleteForAppointments(Collection<UUID> appointmentIds) {
+    if (appointmentIds.isEmpty()) {
+      return 0;
+    }
+    return jdbc.sql("DELETE FROM notification_messages WHERE appointment_id IN (:appointmentIds)")
+        .param("appointmentIds", appointmentIds)
         .update();
   }
 
