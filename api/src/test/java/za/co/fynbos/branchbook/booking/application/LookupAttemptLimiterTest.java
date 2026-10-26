@@ -139,9 +139,12 @@ class LookupAttemptLimiterTest {
     assertThat(passed).isOne();
   }
 
-  /** A lookup that fails for another reason, such as the database, is not the caller's guess. */
+  /**
+   * A lookup ended as not wrong, however many, leaves nothing behind. The handler ends a lookup
+   * whose read failed this way (LookupAppointmentHandlerTest).
+   */
   @Test
-  void lookupThatFailsForAnotherReasonIsNotCounted() {
+  void lookupEndedAsNotWrongLeavesNothingBehind() {
     for (int lookup = 0; lookup < 10; lookup++) {
       limiter.end(limiter.begin(REFERENCE, FIRST), false);
     }
@@ -153,20 +156,45 @@ class LookupAttemptLimiterTest {
   }
 
   /**
-   * A lookup admitted in a window that has since closed changes nothing when it ends: it was
-   * counted in that window, not in the one that replaced it.
+   * A slow lookup admitted in a window that has since closed releases nothing when it ends: it was
+   * counted in that window, not in the one that replaced it. With four failures in the new window,
+   * one lookup is admitted and the next is refused.
    */
   @Test
-  void lookupFromAnEarlierWindowDoesNotCountInTheNext() {
+  void staleLookupDoesNotFreeAPlaceInTheNextWindow() {
     LookupAttemptLimiter.Attempt slow = limiter.begin(REFERENCE, FIRST);
     Instant nextWindow = FIRST.plus(Duration.ofHours(1));
     for (int failure = 0; failure < 4; failure++) {
       wrongLookup(REFERENCE, nextWindow);
     }
 
-    limiter.end(slow, true);
+    limiter.end(slow, false);
 
     assertThatNoException().isThrownBy(() -> limiter.begin(REFERENCE, nextWindow));
+    assertThatExceptionOfType(LookupRateLimitedException.class)
+        .isThrownBy(() -> limiter.begin(REFERENCE, nextWindow))
+        .satisfies(limited -> assertThat(limited.retryAfter()).contains(Duration.ofSeconds(1)));
+  }
+
+  /**
+   * Nor does it wipe the next window while a guess is in flight there, which would lose that
+   * guess's failure: five failures in the new window still block the reference for the hour.
+   */
+  @Test
+  void staleLookupDoesNotLoseAFailureInTheNextWindow() {
+    LookupAttemptLimiter.Attempt slow = limiter.begin(REFERENCE, FIRST);
+    Instant nextWindow = FIRST.plus(Duration.ofHours(1));
+    LookupAttemptLimiter.Attempt guess = limiter.begin(REFERENCE, nextWindow);
+
+    limiter.end(slow, false);
+    limiter.end(guess, true);
+    for (int failure = 0; failure < 4; failure++) {
+      wrongLookup(REFERENCE, nextWindow);
+    }
+
+    assertThatExceptionOfType(LookupRateLimitedException.class)
+        .isThrownBy(() -> limiter.begin(REFERENCE, nextWindow))
+        .satisfies(limited -> assertThat(limited.retryAfter()).contains(Duration.ofHours(1)));
   }
 
   @Test

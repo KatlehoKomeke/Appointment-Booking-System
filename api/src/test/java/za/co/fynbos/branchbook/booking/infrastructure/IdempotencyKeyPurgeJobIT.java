@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static za.co.fynbos.branchbook.support.Bookings.body;
 import static za.co.fynbos.branchbook.support.Bookings.book;
 
+import com.jayway.jsonpath.JsonPath;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -56,6 +58,20 @@ class IdempotencyKeyPurgeJobIT {
         .doesNotContainHeader("Idempotent-Replayed");
     assertThat(count("SELECT count(*) FROM idempotency_keys")).isOne();
     assertThat(count("SELECT count(*) FROM appointments")).isEqualTo(2);
+
+    MvcTestResult again =
+        book(mvc, key, body("SAN", "FICA", "2026-10-29T10:00:00+02:00", "082 555 0171"));
+    assertThat(again)
+        .as("the key now belongs to the new booking: its details, and a fresh 24 hours")
+        .hasStatus(HttpStatus.CREATED)
+        .hasHeader("Idempotent-Replayed", "true");
+    assertThat(reference(again)).isEqualTo(reference(afterADay));
+  }
+
+  private static String reference(MvcTestResult result) {
+    return JsonPath.read(
+        new String(result.getResponse().getContentAsByteArray(), StandardCharsets.UTF_8),
+        "$.reference");
   }
 
   @Test
