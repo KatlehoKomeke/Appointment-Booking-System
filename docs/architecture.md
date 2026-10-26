@@ -53,7 +53,9 @@ gateway (M5), and PostgreSQL 17.*
 - **Everything on the customer path is synchronous.** Background work runs in the same jar: `HolidayCoverageCheck`
   at start-up and daily at 06:00 SAST (M2), `IdempotencyKeyPurgeJob` every hour (M3) and the dispatcher (M5), which
   delivers the outbox rows the booking transaction writes
-  ([ADR-0003](adr/0003-transactional-outbox-for-confirmations.md)).
+  ([ADR-0003](adr/0003-transactional-outbox-for-confirmations.md)). `RetentionPurgeJob` runs every hour only where a
+  deployment switches it on, as the hosted demo does, and deletes each booking 48 hours after it was made
+  ([runbook](runbook.md#did-the-48-hour-purge-run)).
 - **Real gateways plug in later.** The dispatcher sends through a `MessageGateway` port, which the simulated SMS
   gateway implements; a real SMS provider would be one more implementation of it.
 

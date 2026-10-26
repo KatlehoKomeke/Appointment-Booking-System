@@ -60,6 +60,11 @@ the public internet must not collect real personal information.
   each appointment booked 48 hours ago or earlier, with its messages and idempotency keys
   ([docs/runbook.md](../runbook.md#did-the-48-hour-purge-run)). It empties the live database only: a deleted booking
   stays in the automated backups until they expire ([SECURITY.md](../../SECURITY.md#personal-information-popia)).
+- **Demo numbers are a block, not personas,** behind `branchbook.booking.demo-numbers-only`, not a `demo` profile.
+  The hosted demo's task definition sets `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true`, so bookings take only
+  082 555 0000 to 0199 and any other number is `422 DEMO_NUMBER_REQUIRED`, before anything is written. Names stay
+  free text, so a number is never locked to a fictional persona
+  ([docs/errors.md](../errors.md#codes)).
 - **The budget alarm already exists,** in `BranchbookAccount`. The teardown date will be recorded in
   [infra/README.md](../../infra/README.md) when the app stacks are first deployed.
 

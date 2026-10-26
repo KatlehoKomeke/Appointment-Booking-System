@@ -129,8 +129,17 @@ BranchBook is designed around the Protection of Personal Information Act, even t
 - **Synthetic test data only.** Tests and demos use made-up names and the published demo numbers: `082 555 01xx`,
   and `082 555 0000`, which the simulated gateway always refuses, to show a failed delivery. Never use a real
   person's details, including your own.
-- **A hosted demo cannot collect real data.** *Planned, after M6.* It will accept only the published demo numbers,
-  each locked to a fictional persona ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)).
+- **A hosted demo cannot collect a real number.** *Built; on in the hosted demo only.* While
+  `branchbook.booking.demo-numbers-only` is true (`BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true`), a booking is taken
+  only for the demo block, `082 555 0000` to `082 555 0199`. Any other South African mobile is refused with
+  `422 DEMO_NUMBER_REQUIRED` before anything is written, so a real person's number is never stored or sent an SMS,
+  and the refusal never repeats the number (`DemoNumbersOnlyIT.aNumberOutsideTheBlockIsRefusedOnItsFieldAndWritesNothing`,
+  `MobileNumberTest.theDemoBlockRunsFrom0825550000To0825550199`). The start-up log says which numbers bookings take.
+  Nothing real is ever sent: the SMS gateway is simulated. On the hosted demo the simulated inbox is off, so no
+  visitor can list other people's bookings, and every booking is deleted with the purge below. Names are free text;
+  the form and the privacy page ask for a made-up one. ADR-0006 planned to lock each demo number to a fictional
+  persona; the block and the purge were built instead
+  ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)).
 - **The hosted demo deletes every booking after 48 hours.** *Built; on in the hosted demo only.* While
   `branchbook.retention.enabled` is true (`BRANCHBOOK_RETENTION_ENABLED=true`), a job runs every hour, from a minute
   after start-up, and deletes every appointment booked `branchbook.retention.max-age` ago or earlier (`PT48H`, set by
@@ -172,7 +181,7 @@ These risks are accepted in v1, or reduced but not closed. Each has the control 
 
 | Risk | Today | Production control |
 |---|---|---|
-| **Unauthenticated SMS sending.** Anyone can book with any South African mobile number, which invites SMS pumping, harassment and slot squatting. | Open by design ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)). v1 sends nothing real: confirmations go to a simulated gateway (planned, M5). | An OTP before an appointment counts as confirmed, per-recipient and per-prefix caps, CAPTCHA, blocking premium-rate prefixes, and cost alerts |
+| **Unauthenticated SMS sending.** Anyone can book with any South African mobile number, which invites SMS pumping, harassment and slot squatting. | Open by design ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)). v1 sends nothing real: confirmations go to a simulated gateway (built in M5), and the hosted demo accepts only the published demo numbers. | An OTP before an appointment counts as confirmed, per-recipient and per-prefix caps, CAPTCHA, blocking premium-rate prefixes, and cost alerts |
 | **Learning that a number has a booking.** Booking with another person's number returns `409 DUPLICATE_APPOINTMENT` or `409 CUSTOMER_OVERLAP`, though never the reference, branch or time ([BR-23](docs/domain-rules.md#br-23)). | Accepted for the demo | OTP verification of the number before any answer |
 | **Reference enumeration.** Guessing references to find appointments. | Built in M3: eight characters from a 31-symbol alphabet, the same 404 for an unknown reference and for wrong digits, and the lookup rate limit ([BR-13](docs/domain-rules.md#br-13)) | Appointments bound to a verified customer through the bank's identity provider |
 | **Blocking someone's lookup.** Five wrong tries block a known reference for an hour, and the counts are kept in memory for one instance ([docs/architecture.md](docs/architecture.md#lookup)). | Accepted: a reference appears only in the customer's own SMS and pages | A shared rate-limit store, and identity-bound lookups |

@@ -86,15 +86,15 @@ environment supplies the rest:
 
 | Variable | Purpose | Set by |
 |---|---|---|
-| `DB_URL` | JDBC URL of the PostgreSQL database | `compose.yaml` locally; planned for the hosted demo (after M6): the ECS task definition |
-| `DB_USER`, `DB_PASSWORD` | Database credentials | `compose.yaml` locally; planned for the hosted demo (after M6): AWS Secrets Manager |
+| `DB_URL` | JDBC URL of the PostgreSQL database | `compose.yaml` locally; in the hosted demo, the ECS task definition, with `sslmode=require` |
+| `DB_USER`, `DB_PASSWORD` | Database credentials | `compose.yaml` locally; in the hosted demo, AWS Secrets Manager (`branchbook/database`), injected when the task starts |
 | `PORT` | HTTP port, 8080 by default | Optional |
 | `BRANCHBOOK_DISPATCHER_ENABLED` | Runs the dispatcher that delivers PENDING messages every 2 seconds on its own thread. `true` by default; its interval and the simulated gateway's latency are in application.yml. | Optional; the tests switch it off and drive it themselves |
 | `BRANCHBOOK_INBOX_ENABLED` | Switches on the simulated inbox, `GET /api/v1/messages`, an operator view of every booking's messages. `false` by default. | `compose.yaml` and `make dev-api` set it to `true`, and so do the tests |
 | `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` | Takes bookings only from the published demo numbers, 082 555 0000 to 0199, so a public demo is never given a real person's number ([ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md)). Any other South African mobile is `422 DEMO_NUMBER_REQUIRED`. `false` by default. | The hosted demo's ECS task definition sets it to `true`, and `EXPECT_DEMO_NUMBERS_ONLY=1 scripts/smoke.sh <url>` fails if a deployment has it off. The start-up log says which numbers bookings take. `compose.yaml` and `make dev-api` leave it off, and the shared test configuration sets it to `false`; `DemoNumbersOnlyIT` switches it on |
 | `BRANCHBOOK_RETENTION_ENABLED` | `branchbook.retention.enabled`. Switches on the hourly retention job, which deletes every appointment older than the max-age below, with its messages and idempotency keys, keeping the hosted demo's 48-hour promise ([SECURITY.md](../SECURITY.md#personal-information-popia)). `false` by default. | The hosted demo's ECS task definition sets it to `true`, and nothing else does. `compose.yaml`, `make dev-api` and the tests leave it off; the tests call `RetentionPurge` themselves |
 | `BRANCHBOOK_RETENTION_MAX_AGE` | `branchbook.retention.max-age`. How long after its booking an appointment is deleted, as an ISO-8601 duration. `PT48H` by default; less than `PT24H`, the life of an `Idempotency-Key`, stops start-up. | Optional; the default is the hosted demo's promise |
-| `PUBLIC_BASE_URL` | The address customers reach the app at, which ends the confirmation SMS's `/manage` link. At most 28 characters with no trailing slash, so the longest SMS fits one segment; a longer value stops start-up. `http://localhost:8080` by default. | `compose.yaml` locally (it follows `APP_PORT`); planned for the hosted demo (after M6): the ECS task definition |
+| `PUBLIC_BASE_URL` | The address customers reach the app at, which ends the confirmation SMS's `/manage` link. At most 28 characters with no trailing slash, so the longest SMS fits one segment; a longer value stops start-up. `http://localhost:8080` by default. | `compose.yaml` locally (it follows `APP_PORT`); in the hosted demo, the ECS task definition (`https://branchbook.click`) |
 
 The booking rules that are settings rather than code are under `branchbook.booking` in application.yml: the
 two-hour lead time, the thirty-day horizon, the lookup limit of five wrong tries per reference in an hour, and

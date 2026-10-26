@@ -54,6 +54,6 @@ stands.
   `scheduling` domain types, such as `Branch`, `ServiceOffer`, `SlotCalendar` and `BookedInterval`, and
   `notification` uses `booking`'s `MobileNumber`. Calls still go through application code; the values they pass
   need not.
-- **The dispatcher is not the only asynchronous element.** Two scheduled jobs already run in-process:
-  `HolidayCoverageCheck` (M2) at start-up and daily, and `IdempotencyKeyPurgeJob` (M3) hourly. The outbox dispatcher
-  is planned for M5.
+- **The dispatcher is not the only asynchronous element.** Scheduled jobs run in-process too:
+  `HolidayCoverageCheck` (M2) at start-up and daily, `IdempotencyKeyPurgeJob` (M3) hourly, and `RetentionPurgeJob`
+  hourly where a deployment switches it on. The outbox dispatcher, built in M5, runs on its own thread.
