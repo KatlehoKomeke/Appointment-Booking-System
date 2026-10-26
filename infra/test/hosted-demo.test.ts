@@ -4,11 +4,10 @@
  */
 import { App } from 'aws-cdk-lib/core';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { AppStack, AppStackProps, BOOKING_RATE_LIMIT, DEMO_GATE_USER } from '../lib/app-stack';
+import { AppStack, AppStackProps, BOOKING_RATE_LIMIT } from '../lib/app-stack';
 import { DataStack } from '../lib/data-stack';
 
 const env = { account: '111111111111', region: 'af-south-1' };
-const password = 'not-a-real-password';
 
 function synth(overrides: Partial<AppStackProps> = {}): { data: Template; app: Template } {
   const app = new App();
@@ -19,7 +18,6 @@ function synth(overrides: Partial<AppStackProps> = {}): { data: Template; app: T
     database: data.database,
     domainName: 'branchbook.link',
     hostedZoneId: 'Z0000000PLACEHOLDER',
-    demoGatePassword: password,
     ...overrides,
   });
   return { data: Template.fromStack(data), app: Template.fromStack(appStack) };
@@ -74,7 +72,7 @@ describe('AppStack', () => {
     });
   });
 
-  test('gives the app the public address the SMS links to, over TLS to the database, with the inbox and the 48-hour deletion on', () => {
+  test('gives the app the public address the SMS links to, over TLS to the database, with the inbox off and the 48-hour deletion on', () => {
     app.hasResourceProperties('AWS::ECS::TaskDefinition', {
       ContainerDefinitions: [
         Match.objectLike({
@@ -82,7 +80,7 @@ describe('AppStack', () => {
           Environment: Match.arrayWith([
             { Name: 'DB_URL', Value: Match.objectLike({ 'Fn::Join': Match.anyValue() }) },
             { Name: 'PUBLIC_BASE_URL', Value: 'https://branchbook.link' },
-            { Name: 'BRANCHBOOK_INBOX_ENABLED', Value: 'true' },
+            { Name: 'BRANCHBOOK_INBOX_ENABLED', Value: 'false' },
             { Name: 'BRANCHBOOK_RETENTION_ENABLED', Value: 'true' },
             { Name: 'BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY', Value: 'true' },
           ]),
@@ -96,15 +94,15 @@ describe('AppStack', () => {
     app.hasResourceProperties('AWS::Logs::LogGroup', { LogGroupName: '/branchbook/app', RetentionInDays: 7 });
   });
 
-  test('serves HTTPS only, with a TLS 1.3 policy, so the gate never asks for the password over plain HTTP', () => {
-    app.resourceCountIs('AWS::ElasticLoadBalancingV2::Listener', 1);
+  test('serves HTTPS with a TLS 1.3 policy and redirects plain HTTP to it', () => {
     app.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
       Port: 443,
       Protocol: 'HTTPS',
       SslPolicy: Match.stringLikeRegexp('TLS13'),
     });
-    app.hasResourceProperties('AWS::EC2::SecurityGroup', {
-      SecurityGroupIngress: [Match.objectLike({ FromPort: 443, ToPort: 443, CidrIp: '0.0.0.0/0' })],
+    app.hasResourceProperties('AWS::ElasticLoadBalancingV2::Listener', {
+      Port: 80,
+      DefaultActions: [Match.objectLike({ Type: 'redirect', RedirectConfig: Match.objectLike({ Protocol: 'HTTPS' }) })],
     });
     app.hasResourceProperties('AWS::ElasticLoadBalancingV2::TargetGroup', { HealthCheckPath: '/readyz' });
   });
@@ -122,25 +120,19 @@ describe('AppStack', () => {
     });
   });
 
-  test('puts WAF in front: /actuator blocked, the demo gate, the booking rate limit and AWS managed rules', () => {
-    const expected = `Basic ${Buffer.from(`${DEMO_GATE_USER}:${password}`).toString('base64')}`;
+  test('puts WAF in front, with no sign-in: /actuator blocked, the booking rate limit and AWS managed rules', () => {
     app.hasResourceProperties('AWS::WAFv2::WebACL', {
       Scope: 'REGIONAL',
-      Rules: Match.arrayWith([
+      Rules: [
         Match.objectLike({ Name: 'block-actuator', Action: { Block: {} } }),
-        Match.objectLike({
-          Name: 'demo-gate',
-          Action: { Block: { CustomResponse: Match.objectLike({ ResponseCode: 401 }) } },
-          Statement: {
-            NotStatement: { Statement: { ByteMatchStatement: Match.objectLike({ SearchString: expected }) } },
-          },
-        }),
         Match.objectLike({
           Name: 'booking-rate-limit',
           Statement: { RateBasedStatement: Match.objectLike({ Limit: BOOKING_RATE_LIMIT, EvaluationWindowSec: 300 }) },
         }),
+        Match.objectLike({ Name: 'AWSManagedRulesAmazonIpReputationList' }),
+        Match.objectLike({ Name: 'AWSManagedRulesKnownBadInputsRuleSet' }),
         Match.objectLike({ Name: 'AWSManagedRulesCommonRuleSet' }),
-      ]),
+      ],
     });
     app.resourceCountIs('AWS::WAFv2::WebACLAssociation', 1);
   });
@@ -151,9 +143,5 @@ describe('AppStack', () => {
 
   test('refuses a domain too long for the SMS link (BR-18)', () => {
     expect(() => synth({ domainName: 'a-much-too-long-name.link' })).toThrow(/at most 20 characters/);
-  });
-
-  test('refuses a short demo gate password', () => {
-    expect(() => synth({ demoGatePassword: 'short' })).toThrow(/at least 12 characters/);
   });
 });

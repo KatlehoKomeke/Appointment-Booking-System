@@ -19,7 +19,7 @@ const SECTIONS = [
   {
     id: 'privacy-collect',
     heading: 'What we collect',
-    body: 'Your first name, last name and cellphone number. All three are needed to book, so none is optional. We never ask for your ID number.',
+    body: 'Your first name, last name and cellphone number. All three are needed to book, so none is optional. We never ask for your ID number. On the hosted demo, book with a demo number, 082 555 0000 to 082 555 0199, and a made-up name; other visitors cannot see your booking.',
   },
   {
     id: 'privacy-why',

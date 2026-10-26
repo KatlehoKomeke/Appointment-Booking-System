@@ -53,9 +53,9 @@ jobs:
         run: npm test -- --ci
 
       - name: Synthesise every stack
-        # Placeholders: the real address and the demo gate's password are supplied only when deploying, never
-        # committed. Setting them brings BranchbookAccount and the hosted demo's two stacks into the app.
+        # A placeholder address: the real one is supplied only when deploying, never committed. With the flag, it
+        # brings BranchbookAccount and the hosted demo's two stacks into the app.
         env:
           BRANCHBOOK_ALERT_EMAIL: alerts@example.com
-          BRANCHBOOK_DEMO_GATE_PASSWORD: synth-only-placeholder
+          BRANCHBOOK_HOSTED_DEMO: 'true'
         run: npx cdk synth --quiet

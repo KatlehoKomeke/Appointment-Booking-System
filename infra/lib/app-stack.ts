@@ -17,9 +17,6 @@ import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
 import { DATABASE_NAME } from './data-stack';
 
-/** The user name of the demo gate. The password is supplied at deploy time and never committed. */
-export const DEMO_GATE_USER = 'reviewer';
-
 /** Bookings one address may make in {@link BOOKING_RATE_WINDOW_SECONDS} before WAF refuses more (ADR-0006). */
 export const BOOKING_RATE_LIMIT = 30;
 
@@ -45,9 +42,6 @@ export interface AppStackProps extends StackProps {
   /** The ID of that hosted zone. Public, not a secret, and written out so that synthesis needs no lookup. */
   readonly hostedZoneId: string;
 
-  /** The demo gate's password, supplied at deploy time from the environment and never committed. */
-  readonly demoGatePassword: string;
-
   /** Where the three alarms are e-mailed, if anywhere. Personal data, so supplied at deploy time only. */
   readonly alertEmail?: string;
 }
@@ -57,10 +51,11 @@ export interface AppStackProps extends StackProps {
  * (ADR-0006). A reviewer's request takes this path:
  *
  * 1. Route 53 answers the domain with the load balancer's address.
- * 2. AWS WAF, attached to the load balancer, blocks `/actuator` (403), asks for the demo gate's basic-auth
- *    credentials (401 without them), allows 30 bookings per address in five minutes, and applies AWS's managed
- *    rules for known bad inputs and addresses.
- * 3. The load balancer ends HTTPS with an ACM certificate, serves no plain HTTP, and health-checks `/readyz`.
+ * 2. AWS WAF, attached to the load balancer, blocks `/actuator` (403), allows 30 bookings per address in five
+ *    minutes, and applies AWS's managed rules for known bad inputs and addresses. There is no sign-in: anyone with
+ *    the address can try the demo, which accepts only the published demo numbers and deletes every booking after
+ *    48 hours.
+ * 3. The load balancer ends HTTPS with an ACM certificate, redirects plain HTTP to it, and health-checks `/readyz`.
  * 4. One ARM64 Fargate task (0.5 vCPU, 1 GB) serves the request on port 8080. It accepts traffic only from the load
  *    balancer, and runs in a public subnet so it reaches ECR and Secrets Manager without a NAT gateway.
  * 5. The task reaches RDS on port 5432 over TLS, directly, with no RDS Proxy; the database accepts only the task.
@@ -77,9 +72,6 @@ export class AppStack extends Stack {
 
     if (props.domainName.length > 20) {
       throw new Error(`domainName must be at most 20 characters for the SMS link (BR-18): ${props.domainName}`);
-    }
-    if (props.demoGatePassword.length < 12) {
-      throw new Error('demoGatePassword must be at least 12 characters');
     }
     this.url = `https://${props.domainName}`;
 
@@ -125,8 +117,10 @@ export class AppStack extends Stack {
         DB_URL: `jdbc:postgresql://${endpoint}:5432/${DATABASE_NAME}?sslmode=require`,
         // The confirmation SMS's /manage link (BR-18).
         PUBLIC_BASE_URL: this.url,
-        // The simulated inbox stays on in the demo, so reviewers can watch the outbox deliver.
-        BRANCHBOOK_INBOX_ENABLED: 'true',
+        // The simulated inbox is off: with no sign-in, it would show every visitor every booking's reference, and a
+        // demo number's last four digits are public, so anyone could open anyone's booking. Each booker still sees
+        // their own SMS and its status on the confirmation page.
+        BRANCHBOOK_INBOX_ENABLED: 'false',
         // Every booking, with its name and number, is deleted 48 hours after it was made, as the privacy notice
         // says of the hosted demo.
         BRANCHBOOK_RETENTION_ENABLED: 'true',
@@ -183,9 +177,7 @@ export class AppStack extends Stack {
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       dropInvalidHeaderFields: true,
     });
-    // No HTTP listener at all, not even a redirect: WAF judges a request before the load balancer redirects it, so
-    // plain HTTP would meet the demo gate's sign-in prompt and send the password unencrypted. Browsers upgrade to
-    // HTTPS by themselves, and HSTS keeps them there.
+    loadBalancer.addRedirect({ sourcePort: 80, targetPort: 443 });
     const https = loadBalancer.addListener('Https', {
       port: 443,
       certificates: [certificate],
@@ -209,7 +201,7 @@ export class AppStack extends Stack {
       target: route53.RecordTarget.fromAlias(new targets.LoadBalancerTarget(loadBalancer)),
     });
 
-    const webAcl = this.webAcl(props.demoGatePassword);
+    const webAcl = this.webAcl();
     new wafv2.CfnWebACLAssociation(this, 'WafOnLoadBalancer', {
       resourceArn: loadBalancer.loadBalancerArn,
       webAclArn: webAcl.attrArn,
@@ -222,14 +214,10 @@ export class AppStack extends Stack {
   }
 
   /**
-   * The web ACL in front of the load balancer. The demo gate is a WAF rule rather than application code, so the
-   * application is deployed exactly as `make up` runs it; the cost is that the gate's credential sits in this rule
-   * and so in the deployed template (SECURITY.md).
-   *
-   * @param password - the demo gate's password, for the user {@link DEMO_GATE_USER}
+   * The web ACL in front of the load balancer. It asks for no sign-in: a prompt in front of a demo turned away the
+   * people it is for (ADR-0006 Notes). The demo-number check and the 48-hour deletion keep real personal data out.
    */
-  private webAcl(password: string): wafv2.CfnWebACL {
-    const expected = `Basic ${Buffer.from(`${DEMO_GATE_USER}:${password}`).toString('base64')}`;
+  private webAcl(): wafv2.CfnWebACL {
     const visibility = (metricName: string): wafv2.CfnWebACL.VisibilityConfigProperty => ({
       cloudWatchMetricsEnabled: true,
       metricName,
@@ -255,9 +243,6 @@ export class AppStack extends Stack {
       scope: 'REGIONAL',
       defaultAction: { allow: {} },
       visibilityConfig: visibility('branchbook-demo'),
-      customResponseBodies: {
-        gate: { contentType: 'TEXT_PLAIN', content: 'BranchBook demo: sign in with the reviewer credentials.' },
-      },
       rules: [
         {
           name: 'block-actuator',
@@ -267,34 +252,8 @@ export class AppStack extends Stack {
           visibilityConfig: visibility('block-actuator'),
         },
         {
-          name: 'demo-gate',
-          priority: 1,
-          action: {
-            block: {
-              customResponse: {
-                responseCode: 401,
-                customResponseBodyKey: 'gate',
-                responseHeaders: [{ name: 'WWW-Authenticate', value: 'Basic realm="BranchBook demo", charset="UTF-8"' }],
-              },
-            },
-          },
-          statement: {
-            notStatement: {
-              statement: {
-                byteMatchStatement: {
-                  fieldToMatch: { singleHeader: { Name: 'authorization' } },
-                  positionalConstraint: 'EXACTLY',
-                  searchString: expected,
-                  textTransformations: [{ priority: 0, type: 'NONE' }],
-                },
-              },
-            },
-          },
-          visibilityConfig: visibility('demo-gate'),
-        },
-        {
           name: 'booking-rate-limit',
-          priority: 2,
+          priority: 1,
           action: { block: {} },
           statement: {
             rateBasedStatement: {
@@ -320,9 +279,9 @@ export class AppStack extends Stack {
           },
           visibilityConfig: visibility('booking-rate-limit'),
         },
-        managed('AWSManagedRulesAmazonIpReputationList', 3),
-        managed('AWSManagedRulesKnownBadInputsRuleSet', 4),
-        managed('AWSManagedRulesCommonRuleSet', 5),
+        managed('AWSManagedRulesAmazonIpReputationList', 2),
+        managed('AWSManagedRulesKnownBadInputsRuleSet', 3),
+        managed('AWSManagedRulesCommonRuleSet', 4),
       ],
     });
   }

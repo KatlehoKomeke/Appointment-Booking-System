@@ -66,11 +66,10 @@ new ReleaseStack(app, 'BranchbookRelease', {
   version: process.env.GITHUB_SHA ?? 'local',
 });
 
-// The hosted demo (ADR-0006) is part of the app only when its gate's password is supplied: by an administrator
-// deploying it from their own machine, or as a placeholder in the credential-free infra workflow. The deploy
-// workflow never sets it, so the pipeline, whose role may deploy BranchbookRelease alone, never touches these.
-const demoGatePassword = process.env.BRANCHBOOK_DEMO_GATE_PASSWORD;
-if (demoGatePassword !== undefined) {
+// The hosted demo (ADR-0006) is part of the app only when BRANCHBOOK_HOSTED_DEMO is set: by an administrator
+// deploying it from their own machine, or in the credential-free infra workflow. The deploy workflow never sets
+// it, so the pipeline, whose role may deploy BranchbookRelease alone, never touches these stacks.
+if (process.env.BRANCHBOOK_HOSTED_DEMO === 'true') {
   const data = new DataStack(app, 'BranchbookData', {
     env: { account, region: 'af-south-1' },
     description: 'BranchBook hosted demo: the network and the PostgreSQL 17 database (synthetic data only).',
@@ -83,7 +82,6 @@ if (demoGatePassword !== undefined) {
     database: data.database,
     domainName: context('demoDomain'),
     hostedZoneId: context('demoHostedZoneId'),
-    demoGatePassword,
     // Personal data, so never committed; the alarms still exist without it, on a topic with no subscriber.
     alertEmail: process.env.BRANCHBOOK_DEMO_ALERT_EMAIL,
   });
