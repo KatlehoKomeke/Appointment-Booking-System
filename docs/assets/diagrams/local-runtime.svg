@@ -1,0 +1,243 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
+  <title id="title">From source to a running stack</title>
+  <desc id="desc">How make up turns this repository into a running stack: the build on the left, the running stack on the right, and the image's other uses below. Build, from the Dockerfile. No tests run in the image build; CI runs them. The .dockerignore allow-list lets only api/.mvn/, api/mvnw, api/pom.xml, api/src/ and web/ into the build, and they feed two stages. Stage web runs on the builder's own platform ($BUILDPLATFORM) on Node.js 24 and Alpine: npm ci with a cache at /root/.npm, then npm run build into dist/. dist/ flows into stage api, also on $BUILDPLATFORM, on the Eclipse Temurin 25 JDK and Alpine: it copies dist/ into src/main/resources/static/, runs ./mvnw -DskipTests package with a cache at /root/.m2, and extracts the jar into layers with jarmode tools. The layers flow into stage runtime, on the Eclipse Temurin 25 JRE and Alpine, which stacks four layers from least to most often changed: dependencies, spring-boot-loader, snapshot-dependencies and application. It runs as USER 10001, with TZ=UTC and a HEALTHCHECK on /readyz. The main path leads from runtime to the image branchbook:local, the highlighted node. Step 1: make up builds branchbook:local. Run, with make up: the main path continues from the image into the Docker Compose project branchbook. Service db runs PostgreSQL 17 on Alpine, with port 5432 on the compose network only, the volume db-data, and a terse error log that keeps personal data out. Step 2: db starts. A health check runs pg_isready every 2 s. Step 3: pg_isready reports db healthy. A gate, depends_on with condition service_healthy, holds service app until then. Service app runs the image branchbook:local as user 10001, with stop_grace_period 30s. Step 4: app starts; Flyway applies V1 to V4 and Hibernate validates the schema. It serves the React app at / and /assets/*, with the SPA routes forwarded to index.html; the API at /api/v1/branches, /api/v1/branches/{code}, /api/v1/branches/{code}/availability, /api/v1/appointments, /api/v1/appointments/{reference}, /v3/api-docs and /swagger-ui.html; and the probes /readyz (readiness, which includes the database), /livez, /actuator/health and /actuator/info. A health check, the image's HEALTHCHECK, runs wget on /readyz every 5 s after a start period of 90 s. Step 5: /readyz answers UP and the container is healthy. The main path ends at app reaching db over JDBC at db:5432; if HikariCP finds no free connection within 3 s, the API answers 503 TRY_AGAIN. A browser reaches app only through the port 127.0.0.1:${APP_PORT:-8080}. Step 6: docker compose up --wait returns and make up prints the URL. The same image elsewhere: the stack job in ci.yml builds the same image from this Dockerfile, starts it with compose up --wait, runs smoke.sh and checks the logs for credentials. A planned flow, deploy after M6, leads to an ECS Fargate task on ARM64, planned after M6. Developing without the image, built: make dev-api runs the API on port 8080 against a throwaway PostgreSQL 17 from Testcontainers, and make dev-web runs Vite on port 5173, proxying /api, /actuator, /readyz and /livez to port 8080. Legend: Built; Planned, with milestone; Main path; Planned flow; Health check.</desc>
+  <!--
+    Diagram id: local-runtime
+    Shown in: docs/architecture.md (10.1 Locally: the image and the stack)
+    Sources: Dockerfile; .dockerignore; compose.yaml; Makefile (up, dev-api, dev-web);
+      api/src/main/resources/application.yml; api/src/main/resources/db/migration/ (V1 to V4);
+      api/src/main/java/za/co/fynbos/branchbook/shared/web/SpaForwardingController.java;
+      api/src/main/java/za/co/fynbos/branchbook/catalogue/api/BranchController.java;
+      api/src/main/java/za/co/fynbos/branchbook/scheduling/api/AvailabilityController.java;
+      api/src/main/java/za/co/fynbos/branchbook/booking/api/AppointmentController.java;
+      api/src/main/java/za/co/fynbos/branchbook/shared/problem/ProblemCode.java (TRY_AGAIN);
+      api/src/test/java/za/co/fynbos/branchbook/TestBranchBookApplication.java;
+      api/src/test/java/za/co/fynbos/branchbook/support/TestcontainersConfiguration.java;
+      web/vite.config.ts; .github/workflows/ci.yml (job stack); scripts/smoke.sh;
+      docs/adr/0006-hosted-demo-on-aws-with-cdk.md (the planned Fargate task)
+    Verified at 85cd726 (2026-10-26)
+    Conventions: docs/assets/diagrams/README.md
+    Planned elements carry class="planned" data-milestone (here: the ECS Fargate task and its flow, after-M6)
+  -->
+  <style>
+:root{--bg:#F2F5F2;--surface:#FFFFFF;--surface-2:#E8EEE9;--ink:#15201A;--ink-2:#46534C;--ink-3:#69766E;--line:#D3DCD5;--line-strong:#AEBDB3;--accent:#1E6B52;--accent-strong:#164F3D;--accent-soft:#DCEDE4;--bad:#A63650;--bad-soft:#F6E0E6;--warn:#775C10;--warn-soft:#F5ECCD}
+@media (prefers-color-scheme:dark){:root{--bg:#0D1310;--surface:#141C18;--surface-2:#1A2520;--ink:#E2EAE5;--ink-2:#A9B6AE;--ink-3:#85938B;--line:#28352F;--line-strong:#3E4F46;--accent:#62C29A;--accent-strong:#8AD8B5;--accent-soft:#16332A;--bad:#EC8CA3;--bad-soft:#3A1C25;--warn:#E3C266;--warn-soft:#342B12}}
+.card{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.box{fill:var(--surface);stroke:var(--line-strong);stroke-width:1.2}
+.box-ok{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+.box-soft{fill:var(--surface-2);stroke:var(--line-strong);stroke-width:1}
+.box-dash{fill:none;stroke:var(--ink-3);stroke-width:1.2;stroke-dasharray:5 4}
+.box-warn{fill:var(--warn-soft);stroke:var(--warn);stroke-width:1.5}
+.box-bad{fill:var(--bad-soft);stroke:var(--bad);stroke-width:1.5}
+.edge{stroke:var(--ink-2);stroke-width:1.4;fill:none}
+.edge-acc{stroke:var(--accent);stroke-width:2.2;fill:none}
+.edge-dash{stroke:var(--ink-3);stroke-width:1.3;stroke-dasharray:5 4;fill:none}
+.edge-bad{stroke:var(--bad);stroke-width:1.6;fill:none}
+.probe{stroke:var(--ink-3);stroke-width:1.2;stroke-dasharray:1.5 3;fill:none}
+.grid{stroke:var(--line);stroke-width:1}
+.ah{fill:var(--ink-2)}.ah-acc{fill:var(--accent)}.ah-dash{fill:var(--ink-3)}.ah-bad{fill:var(--bad)}
+text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+.t{fill:var(--ink);font-size:14px;font-weight:600}
+.s{fill:var(--ink-2);font-size:13px}
+.l{fill:var(--ink-2);font-size:12.5px}
+.g{fill:var(--ink-2);font-size:12px;font-weight:600;letter-spacing:.04em}
+.tp{fill:var(--ink-2)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+.t.mono{font-size:13px}.s.mono,.l.mono{font-size:12px}
+.halo{paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+.halo-2{paint-order:stroke;stroke:var(--surface-2);stroke-width:4px;stroke-linejoin:round}
+.pill-built{fill:var(--accent-soft)}.pill-built-t{fill:var(--accent-strong);font-size:12px;font-weight:600}
+.pill-plan{fill:var(--surface);stroke:var(--ink-3);stroke-width:1;stroke-dasharray:3 2}.pill-plan-t{fill:var(--ink-2);font-size:12px;font-weight:600}
+.pill-warn{fill:var(--warn-soft)}.pill-warn-t{fill:var(--warn);font-size:12px;font-weight:600}
+.pill-bad{fill:var(--bad-soft)}.pill-bad-t{fill:var(--bad);font-size:12px;font-weight:600}
+.badge{fill:var(--accent)}.badge-t{fill:var(--surface);font-size:12px;font-weight:700}
+.aws-compute{fill:#ED7100}.aws-db{fill:#C925D1}.aws-net{fill:#8C4FFF}.aws-sec{fill:#DD344C}.aws-mgmt{fill:#E7157B}.aws-store{fill:#7AA116}
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah" d="M0,0 L8,4 L0,8 z"/></marker>
+    <marker id="ah-acc" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-acc" d="M0,0 L8,4 L0,8 z"/></marker>
+    <marker id="ah-dash" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-dash" d="M0,0 L8,4 L0,8 z"/></marker>
+    <marker id="ah-bad" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-bad" d="M0,0 L8,4 L0,8 z"/></marker>
+  </defs>
+  <rect class="card" x="0.5" y="0.5" width="959" height="799" rx="16"/>
+  <g id="lane-build">
+    <rect class="box-soft" x="24.5" y="24.5" width="320" height="576" rx="12"/>
+    <text class="g" x="40" y="46">Build · <tspan class="mono">Dockerfile</tspan></text>
+    <text class="tp" x="40" y="64" font-size="12">No tests run in the image build; CI runs them.</text>
+  </g>
+  <g id="file-dockerignore">
+    <path class="box" d="M48.5,78.5 H298.5 L308.5,88.5 V138.5 A8,8 0 0 1 300.5,146.5 H48.5 A8,8 0 0 1 40.5,138.5 V86.5 A8,8 0 0 1 48.5,78.5 Z"/>
+    <path class="box" d="M298.5,78.5 V88.5 H308.5 Z"/>
+    <text class="t" x="52" y="100"><tspan class="t mono">.dockerignore</tspan> allow-list</text>
+    <text class="s mono" x="52" y="119">api/.mvn/ · api/mvnw</text>
+    <text class="s mono" x="52" y="135">api/pom.xml · api/src/ · web/</text>
+  </g>
+  <g id="stage-web">
+    <rect class="box" x="40.5" y="166.5" width="268" height="90" rx="8"/>
+    <text class="t" x="52" y="188">web</text>
+    <rect class="box-soft" x="168.5" y="173.5" width="128" height="20" rx="10"/>
+    <text class="s mono" x="232.5" y="188" text-anchor="middle">$BUILDPLATFORM</text>
+    <text class="s" x="52" y="209">Node.js 24 · Alpine</text>
+    <text class="s" x="52" y="227"><tspan class="s mono">npm ci</tspan>, cache <tspan class="s mono">/root/.npm</tspan></text>
+    <text class="s" x="52" y="245"><tspan class="s mono">npm run build</tspan> into <tspan class="s mono">dist/</tspan></text>
+  </g>
+  <g id="stage-api">
+    <rect class="box" x="40.5" y="276.5" width="268" height="126" rx="8"/>
+    <text class="t" x="52" y="298">api</text>
+    <rect class="box-soft" x="168.5" y="283.5" width="128" height="20" rx="10"/>
+    <text class="s mono" x="232.5" y="298" text-anchor="middle">$BUILDPLATFORM</text>
+    <text class="s" x="52" y="319">Eclipse Temurin 25 JDK · Alpine</text>
+    <text class="s" x="52" y="337"><tspan class="s mono">dist/</tspan> into <tspan class="s mono">…/resources/static/</tspan></text>
+    <text class="s mono" x="52" y="355">./mvnw -DskipTests package</text>
+    <text class="s" x="52" y="373">cache <tspan class="s mono">/root/.m2</tspan></text>
+    <text class="s" x="52" y="391"><tspan class="s mono">extract --layers</tspan> (jarmode tools)</text>
+  </g>
+  <g id="stage-runtime">
+    <rect class="box" x="40.5" y="422.5" width="268" height="164" rx="8"/>
+    <text class="t" x="52" y="444">runtime</text>
+    <rect class="box-soft" x="132.5" y="429.5" width="92" height="20" rx="10"/>
+    <text class="s mono" x="178.5" y="444" text-anchor="middle">USER 10001</text>
+    <rect class="box-soft" x="232.5" y="429.5" width="64" height="20" rx="10"/>
+    <text class="s mono" x="264.5" y="444" text-anchor="middle">TZ=UTC</text>
+    <text class="s" x="52" y="465">Eclipse Temurin 25 JRE · Alpine</text>
+    <rect class="box-soft" x="52.5" y="476.5" width="244" height="16" rx="3"/>
+    <text class="s mono" x="60" y="489">application</text>
+    <text class="tp" x="288" y="489" font-size="12" text-anchor="end">most often changed</text>
+    <rect class="box-soft" x="52.5" y="494.5" width="244" height="16" rx="3"/>
+    <text class="s mono" x="60" y="507">snapshot-dependencies</text>
+    <rect class="box-soft" x="52.5" y="512.5" width="244" height="16" rx="3"/>
+    <text class="s mono" x="60" y="525">spring-boot-loader</text>
+    <rect class="box-soft" x="52.5" y="530.5" width="244" height="16" rx="3"/>
+    <text class="s mono" x="60" y="543">dependencies</text>
+    <text class="tp" x="288" y="543" font-size="12" text-anchor="end">least often changed</text>
+    <rect class="box-soft" x="52.5" y="554.5" width="154" height="20" rx="10"/>
+    <text class="s mono" x="129.5" y="569" text-anchor="middle">HEALTHCHECK /readyz</text>
+  </g>
+  <g id="edges-build">
+    <path class="edge" d="M174,147 V166" marker-end="url(#ah)"/>
+    <path class="edge" d="M174,257 V276" marker-end="url(#ah)"/>
+    <text class="l mono halo-2" x="184" y="271">dist/</text>
+    <path class="edge" d="M174,403 V422" marker-end="url(#ah)"/>
+    <text class="l halo-2" x="184" y="417">layers</text>
+    <path class="edge" d="M309,112.5 H320 A6,6 0 0 1 326,118.5 V333.5 A6,6 0 0 1 320,339.5 H309" marker-end="url(#ah)"/>
+  </g>
+  <g id="lane-run">
+    <text class="g" x="376" y="46">Run · <tspan class="mono">make up</tspan></text>
+    <rect class="box" x="728.5" y="24.5" width="96" height="32" rx="16"/>
+    <text class="t" x="776.5" y="45" text-anchor="middle">Browser</text>
+    <path class="edge" d="M776.5,57 V86" marker-end="url(#ah)"/>
+  </g>
+  <g id="compose-project-branchbook">
+    <rect class="box-soft" x="360.5" y="96.5" width="575" height="460" rx="12"/>
+    <text class="g" x="376" y="118">Docker Compose project <tspan class="mono">branchbook</tspan></text>
+  </g>
+  <g id="port-app">
+    <rect class="box" x="670.5" y="86.5" width="212" height="20" rx="10"/>
+    <text class="s mono" x="776.5" y="101" text-anchor="middle">127.0.0.1:${APP_PORT:-8080}</text>
+    <circle class="badge" cx="904" cy="96.5" r="10"/>
+    <text class="badge-t" x="904" y="100.5" text-anchor="middle">6</text>
+    <path class="edge" d="M776.5,107 V132" marker-end="url(#ah)"/>
+  </g>
+  <g id="service-app">
+    <rect class="box" x="376.5" y="132.5" width="543" height="214" rx="8"/>
+    <text class="t" x="388" y="156">app<tspan class="s" font-weight="400"> · image </tspan><tspan class="s mono" font-weight="400">branchbook:local</tspan></text>
+    <circle class="badge" cx="900" cy="152" r="10"/>
+    <text class="badge-t" x="900" y="156" text-anchor="middle">4</text>
+    <text class="s" x="388" y="175">user <tspan class="s mono">10001</tspan> · <tspan class="s mono">stop_grace_period 30s</tspan></text>
+    <rect class="box-soft" x="388.5" y="186.5" width="519" height="28" rx="4"/>
+    <text class="g" x="400" y="205">React app</text>
+    <text class="s" x="484" y="205"><tspan class="s mono">/</tspan> and <tspan class="s mono">/assets/*</tspan>; SPA routes forward to <tspan class="s mono">index.html</tspan></text>
+    <rect class="box-soft" x="388.5" y="222.5" width="519" height="60" rx="4"/>
+    <text class="g" x="400" y="241">API</text>
+    <text class="s mono" x="484" y="241">/api/v1/branches, …/{code}, …/{code}/availability</text>
+    <text class="s mono" x="484" y="257">/api/v1/appointments, …/{reference}</text>
+    <text class="s mono" x="484" y="273">/v3/api-docs, /swagger-ui.html</text>
+    <rect class="box-soft" x="388.5" y="290.5" width="519" height="44" rx="4"/>
+    <text class="g" x="400" y="309">Probes</text>
+    <text class="s" x="484" y="309"><tspan class="s mono">/readyz</tspan> (readiness + db), <tspan class="s mono">/livez</tspan></text>
+    <text class="s mono" x="484" y="325">/actuator/health, /actuator/info</text>
+    <circle class="badge" cx="884" cy="312.5" r="10"/>
+    <text class="badge-t" x="884" y="316.5" text-anchor="middle">5</text>
+  </g>
+  <g id="probe-app-healthcheck">
+    <path class="probe" d="M400,347 V358 A6,6 0 0 0 406,364 H434 A6,6 0 0 0 440,358 V348" marker-end="url(#ah-dash)"/>
+    <text class="l mono halo-2" x="452" y="362">HEALTHCHECK wget /readyz</text>
+    <text class="l halo-2" x="452" y="378">every 5 s, start period 90 s</text>
+  </g>
+  <g id="edge-app-db">
+    <path class="edge-acc" d="M700,347 V430" marker-end="url(#ah-acc)"/>
+    <text class="l mono halo-2" x="688" y="400" text-anchor="end">JDBC db:5432</text>
+    <text class="l halo-2" x="688" y="416" text-anchor="end">HikariCP waits 3 s, then 503 <tspan class="l mono">TRY_AGAIN</tspan></text>
+  </g>
+  <g id="gate-depends-on">
+    <path class="edge" d="M800,431 V388"/>
+    <path class="edge" d="M800,374 L807,381 L800,388 L793,381 Z"/>
+    <path class="edge" d="M800,374 V348" marker-end="url(#ah)"/>
+    <text class="l mono halo-2" x="815" y="377">depends_on:</text>
+    <text class="l mono halo-2" x="815" y="393">service_healthy</text>
+  </g>
+  <g id="service-db">
+    <path class="box" d="M560.5,436 V532 A139.5,6 0 0 0 839.5,532 V436"/>
+    <ellipse class="box" cx="700" cy="436" rx="139.5" ry="6"/>
+    <text class="t" x="572" y="462">db<tspan class="s" font-weight="400"> · PostgreSQL 17 · Alpine</tspan></text>
+    <circle class="badge" cx="820" cy="458" r="10"/>
+    <text class="badge-t" x="820" y="462" text-anchor="middle">2</text>
+    <text class="s" x="572" y="481">port 5432, compose network only</text>
+    <text class="s" x="572" y="499">volume <tspan class="s mono">db-data</tspan></text>
+    <text class="s" x="572" y="517">terse log keeps personal data out</text>
+  </g>
+  <g id="probe-db-pg-isready">
+    <path class="probe" d="M560,466 H536 A6,6 0 0 0 530,472 V494 A6,6 0 0 0 536,500 H559" marker-end="url(#ah-dash)"/>
+    <circle class="badge" cx="530" cy="483" r="10"/>
+    <text class="badge-t" x="530" y="487" text-anchor="middle">3</text>
+    <text class="l mono halo-2" x="512" y="479" text-anchor="end">pg_isready</text>
+    <text class="l halo-2" x="512" y="495" text-anchor="end">every 2 s</text>
+  </g>
+  <g id="image-branchbook-local">
+    <rect class="box-ok" x="404.5" y="594.5" width="183" height="43" rx="8"/>
+    <text class="t mono" x="418" y="621">branchbook:local</text>
+    <circle class="badge" cx="566" cy="616" r="10"/>
+    <text class="badge-t" x="566" y="620" text-anchor="middle">1</text>
+  </g>
+  <g id="edges-image">
+    <path class="edge-acc" d="M174,587 V610 A6,6 0 0 0 180,616 H404" marker-end="url(#ah-acc)"/>
+    <path class="edge-acc" d="M496,594 V557" marker-end="url(#ah-acc)"/>
+    <text class="l mono halo" x="508" y="580">make up</text>
+  </g>
+  <g id="lane-same-image-elsewhere">
+    <text class="g" x="512" y="662">The same image elsewhere</text>
+    <path class="edge" d="M496,638 V676" marker-end="url(#ah)"/>
+    <rect class="box" x="376.5" y="676.5" width="239" height="72" rx="8"/>
+    <text class="t" x="388" y="698"><tspan class="t mono">stack</tspan> job in <tspan class="t mono">ci.yml</tspan></text>
+    <text class="s" x="388" y="717"><tspan class="s mono">compose up --wait</tspan>, <tspan class="s mono">smoke.sh</tspan>,</text>
+    <text class="s" x="388" y="735">logs checked for credentials</text>
+  </g>
+  <g id="ecs-fargate-task" class="planned" data-milestone="after-M6">
+    <path class="edge-dash" d="M588,616 H770 A6,6 0 0 1 776,622 V676" marker-end="url(#ah-dash)"/>
+    <text class="l halo" x="604" y="608">deploy · after M6</text>
+    <rect class="box-dash" x="632.5" y="676.5" width="287" height="72" rx="8"/>
+    <text class="t tp" x="644" y="698">ECS Fargate task, ARM64</text>
+    <rect class="pill-plan" x="644.5" y="710.5" width="140" height="20" rx="10"/>
+    <text class="pill-plan-t" x="714.5" y="725" text-anchor="middle">planned · after M6</text>
+  </g>
+  <g id="lane-developing-without-the-image">
+    <rect class="box-soft" x="24.5" y="632.5" width="320" height="116" rx="12"/>
+    <text class="g" x="40" y="654">Developing without the image</text>
+    <text class="t" x="40" y="677"><tspan class="t mono">make dev-api</tspan><tspan class="s" font-weight="400"> · the API on :8080</tspan></text>
+    <text class="s" x="40" y="695">throwaway PostgreSQL 17 (Testcontainers)</text>
+    <text class="t" x="40" y="717"><tspan class="t mono">make dev-web</tspan><tspan class="s" font-weight="400"> · Vite on :5173, proxying</tspan></text>
+    <text class="s" x="40" y="735"><tspan class="s mono">/api /actuator /readyz /livez</tspan> to <tspan class="s mono">:8080</tspan></text>
+  </g>
+  <g id="legend">
+    <rect class="box" x="24.5" y="765.5" width="23" height="13" rx="3"/>
+    <text class="tp" x="56" y="776" font-size="12">Built</text>
+    <rect class="box-dash" x="100.5" y="765.5" width="23" height="13" rx="3"/>
+    <text class="tp" x="132" y="776" font-size="12">Planned, with milestone</text>
+    <path class="edge-acc" d="M292,771.5 H316"/>
+    <text class="tp" x="324" y="776" font-size="12">Main path</text>
+    <path class="edge-dash" d="M400,771.5 H424"/>
+    <text class="tp" x="432" y="776" font-size="12">Planned flow</text>
+    <path class="probe" d="M524,771.5 H548"/>
+    <text class="tp" x="556" y="776" font-size="12">Health check</text>
+  </g>
+</svg>

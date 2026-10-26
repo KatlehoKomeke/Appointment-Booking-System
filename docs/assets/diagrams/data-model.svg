@@ -1,0 +1,323 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
+  <title id="title">The schema, by owning module</title>
+  <desc id="desc">The BranchBook schema: eight tables, all built in M1 by V2__schema.sql, grouped by the module that owns them. Catalogue owns five tables. branch_operating_hours, 4 constraints: branch_id and weekday form the primary key, branch_id is a foreign key, weekday is 1 to 7, opens_at is before closes_at. services, 6 constraints: id primary key, code unique and [A-Z]{2,12}, duration_minutes 15 to 120 in steps of 15, documents_needed 1 to 8. branches, 6 constraints: id primary key, code unique and [A-Z]{2,8}, name, sms_name, timezone, active and open_on_public_holidays. branch_services, 4 constraints: branch_id and service_id form the primary key and are foreign keys, capacity 1 to 20. public_holidays, 2 constraints: holiday_date primary key, name, source SCHEDULE_1 or PROCLAMATION; a note says it has no foreign key and that observed Mondays are derived in PublicHolidayCalendar. Notification owns notification_messages; the table is built in M1, each booking writes its PENDING confirmation row from M3, and the sending is planned for M5. 11 constraints: id primary key, appointment_id foreign key, kind CONFIRMATION or CANCELLATION, channel SMS or EMAIL, status PENDING, SENT or FAILED, attempts 0 to 5, next_attempt_at and failure_reason. Booking owns two tables, built in M1 and written by the booking transaction from M3. appointments, 15 constraints: id primary key, reference unique in the form APT-XXXX-XXXX, status and version, the foreign key (branch_id, service_id), seat_no 1 to 20, starts_at before ends_at, customer_first_name, customer_last_name and customer_mobile starting +27. idempotency_keys, 6 constraints: key primary key, request_hash 64 hex characters, appointment_id a nullable foreign key, response_status NULL or 201, expires_at. Relationships, one to many unless stated: branches to branch_operating_hours; services to branch_services; branches to branch_services; branch_services to appointments, the main path, through the composite foreign key appointments_branch_service_fkey; appointments to notification_messages; and many idempotency_keys to zero or one appointment, nullable until the booking commits. The highlighted note, joined to appointments: appointments_seat_no_overlap is EXCLUDE USING gist with branch_id, service_id and seat_no equal and tstzrange(starts_at, ends_at, '[)') overlapping; appointments_customer_no_overlap is customer_mobile equal and the same range overlapping; both apply only WHERE status IN ('CONFIRMED', 'CHECKED_IN'), so a cancelled appointment frees its seat. Its timeline for seat 1, 09:00 to 10:00: 09:00 to 09:30 is accepted; 09:30 to 10:00 is accepted, because ranges are half-open; 09:15 to 09:45 is rejected with SQLSTATE 23P01. Footer: all eight tables are built (M1); 54 named constraints, that is 8 primary keys, 3 unique, 35 checks, 6 foreign keys and 2 exclusion; SchemaConstraintIT proves each with raw SQL, and everyNamedConstraintHasACase fails if one is added without a case. Flyway: V1 btree_gist, V2 schema, V3 reference data, V4 public holidays 2026 and 2027. Legend: built, main path, refused or not allowed, and the relationship ends: a bar is one, a crow's foot is many, a circle and a bar is zero or one.</desc>
+  <!--
+    Diagram id: data-model
+    Shown in: docs/architecture.md (7. Data model)
+    Sources: api/src/main/resources/db/migration/V1__enable_btree_gist.sql, V2__schema.sql,
+      V3__reference_data.sql and V4__public_holidays_2026_2027.sql;
+      api/src/test/java/za/co/fynbos/branchbook/SchemaConstraintIT.java;
+      api/src/main/java/za/co/fynbos/branchbook/catalogue/domain/PublicHolidayCalendar.java;
+      api/src/main/java/za/co/fynbos/branchbook/booking/application/BookAppointmentHandler.java (writes both booking tables);
+      api/src/main/java/za/co/fynbos/branchbook/notification/application/NotificationOutbox.java (writes the PENDING row);
+      docs/domain-rules.md (BR-16 and BR-17: the dispatcher is planned for M5)
+    Verified at 85cd726 (2026-10-26)
+    Conventions: docs/assets/diagrams/README.md
+    Planned elements carry class="planned" data-milestone="M5".
+  -->
+  <style>
+:root{--bg:#F2F5F2;--surface:#FFFFFF;--surface-2:#E8EEE9;--ink:#15201A;--ink-2:#46534C;--ink-3:#69766E;--line:#D3DCD5;--line-strong:#AEBDB3;--accent:#1E6B52;--accent-strong:#164F3D;--accent-soft:#DCEDE4;--bad:#A63650;--bad-soft:#F6E0E6;--warn:#775C10;--warn-soft:#F5ECCD}
+@media (prefers-color-scheme:dark){:root{--bg:#0D1310;--surface:#141C18;--surface-2:#1A2520;--ink:#E2EAE5;--ink-2:#A9B6AE;--ink-3:#85938B;--line:#28352F;--line-strong:#3E4F46;--accent:#62C29A;--accent-strong:#8AD8B5;--accent-soft:#16332A;--bad:#EC8CA3;--bad-soft:#3A1C25;--warn:#E3C266;--warn-soft:#342B12}}
+.card{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.box{fill:var(--surface);stroke:var(--line-strong);stroke-width:1.2}
+.box-ok{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+.box-soft{fill:var(--surface-2);stroke:var(--line-strong);stroke-width:1}
+.box-dash{fill:none;stroke:var(--ink-3);stroke-width:1.2;stroke-dasharray:5 4}
+.box-warn{fill:var(--warn-soft);stroke:var(--warn);stroke-width:1.5}
+.box-bad{fill:var(--bad-soft);stroke:var(--bad);stroke-width:1.5}
+.edge{stroke:var(--ink-2);stroke-width:1.4;fill:none}
+.edge-acc{stroke:var(--accent);stroke-width:2.2;fill:none}
+.edge-dash{stroke:var(--ink-3);stroke-width:1.3;stroke-dasharray:5 4;fill:none}
+.edge-bad{stroke:var(--bad);stroke-width:1.6;fill:none}
+.probe{stroke:var(--ink-3);stroke-width:1.2;stroke-dasharray:1.5 3;fill:none}
+.grid{stroke:var(--line);stroke-width:1}
+.ah{fill:var(--ink-2)}.ah-acc{fill:var(--accent)}.ah-dash{fill:var(--ink-3)}.ah-bad{fill:var(--bad)}
+text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+.t{fill:var(--ink);font-size:14px;font-weight:600}
+.s{fill:var(--ink-2);font-size:13px}
+.l{fill:var(--ink-2);font-size:12.5px}
+.g{fill:var(--ink-2);font-size:12px;font-weight:600;letter-spacing:.04em}
+.tp{fill:var(--ink-2)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+.t.mono{font-size:13px}.s.mono,.l.mono{font-size:12px}
+.halo{paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+.halo-2{paint-order:stroke;stroke:var(--surface-2);stroke-width:4px;stroke-linejoin:round}
+.pill-built{fill:var(--accent-soft)}.pill-built-t{fill:var(--accent-strong);font-size:12px;font-weight:600}
+.pill-plan{fill:var(--surface);stroke:var(--ink-3);stroke-width:1;stroke-dasharray:3 2}.pill-plan-t{fill:var(--ink-2);font-size:12px;font-weight:600}
+.pill-warn{fill:var(--warn-soft)}.pill-warn-t{fill:var(--warn);font-size:12px;font-weight:600}
+.pill-bad{fill:var(--bad-soft)}.pill-bad-t{fill:var(--bad);font-size:12px;font-weight:600}
+.badge{fill:var(--accent)}.badge-t{fill:var(--surface);font-size:12px;font-weight:700}
+.aws-compute{fill:#ED7100}.aws-db{fill:#C925D1}.aws-net{fill:#8C4FFF}.aws-sec{fill:#DD344C}.aws-mgmt{fill:#E7157B}.aws-store{fill:#7AA116}
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah" d="M0,0 L8,4 L0,8 z"/></marker>
+    <marker id="ah-acc" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-acc" d="M0,0 L8,4 L0,8 z"/></marker>
+    <marker id="ah-dash" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-dash" d="M0,0 L8,4 L0,8 z"/></marker>
+    <marker id="ah-bad" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-bad" d="M0,0 L8,4 L0,8 z"/></marker>
+  </defs>
+  <rect class="card" x="0.5" y="0.5" width="959" height="799" rx="16"/>
+  <g id="group-catalogue">
+    <rect class="box-soft" x="24.5" y="24.5" width="559" height="442" rx="12"/>
+    <text class="g" x="40" y="46">catalogue owns</text>
+    <g id="table-branch-operating-hours">
+      <rect class="box" x="36.5" y="60.5" width="305" height="92" rx="8"/>
+      <path class="box-soft" d="M36.5,88.5 V68.5 A8,8 0 0 1 44.5,60.5 H333.5 A8,8 0 0 1 341.5,68.5 V88.5 Z"/>
+      <text class="t mono" x="48" y="79">branch_operating_hours</text>
+      <rect class="box" x="238.5" y="65.5" width="97" height="18" rx="9"/>
+      <text class="tp" font-size="12" font-weight="600" x="287" y="79" text-anchor="middle">4 constraints</text>
+      <text class="s mono" x="48" y="105">branch_id</text>
+      <rect class="box" x="121.5" y="93.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="135" y="105" text-anchor="middle">PK</text>
+      <rect class="box" x="153.5" y="93.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="167" y="105" text-anchor="middle">FK</text>
+      <text class="s mono" x="48" y="123">weekday</text>
+      <rect class="box" x="121.5" y="111.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="135" y="123" text-anchor="middle">PK</text>
+      <text class="s mono" x="330" y="123" text-anchor="end">1..7</text>
+      <text class="s mono" x="48" y="141">opens_at &lt; closes_at</text>
+    </g>
+    <g id="table-services">
+      <rect class="box" x="357.5" y="60.5" width="187" height="128" rx="8"/>
+      <path class="box-soft" d="M357.5,88.5 V68.5 A8,8 0 0 1 365.5,60.5 H536.5 A8,8 0 0 1 544.5,68.5 V88.5 Z"/>
+      <text class="t mono" x="369" y="79">services</text>
+      <rect class="box" x="441.5" y="65.5" width="97" height="18" rx="9"/>
+      <text class="tp" font-size="12" font-weight="600" x="490" y="79" text-anchor="middle">6 constraints</text>
+      <text class="s mono" x="369" y="105">id</text>
+      <rect class="box" x="391.5" y="93.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="405" y="105" text-anchor="middle">PK</text>
+      <text class="s mono" x="369" y="123">code</text>
+      <rect class="box" x="406.5" y="111.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="420" y="123" text-anchor="middle">UK</text>
+      <text class="s mono" x="533" y="123" text-anchor="end">[A-Z]{2,12}</text>
+      <text class="s mono" x="369" y="141">duration_minutes</text>
+      <text class="s mono" x="533" y="159" text-anchor="end">15..120, step 15</text>
+      <text class="s mono" x="369" y="177">documents_needed</text>
+      <text class="s mono" x="533" y="177" text-anchor="end">1..8</text>
+    </g>
+    <g id="table-branches">
+      <rect class="box" x="89.5" y="202.5" width="199" height="128" rx="8"/>
+      <path class="box-soft" d="M89.5,230.5 V210.5 A8,8 0 0 1 97.5,202.5 H280.5 A8,8 0 0 1 288.5,210.5 V230.5 Z"/>
+      <text class="t mono" x="101" y="221">branches</text>
+      <rect class="box" x="185.5" y="207.5" width="97" height="18" rx="9"/>
+      <text class="tp" font-size="12" font-weight="600" x="234" y="221" text-anchor="middle">6 constraints</text>
+      <text class="s mono" x="101" y="247">id</text>
+      <rect class="box" x="123.5" y="235.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="137" y="247" text-anchor="middle">PK</text>
+      <text class="s mono" x="101" y="265">code</text>
+      <rect class="box" x="138.5" y="253.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="152" y="265" text-anchor="middle">UK</text>
+      <text class="s mono" x="277" y="265" text-anchor="end">[A-Z]{2,8}</text>
+      <text class="s mono" x="101" y="283">name, sms_name</text>
+      <text class="s mono" x="101" y="301">timezone, active</text>
+      <text class="s mono" x="101" y="319">open_on_public_holidays</text>
+    </g>
+    <g id="table-branch-services">
+      <rect class="box" x="329.5" y="220.5" width="243" height="92" rx="8"/>
+      <path class="box-soft" d="M329.5,248.5 V228.5 A8,8 0 0 1 337.5,220.5 H564.5 A8,8 0 0 1 572.5,228.5 V248.5 Z"/>
+      <text class="t mono" x="341" y="239">branch_services</text>
+      <rect class="box" x="469.5" y="225.5" width="97" height="18" rx="9"/>
+      <text class="tp" font-size="12" font-weight="600" x="518" y="239" text-anchor="middle">4 constraints</text>
+      <text class="s mono" x="341" y="265">branch_id</text>
+      <rect class="box" x="421.5" y="253.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="435" y="265" text-anchor="middle">PK</text>
+      <rect class="box" x="453.5" y="253.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="467" y="265" text-anchor="middle">FK</text>
+      <text class="s mono" x="341" y="283">service_id</text>
+      <rect class="box" x="421.5" y="271.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="435" y="283" text-anchor="middle">PK</text>
+      <rect class="box" x="453.5" y="271.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="467" y="283" text-anchor="middle">FK</text>
+      <text class="s mono" x="341" y="301">capacity</text>
+      <text class="s mono" x="561" y="301" text-anchor="end">1..20</text>
+    </g>
+    <g id="table-public-holidays">
+      <rect class="box" x="36.5" y="362.5" width="269" height="92" rx="8"/>
+      <path class="box-soft" d="M36.5,390.5 V370.5 A8,8 0 0 1 44.5,362.5 H297.5 A8,8 0 0 1 305.5,370.5 V390.5 Z"/>
+      <text class="t mono" x="48" y="381">public_holidays</text>
+      <rect class="box" x="202.5" y="367.5" width="97" height="18" rx="9"/>
+      <text class="tp" font-size="12" font-weight="600" x="251" y="381" text-anchor="middle">2 constraints</text>
+      <text class="s mono" x="48" y="407">holiday_date</text>
+      <rect class="box" x="143.5" y="395.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="157" y="407" text-anchor="middle">PK</text>
+      <text class="s mono" x="48" y="425">name</text>
+      <text class="s mono" x="48" y="443">source</text>
+      <text class="s mono" x="294" y="443" text-anchor="end">SCHEDULE_1 | PROCLAMATION</text>
+    </g>
+    <g id="note-public-holidays">
+      <path class="probe" d="M306,408 H372"/>
+      <path class="box" d="M380.5,369.5 H562.5 L572.5,379.5 V438.5 A8,8 0 0 1 564.5,446.5 H380.5 A8,8 0 0 1 372.5,438.5 V377.5 A8,8 0 0 1 380.5,369.5 Z"/>
+      <path class="box" d="M562.5,369.5 V379.5 H572.5 Z"/>
+      <text class="s" x="384" y="393">No foreign key; observed</text>
+      <text class="s" x="384" y="411">Mondays are derived in</text>
+      <text class="s mono" x="384" y="429">PublicHolidayCalendar</text>
+    </g>
+    <g id="edges-catalogue">
+      <path class="edge" d="M189,152 V202"/>
+      <path class="edge" d="M182,152 L189,164 L196,152 M189,164 L189,152"/>
+      <path class="edge" d="M195,194 L183,194"/>
+      <path class="edge" d="M451,188 V220"/>
+      <path class="edge" d="M445,196 L457,196"/>
+      <path class="edge" d="M458,220 L451,208 L444,220 M451,208 L451,220"/>
+      <path class="edge" d="M289,266 H329"/>
+      <path class="edge" d="M297,272 L297,260"/>
+      <path class="edge" d="M329,259 L317,266 L329,273 M317,266 L329,266"/>
+    </g>
+  </g>
+  <g id="group-notification">
+    <rect class="box-soft" x="600.5" y="24.5" width="335" height="227" rx="12"/>
+    <text class="g" x="616" y="46">notification owns</text>
+    <g id="notification-module-status" class="planned" data-milestone="M5">
+      <text class="tp" font-size="12" x="616" y="64">written from M3 · sending planned for M5</text>
+    </g>
+    <g id="table-notification-messages">
+      <rect class="box" x="612.5" y="76.5" width="311" height="164" rx="8"/>
+      <path class="box-soft" d="M612.5,104.5 V84.5 A8,8 0 0 1 620.5,76.5 H915.5 A8,8 0 0 1 923.5,84.5 V104.5 Z"/>
+      <text class="t mono" x="624" y="95">notification_messages</text>
+      <rect class="box" x="812.5" y="81.5" width="105" height="18" rx="9"/>
+      <text class="tp" font-size="12" font-weight="600" x="865" y="95" text-anchor="middle">11 constraints</text>
+      <text class="s mono" x="624" y="121">id</text>
+      <rect class="box" x="646.5" y="109.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="660" y="121" text-anchor="middle">PK</text>
+      <text class="s mono" x="624" y="139">appointment_id</text>
+      <rect class="box" x="733.5" y="127.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="747" y="139" text-anchor="middle">FK</text>
+      <text class="s mono" x="624" y="157">kind</text>
+      <text class="s mono" x="912" y="157" text-anchor="end">CONFIRMATION | CANCELLATION</text>
+      <text class="s mono" x="624" y="175">channel</text>
+      <text class="s mono" x="912" y="175" text-anchor="end">SMS | EMAIL</text>
+      <text class="s mono" x="624" y="193">status</text>
+      <text class="s mono" x="912" y="193" text-anchor="end">PENDING | SENT | FAILED</text>
+      <text class="s mono" x="624" y="211">attempts</text>
+      <text class="s mono" x="912" y="211" text-anchor="end">0..5</text>
+      <text class="s mono" x="624" y="229">next_attempt_at, failure_reason</text>
+    </g>
+  </g>
+  <g id="group-booking">
+    <rect class="box-soft" x="600.5" y="267.5" width="335" height="431" rx="12"/>
+    <text class="g" x="616" y="289">booking owns</text>
+    <g id="booking-writes-status">
+      <text class="tp" font-size="12" x="616" y="307">written by the booking transaction from M3</text>
+    </g>
+    <g id="table-appointments">
+      <rect class="box" x="612.5" y="319.5" width="311" height="200" rx="8"/>
+      <path class="box-soft" d="M612.5,347.5 V327.5 A8,8 0 0 1 620.5,319.5 H915.5 A8,8 0 0 1 923.5,327.5 V347.5 Z"/>
+      <text class="t mono" x="624" y="338">appointments</text>
+      <rect class="box" x="812.5" y="324.5" width="105" height="18" rx="9"/>
+      <text class="tp" font-size="12" font-weight="600" x="865" y="338" text-anchor="middle">15 constraints</text>
+      <text class="s mono" x="624" y="364">id</text>
+      <rect class="box" x="646.5" y="352.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="660" y="364" text-anchor="middle">PK</text>
+      <text class="s mono" x="624" y="382">reference</text>
+      <rect class="box" x="697.5" y="370.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="711" y="382" text-anchor="middle">UK</text>
+      <text class="s mono" x="912" y="382" text-anchor="end">APT-XXXX-XXXX</text>
+      <text class="s mono" x="624" y="400">status, version</text>
+      <text class="s mono" x="624" y="418">(branch_id, service_id)</text>
+      <rect class="box" x="798.5" y="406.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="812" y="418" text-anchor="middle">FK</text>
+      <text class="s mono" x="624" y="436">seat_no</text>
+      <text class="s mono" x="912" y="436" text-anchor="end">1..20</text>
+      <text class="s mono" x="624" y="454">starts_at &lt; ends_at</text>
+      <text class="s mono" x="624" y="472">customer_first_name</text>
+      <text class="s mono" x="624" y="490">customer_last_name</text>
+      <text class="s mono" x="624" y="508">customer_mobile</text>
+      <text class="s mono" x="912" y="508" text-anchor="end">+27</text>
+    </g>
+    <g id="table-idempotency-keys">
+      <rect class="box" x="612.5" y="559.5" width="311" height="128" rx="8"/>
+      <path class="box-soft" d="M612.5,587.5 V567.5 A8,8 0 0 1 620.5,559.5 H915.5 A8,8 0 0 1 923.5,567.5 V587.5 Z"/>
+      <text class="t mono" x="624" y="578">idempotency_keys</text>
+      <rect class="box" x="820.5" y="564.5" width="97" height="18" rx="9"/>
+      <text class="tp" font-size="12" font-weight="600" x="869" y="578" text-anchor="middle">6 constraints</text>
+      <text class="s mono" x="624" y="604">key</text>
+      <rect class="box" x="654.5" y="592.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="668" y="604" text-anchor="middle">PK</text>
+      <text class="s mono" x="624" y="622">request_hash</text>
+      <text class="s mono" x="912" y="622" text-anchor="end">64 hex</text>
+      <text class="s mono" x="624" y="640">appointment_id</text>
+      <rect class="box" x="733.5" y="628.5" width="27" height="14" rx="7"/>
+      <text class="tp" font-size="12" font-weight="600" x="747" y="640" text-anchor="middle">FK</text>
+      <text class="s mono" x="912" y="640" text-anchor="end">nullable</text>
+      <text class="s mono" x="624" y="658">response_status</text>
+      <text class="s mono" x="912" y="658" text-anchor="end">NULL or 201</text>
+      <text class="s mono" x="624" y="676">expires_at</text>
+    </g>
+  </g>
+  <g id="edge-appointments-notification-messages">
+    <path class="edge" d="M880,319 V240"/>
+    <path class="edge" d="M886,311 L874,311"/>
+    <path class="edge" d="M873,240 L880,252 L887,240 M880,252 L880,240"/>
+  </g>
+  <g id="edge-idempotency-keys-appointments">
+    <path class="edge" d="M880,559 V541 M880,533 V519"/>
+    <path class="edge" d="M874,527 L886,527"/>
+    <circle class="edge" cx="880" cy="537" r="4"/>
+    <path class="edge" d="M887,559 L880,547 L873,559 M880,547 L880,559"/>
+    <text class="l" x="866" y="543" text-anchor="end">nullable until the booking commits</text>
+  </g>
+  <g id="edge-branch-services-appointments">
+    <path class="edge-acc" d="M573,266 H586 A6,6 0 0 1 592,272 V413 A6,6 0 0 0 598,419 H612"/>
+    <path class="edge-acc" d="M580,272 L580,260"/>
+    <path class="edge-acc" d="M612,412 L600,419 L612,426 M600,419 L612,419"/>
+    <text class="l" x="572" y="332" text-anchor="end">composite FK</text>
+    <text class="l mono" x="572" y="348" text-anchor="end">appointments_branch_service_fkey</text>
+  </g>
+  <g id="note-exclusion-constraints">
+    <path class="probe" d="M584,504 H612"/>
+    <path class="box-ok" d="M32.5,482.5 H573.5 L583.5,492.5 V690.5 A8,8 0 0 1 575.5,698.5 H32.5 A8,8 0 0 1 24.5,690.5 V490.5 A8,8 0 0 1 32.5,482.5 Z"/>
+    <path class="box-ok" d="M573.5,482.5 V492.5 H583.5 Z"/>
+    <text class="t mono" x="40" y="512">appointments_seat_no_overlap</text>
+    <text class="s mono" x="40" y="532">EXCLUDE USING gist (branch_id =,</text>
+    <text class="s mono" x="56" y="548">service_id =, seat_no =,</text>
+    <text class="s mono" x="56" y="564">tstzrange(starts_at, ends_at, '[)') &amp;&amp;)</text>
+    <text class="t mono" x="40" y="594">appointments_customer_no_overlap</text>
+    <text class="s mono" x="40" y="614">(customer_mobile =, the same range &amp;&amp;)</text>
+    <text class="s" x="40" y="642">Both apply only <tspan class="mono" font-size="12">WHERE status IN</tspan></text>
+    <text class="s mono" x="40" y="658">('CONFIRMED', 'CHECKED_IN'),</text>
+    <text class="s" x="40" y="676">so a cancelled appointment frees its seat.</text>
+    <g id="timeline-seat-1">
+      <rect class="box-soft" x="360.5" y="498.5" width="207" height="184" rx="6"/>
+      <text class="g" x="372" y="518">seat 1, 09:00 to 10:00</text>
+      <text class="tp" font-size="12" x="388" y="536" text-anchor="middle">09:00</text>
+      <text class="tp" font-size="12" x="464" y="536" text-anchor="middle">09:30</text>
+      <text class="tp" font-size="12" x="540" y="536" text-anchor="middle">10:00</text>
+      <path class="edge" d="M388,540 V545"/>
+      <path class="edge" d="M464,540 V545"/>
+      <path class="edge" d="M540,540 V545"/>
+      <rect class="box" x="388.5" y="550.5" width="76" height="14" rx="3"/>
+      <text class="tp" font-size="12" x="372" y="580">accepted</text>
+      <rect class="box" x="464.5" y="594.5" width="76" height="14" rx="3"/>
+      <text class="tp" font-size="12" x="372" y="624">accepted: ranges are half-open</text>
+      <rect class="box-bad" x="426.5" y="638.5" width="76" height="14" rx="3"/>
+      <path class="ah-bad" d="M458.8,641.2 L468.8,651.2 L470.2,649.8 L460.2,639.8 Z"/>
+      <path class="ah-bad" d="M458.8,649.8 L460.2,651.2 L470.2,641.2 L468.8,639.8 Z"/>
+      <text class="tp" font-size="12" x="372" y="668">rejected · SQLSTATE 23P01</text>
+    </g>
+  </g>
+  <g id="footer">
+    <text class="tp" font-size="12" x="24" y="720">All eight tables are built (M1). 54 named constraints: 8 primary keys · 3 unique · 35 checks · 6 foreign keys · 2 exclusion.</text>
+    <text class="tp" font-size="12" x="24" y="736"><tspan class="mono">SchemaConstraintIT</tspan> proves each with raw SQL; <tspan class="mono">everyNamedConstraintHasACase</tspan> fails if one is added without a case.</text>
+    <text class="tp" font-size="12" x="24" y="752">Flyway: V1 <tspan class="mono">btree_gist</tspan> · V2 schema · V3 reference data · V4 public holidays 2026 and 2027.</text>
+  </g>
+  <g id="legend">
+    <rect class="box" x="24.5" y="765.5" width="23" height="13" rx="3"/>
+    <text class="tp" font-size="12" x="56" y="776">Built</text>
+    <path class="edge-acc" d="M104,771.5 H128"/>
+    <text class="tp" font-size="12" x="136" y="776">Main path</text>
+    <path class="edge-bad" d="M216,771.5 H240"/>
+    <path class="ah-bad" d="M222.3,767.2 L232.3,777.2 L233.7,775.8 L223.7,765.8 Z"/>
+    <path class="ah-bad" d="M222.3,775.8 L223.7,777.2 L233.7,767.2 L232.3,765.8 Z"/>
+    <text class="tp" font-size="12" x="248" y="776">Refused or not allowed</text>
+    <text class="tp" font-size="12" x="424" y="776">Relationship ends:</text>
+    <path class="edge" d="M552,771.5 H576"/>
+    <path class="edge" d="M568,765.5 L568,777.5"/>
+    <text class="tp" font-size="12" x="584" y="776">one</text>
+    <path class="edge" d="M624,771.5 H648"/>
+    <path class="edge" d="M648,764.5 L636,771.5 L648,778.5 M636,771.5 L648,771.5"/>
+    <text class="tp" font-size="12" x="656" y="776">many</text>
+    <path class="edge" d="M704,771.5 H710 M718,771.5 H734"/>
+    <circle class="edge" cx="714" cy="771.5" r="4"/>
+    <path class="edge" d="M726,765.5 L726,777.5"/>
+    <text class="tp" font-size="12" x="742" y="776">zero or one</text>
+  </g>
+</svg>
