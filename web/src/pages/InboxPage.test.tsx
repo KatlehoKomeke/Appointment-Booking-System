@@ -15,7 +15,8 @@ describe('InboxPage', () => {
     expect(
       await screen.findByRole('heading', { level: 1, name: 'Simulated inbox' }),
     ).toBeInTheDocument();
-    expect(screen.getByText('Simulated: no real messages are sent.')).toBeInTheDocument();
+    expect(screen.getByText('Demo operator view.')).toBeInTheDocument();
+    expect(screen.getByText(/every message is simulated/)).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
     const [pending, sent, failed] = within(

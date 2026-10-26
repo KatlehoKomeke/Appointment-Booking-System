@@ -52,7 +52,7 @@ describe('ConfirmationPage', () => {
 
     expect(await within(status).findByText('Sent at 10:42', {}, { timeout: 4000 })).toBeVisible();
     expect(smsCard()).toHaveTextContent('Ref APT-7K3M-9Q2X');
-    expect(smsCard()).toHaveTextContent('BRANCHBOOK · 10:42 · simulated');
+    expect(smsCard()).toHaveTextContent('BRANCHBOOK · 10:42 SAST');
     expect(within(smsCard()).getByRole('button', { name: 'Hide the message' })).toHaveAttribute(
       'aria-expanded',
       'true',

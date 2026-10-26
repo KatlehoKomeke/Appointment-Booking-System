@@ -38,7 +38,8 @@ export function Shell() {
       <aside aria-label="About this site" className={styles.banner}>
         <p className={styles.inner}>
           <strong>Fynbos Bank is fictional.</strong> BranchBook is an engineering assessment, not a
-          real bank&apos;s service. No real messages are sent.
+          real bank&apos;s service. The hosted demo texts the number you give, so use only your own;
+          the demo numbers 082 555 0000 to 082 555 0199 are never texted.
         </p>
       </aside>
 

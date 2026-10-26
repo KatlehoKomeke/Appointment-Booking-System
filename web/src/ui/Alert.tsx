@@ -27,7 +27,7 @@ export interface AlertProps extends Omit<HTMLAttributes<HTMLDivElement>, 'title'
   tone: AlertTone;
   /**
    * The headline. On an error it is a line of its own, in the alert-title style; on a status or info alert it is
-   * bold at the start of the text, as the inbox banner's "Simulated: no real messages are sent."
+   * bold at the start of the text, as the inbox banner's "Demo operator view."
    */
   title?: ReactNode;
   /** The body: a sentence or two. */

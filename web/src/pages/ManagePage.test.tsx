@@ -90,6 +90,6 @@ describe('ManagePage', () => {
     expect(
       screen.getByRole('textbox', { name: 'Last four digits of your cellphone number' }),
     ).toHaveAccessibleDescription('Enter the last four digits of your cellphone number.');
-    expect(screen.getByText(/This demo sends no real messages/)).toBeInTheDocument();
+    expect(screen.getByText(/find your SMS\? The demo numbers/)).toBeInTheDocument();
   });
 });
