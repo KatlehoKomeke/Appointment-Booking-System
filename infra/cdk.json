@@ -22,6 +22,8 @@
     "githubRepositoryId": "1423867330",
     "githubEnvironment": "aws-demo",
     "monthlyBudgetUsd": 90,
+    "demoDomain": "branchbook.click",
+    "demoHostedZoneId": "Z08340112LPW7WEQZV0IM",
     "@aws-cdk-containers/ecs-service-extensions:enableDefaultLogDriver": true,
     "@aws-cdk/aws-apigateway:authorizerChangeDeploymentLogicalId": true,
     "@aws-cdk/aws-apigateway:disableCloudWatchRole": true,
