@@ -113,8 +113,9 @@ BranchBook is designed around the Protection of Personal Information Act, even t
     any form, masked or not, and the appointment's reference.
 - **Log lines name appointments by id.** *Built in M3.* A reference and the last four digits open an appointment, so log
   lines carry the appointment's id and never its reference.
-- **Synthetic test data only.** Tests and demos use made-up names and the published demo numbers (`082 555 01xx`).
-  Never use a real person's details, including your own.
+- **Synthetic test data only.** Tests and demos use made-up names and the published demo numbers: `082 555 01xx`,
+  and `082 555 0000`, which the simulated gateway always refuses, to show a failed delivery. Never use a real
+  person's details, including your own.
 - **A hosted demo cannot collect real data.** *Planned, after M6.* It will accept only the published demo numbers,
   each locked to a fictional persona, and delete all data after 48 hours
   ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)).

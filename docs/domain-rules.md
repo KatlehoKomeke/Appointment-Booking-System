@@ -118,9 +118,9 @@ How to read a rule:
 
 **Enforced in.** application service (BookAppointmentHandler: the branch_services row lock, then the lowest free seat from generate_series(1, capacity)) + database constraint (appointments_seat_no_overlap: a seat is never used twice at once; the database does not cap seat_no at the capacity, only at 20)
 
-**Proven by.** `ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201`
+**Proven by.** `ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201`, `ConcurrentBookingIT.twentyRacersForThreeSeatsProduceExactlyThree201s`, `BookAppointmentIT.lowestFreeSeatIsTakenFirst`, `AppointmentApiIT.postWhenSlotFullReturns409WithThreeAlternatives`, `BookAppointmentIT.lockTimeoutReturns503TryAgainWithRetryAfter`
 
-**Status.** Planned for M5, when twenty concurrent requests race for one seat and prove the row lock. Built in M1: the exclusion constraint (BR-8). Built in M3 and proven for requests that arrive one after another: the lowest free seat is taken (`BookAppointmentIT.lowestFreeSeatIsTakenFirst`), and a full slot is 409 SLOT_FULL with three alternatives (`AppointmentApiIT.postWhenSlotFullReturns409WithThreeAlternatives`).
+**Status.** Proven. The exclusion constraint from M1 (BR-8); the row lock, the lowest free seat and the alternatives from M3; the twenty-racer proofs, and the 503 when the lock is not granted in 2 seconds, from M5. `make demo-409` shows the race against a running stack.
 
 <a id="br-8"></a>
 ## BR-8: The database rejects a double booking from any code path
@@ -173,9 +173,9 @@ How to read a rule:
 
 **Enforced in.** database constraint (idempotency_keys_pkey, claimed with INSERT ... ON CONFLICT DO UPDATE, which takes over only a key whose 24 hours have run out) + application service (BookAppointmentHandler step 1)
 
-**Proven by.** `IdempotencyIT.concurrentSameKey_bookOnceAndBothReceiveSameReference`
+**Proven by.** `IdempotencyIT.concurrentSameKey_bookOnceAndBothReceiveSameReference`, `AppointmentApiIT.postWithoutIdempotencyKeyReturns400IdempotencyKeyRequired`, `IdempotencyIT.sameKeySamePayloadReplaysOriginal201`, `IdempotencyIT.sameKeyWithTheNumberAndTimeTypedAnotherWayReplays`, `IdempotencyIT.sameKeyDifferentPayloadReturns422`, `IdempotencyIT.failedBookingLeavesNoKeyRow`, `IdempotencyKeyPurgeJobIT.keyIsHonouredForTwentyFourHoursThenBooksAnewEvenBeforeThePurge`, `IdempotencyKeyPurgeJobIT.purgeRemovesOnlyKeysThatHaveExpired`
 
-**Status.** Planned for M5, when two requests with one key arrive together. Built in M3 and proven for requests that arrive one after another: a missing or malformed key is 400 IDEMPOTENCY_KEY_REQUIRED (`AppointmentApiIT.postWithoutIdempotencyKeyReturns400IdempotencyKeyRequired`), a replay (`IdempotencyIT.sameKeySamePayloadReplaysOriginal201`, `IdempotencyIT.sameKeyWithTheNumberAndTimeTypedAnotherWayReplays`), a reused key (`IdempotencyIT.sameKeyDifferentPayloadReturns422`), no key row after a failure (`IdempotencyIT.failedBookingLeavesNoKeyRow`) the 24 hours (`IdempotencyKeyPurgeJobIT.keyIsHonouredForTwentyFourHoursThenBooksAnewEvenBeforeThePurge`) and the purge (`IdempotencyKeyPurgeJobIT.purgeRemovesOnlyKeysThatHaveExpired`). The hash is over the parsed request, so the same details typed another way are the same request.
+**Status.** Proven. Requests that arrive one after another from M3; two that arrive together from M5, where the first is held inside its transaction until the second is seen waiting on the key's row. The hash is over the parsed request, so the same details typed another way are the same request.
 
 <a id="br-13"></a>
 ## BR-13: Lookup needs the reference and the last four digits
@@ -217,20 +217,20 @@ How to read a rule:
 
 **Enforced in.** application service (BookAppointmentHandler step 9 -> NotificationOutbox.enqueueConfirmation)
 
-**Proven by.** `ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically`
+**Proven by.** `ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically`, `NotificationOutboxIT.refusesToWriteOutsideATransaction`, `AppointmentApiIT.postReturns201WithLocationReferenceAndPendingNotifications`, `BookAppointmentIT.failureAfterTheSmsIsWrittenRollsTheSmsBackWithTheBooking`, `NotificationDispatcherIT.retriesWithBackoffThenMarksFailedAfterFiveAttempts`
 
-**Status.** Planned for M5, when the dispatcher shows that delivery never changes an appointment. Built in M3: the PENDING SMS is written in the booking transaction through a port that refuses to run outside one (`NotificationOutboxIT.refusesToWriteOutsideATransaction`), comes back with the booking (`AppointmentApiIT.postReturns201WithLocationReferenceAndPendingNotifications`), and is rolled back with a booking that fails after writing it (`BookAppointmentIT.failureAfterTheSmsIsWrittenRollsTheSmsBackWithTheBooking`).
+**Status.** Proven for confirmations. A booking held just before its commit shows neither row from outside, and both once committed (M5); a failed delivery leaves the appointment CONFIRMED (M5). Cancellation rows arrive with cancellation (BR-14, Tier 2).
 
 <a id="br-17"></a>
 ## BR-17: Delivery with retries and a final FAILED state
 
-**Rule.** Delivery: NotificationDispatcher runs every 2 s on its own single-thread outboxScheduler (isolation from the default scheduler, not throughput) and processes up to 20 due PENDING rows per tick, one transaction per row: claim with FOR UPDATE SKIP LOCKED LIMIT 1, send, mark with an explicit UPDATE, commit. Failures retry after 2, 4, 8 and 16 s (bound from the Clock); the fifth failed attempt marks FAILED with failure_reason DELIVERY_FAILED (30 s of backoff, about 35 s end to end with the 2 s ticks). A row whose mark fails is set FAILED (failure_reason DISPATCH_ERROR, last_error 'MARK_FAILED') in a separate transaction, so a poisoned row is sent at most once more and never loops. FAILED is replayable via POST /api/v1/messages/{id}/retry (Tier 2) or the guarded runbook SQL.
+**Rule.** Delivery: NotificationDispatcher runs every 2 s on its own single thread, outbox-1 (isolation from the default scheduler, not throughput) and processes up to 20 due PENDING rows per tick, one transaction per row: claim with FOR UPDATE SKIP LOCKED LIMIT 1, send, mark with an explicit UPDATE, commit. Failures retry after 2, 4, 8 and 16 s (bound from the Clock); the fifth failed attempt marks FAILED with failure_reason DELIVERY_FAILED (30 s of backoff, about 35 s end to end with the 2 s ticks). A row whose mark fails is set FAILED (failure_reason DISPATCH_ERROR, last_error 'MARK_FAILED') in a separate transaction, so a poisoned row is sent at most once more and never loops. FAILED is replayable via POST /api/v1/messages/{id}/retry (Tier 2) or the guarded runbook SQL.
 
-**Enforced in.** application service (DispatchDueMessages) + database (partial index ix_notification_messages_due, row locks)
+**Enforced in.** application service (NotificationDispatcher.runOnce, driven by notification.infrastructure.DispatcherLoop; the MessageGateway port, implemented by SimulatedSmsGateway) + database (partial index ix_notification_messages_due, row locks)
 
-**Proven by.** `NotificationDispatcherIT.retriesWithBackoffThenMarksFailedAfterFiveAttempts`
+**Proven by.** `NotificationDispatcherIT.retriesWithBackoffThenMarksFailedAfterFiveAttempts`, `NotificationDispatcherIT.marksSentWithProviderMessageId`, `NotificationDispatcherIT.twoDispatchersNeverSendTheSameMessageTwice`, `NotificationDispatcherIT.poisonedRowDoesNotBlockTheBatch`, `NotificationDispatcherIT.oneTickHandlesAtMostTwentyMessages`, `NotificationDispatcherIT.gatewayThatThrowsIsTriedAgain`, `NotificationDispatcherIT.gatewayErrorMarksTheMessageAndTheBatchCarriesOn`, `MessageGatewayTest.providerIdMustFitItsColumn`, `MessageGatewayTest.longErrorCodeIsCutToItsColumn`, `DispatcherLoopIT.theLoopDeliversOnItsOwnThreadAndLeavesBootsSchedulerInPlace`, `NotificationOutboxIT.writesOnePendingSmsWithTheBoundInstantAndCorrelationId`
 
-**Status.** Planned for M5. Built in M3: each booking writes its PENDING row with no attempts, due at once (`NotificationOutboxIT.writesOnePendingSmsWithTheBoundInstantAndCorrelationId`).
+**Status.** Proven, from M5. The dispatcher's tests drive runOnce with the clock's instant, so none sleeps; only DispatcherLoopIT waits, up to 5 seconds, for the real loop on its own thread. The retry endpoint is Tier 2; until it ships, docs/runbook.md holds the guarded SQL that replays a FAILED message.
 
 <a id="br-18"></a>
 ## BR-18: The SMS fits one segment
@@ -283,9 +283,9 @@ How to read a rule:
 
 **Enforced in.** application service (BookAppointmentHandler steps 4-5) + database (advisory lock, row locks)
 
-**Proven by.** `ConcurrentBookingIT.sameMobileTwoBranchesOverlappingConcurrentlyGivesOne201AndOne409CustomerOverlap`
+**Proven by.** `ConcurrentBookingIT.sameMobileTwoBranchesOverlappingConcurrentlyGivesOne201AndOne409CustomerOverlap`, `BookAppointmentIT.duplicateIsReportedBeforeOverlap`, `BookAppointmentIT.overlapIsReportedBeforeSlotFull`, `BookAppointmentIT.deadlockOnceIsRerunAndBooks`, `BookAppointmentIT.deadlockTwiceReturns503TryAgainAndLeavesNothing`, `ProblemDetailHandlerTest.transientDatabaseFailureBecomes503WithRetryAfterTwo`
 
-**Status.** Planned for M5, with the concurrent tests. Built in M3: the advisory lock, the fixed lock order and the one re-run on 40P01 or 40001. The order of the conflicts is proven by `BookAppointmentIT.duplicateIsReportedBeforeOverlap` and `BookAppointmentIT.overlapIsReportedBeforeSlotFull`, and the 503 with `Retry-After: 2` for a lock or statement timeout by `ProblemDetailHandlerTest.transientDatabaseFailureBecomes503WithRetryAfterTwo`.
+**Status.** Proven. The lock, the order and the re-run from M3; the concurrent proof, ten rounds of one customer at two branches at once, and the deadlock re-run, forced by a test-only trigger, from M5.
 
 <a id="br-23"></a>
 ## BR-23: Error bodies never reveal another booking

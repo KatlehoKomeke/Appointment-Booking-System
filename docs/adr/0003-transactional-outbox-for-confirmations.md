@@ -40,3 +40,27 @@ The brief asks the system to communicate a simulated confirmation. Read as engin
 - The process must stay running with CPU between requests. This rules out hosting that scales to zero or
   throttles idle CPU ([ADR-0006](0006-hosted-demo-on-aws-with-cdk.md)).
 - A real SMS provider is one new `MessageGateway` implementation plus configuration.
+
+## Notes
+
+**2026-10-26.** Facts that have changed or need stating more precisely since the record was accepted. The decision
+stands, with one change:
+
+- **No outbox health indicator.** The plan named an `OutboxHealthIndicator` with the pending and failed counts.
+  Health shows no component details in any environment, so it would show nothing; the simulated inbox (`GET
+  /api/v1/messages`) and the SQL in [docs/runbook.md](../runbook.md) show the outbox instead.
+- **The dispatcher's thread is private.** It runs on `outbox-1`, a single-thread scheduler owned by `DispatcherLoop`,
+  not a scheduler bean: a `TaskScheduler` bean would replace Spring Boot's default scheduler and move the hourly key
+  purge and the daily holiday check onto the dispatcher's thread. `branchbook.dispatcher.enabled` switches the loop
+  off; the tests do, and call `NotificationDispatcher.runOnce` with the instant they want, so none sleeps.
+- **What booking hands over.** `ConfirmationOutbox` takes a `Confirmation` value: the appointment's id, reference,
+  start and zone, the recipient, and the branch's and the service's SMS names. So `notification` reads nothing from
+  `catalogue` (M3).
+- **A row whose outcome cannot be recorded** becomes `FAILED` with `DISPATCH_ERROR` and `last_error` `MARK_FAILED`,
+  in a transaction of its own, so it is sent at most once more and the rest of the batch carries on
+  (`NotificationDispatcherIT.poisonedRowDoesNotBlockTheBatch`). A gateway that throws counts as a refusal and is
+  tried again.
+- **The failing demo number is 082 555 0000.** About 30 seconds of backoff after it is booked, its confirmation is
+  `FAILED` with `DELIVERY_FAILED` after five attempts, and the appointment stays `CONFIRMED`.
+- **Superseding arrives with cancellation.** In v1 as built no message is ever superseded; the rule arrives with the
+  Tier 2 cancel (BR-14, BR-24).

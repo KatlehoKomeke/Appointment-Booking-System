@@ -4,13 +4,13 @@ This document explains how BranchBook is built and why. The decisions behind it 
 [docs/adr](adr/README.md); the business rules are in [domain-rules.md](domain-rules.md). The whole design,
 including the parts not built yet, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX).
 
-**Status: design complete; milestones M0 to M3 are built.** M0 is the skeleton: one jar that serves the app,
+**Status: design complete; milestones M0 to M3 and M5 are built.** M0 is the skeleton: one jar that serves the app,
 PostgreSQL 17 migrated by Flyway, health probes and security headers. M1 adds the whole schema, the seeded
 catalogue, the `catalogue` module with the public-holiday rule, and the shared error and correlation-id handling. M2
 adds the `scheduling` module (`SlotCalendar` and the availability API) and the committed OpenAPI contract that the
 web app's types are generated from. M3 adds the `booking` module's transaction and lookup, and the part of
-`notification` that writes and reads the confirmation SMS. The web app's screens arrive in M4, and the dispatcher
-that delivers the SMS in M5. Each section opens with its status. Diagrams are Mermaid, or SVG files in
+`notification` that writes and reads the confirmation SMS. M5 adds the dispatcher that delivers it through a
+simulated gateway, the simulated inbox's API and the concurrent proofs. The web app's screens arrive in M4. Each section opens with its status. Diagrams are Mermaid, or SVG files in
 [assets/diagrams](assets/diagrams/README.md); solid parts are built and dashed parts are planned, with their
 milestone.
 
@@ -29,7 +29,7 @@ milestone.
 ## 1. What the system does
 
 *Status: describes the finished v1. Built so far: branches and availability (M1, M2), and booking and lookup with
-the confirmation SMS written as PENDING (M3). The booking screens arrive in M4, delivery of the SMS in M5, and
+the confirmation SMS written as PENDING (M3), and its delivery (M5). The booking screens arrive in M4, and
 cancellation in Tier 2.*
 
 A customer of the fictional Fynbos Bank picks a branch, a service, a date and a time slot, enters a name and a
@@ -40,8 +40,8 @@ look the appointment up, and cancel it, with the reference and the last four dig
 ## 2. System context and containers
 
 *Status: Partly built. Built: the jar, the React app's shell and typed API client, the branch, availability,
-booking and lookup API, the PENDING confirmation SMS and PostgreSQL 17. Planned: the booking screens (M4), the
-dispatcher and the simulated SMS gateway (M5).*
+booking and lookup API, the confirmation SMS with its dispatcher and simulated SMS gateway (M5), and PostgreSQL 17.
+Planned: the booking screens (M4).*
 
 ![BranchBook at a glance: one Spring Boot jar serves the React app and the REST API over PostgreSQL 17. Built: branches, availability, the OpenAPI contract, booking and lookup with the PENDING confirmation SMS. Dashed and planned: the booking screens (M4), the dispatcher and simulated SMS (M5). Code ships through GitHub Actions and OpenID Connect to AWS, which today holds the deploy role, a budget and a release record; hosting follows M6.](assets/diagrams/system-at-a-glance.svg)
 
@@ -49,11 +49,11 @@ dispatcher and the simulated SMS gateway (M5).*
   is one origin and no CORS. Locally it is plain HTTP on `127.0.0.1`; HTTPS arrives with the load balancer planned
   for the hosted demo (after M6).
 - **Everything on the customer path is synchronous.** Background work runs in the same jar: `HolidayCoverageCheck`
-  at start-up and daily at 06:00 SAST (M2), `IdempotencyKeyPurgeJob` every hour (M3) and, in M5, the dispatcher
-  that delivers the outbox rows the booking transaction writes
+  at start-up and daily at 06:00 SAST (M2), `IdempotencyKeyPurgeJob` every hour (M3) and the dispatcher (M5), which
+  delivers the outbox rows the booking transaction writes
   ([ADR-0003](adr/0003-transactional-outbox-for-confirmations.md)).
-- **Real gateways plug in later.** The dispatcher will send through a `MessageGateway` port (M5); a real SMS
-  provider would be one more implementation of it.
+- **Real gateways plug in later.** The dispatcher sends through a `MessageGateway` port, which the simulated SMS
+  gateway implements; a real SMS provider would be one more implementation of it.
 
 ### 2.1 One request through the jar
 
@@ -107,15 +107,15 @@ returns no slots without reading the appointments.
 
 ## 3. Modules and the dependency rule
 
-*Status: Partly built. `catalogue`, `scheduling`, `booking` and `shared` are built; `notification` is built up to
-writing and reading the outbox, and its dispatcher is planned for M5.*
+*Status: Built. `catalogue`, `scheduling`, `booking` and `shared` are built; `notification` writes and reads the
+outbox, delivers it through its dispatcher (M5), and serves the simulated inbox.*
 
 The back end is a modular monolith ([ADR-0001](adr/0001-modular-monolith.md)), packaged by capability. Each arrow
 reads "depends on".
 
 ```mermaid
 flowchart TB
-    notification["notification · partly built<br/>outbox writer, built M3<br/>dispatcher, planned M5"]
+    notification["notification · built, M3 and M5<br/>outbox writer, dispatcher, inbox"]
     booking["booking · built, M3<br/>Appointment, booking, lookup"]
     scheduling["scheduling · built, M2<br/>SlotCalendar, availability"]
     catalogue["catalogue · built, M1<br/>branches, services, hours, holidays"]
@@ -133,7 +133,7 @@ Every module may use `shared` (config, correlation, problem, security, time, web
 | `catalogue` | Built (M1, M2) | Branches, services, weekday trading hours, capacities and public holidays. Read-only at runtime; seeded by Flyway. |
 | `scheduling` | Built (M2) | `SlotCalendar`, a pure function that computes and validates slots in the branch's time zone, and the availability query. It learns which seats are taken through the `BookedIntervalsPort`, which `booking` implements, so it never reads the appointments table itself. |
 | `booking` | Built (M3); cancellation Tier 2 | The `Appointment` aggregate, the booking transaction, idempotency and lookup; cancellation in Tier 2. |
-| `notification` | Partly built (M3); dispatcher M5 | The outbox writer, the message templates and the read of an appointment's messages; the dispatcher and the gateway port in M5. It reads nothing from `catalogue`: the booking hands it the branch's and the service's short names with the appointment. |
+| `notification` | Built (M3, M5) | The outbox writer, the message templates, the read of an appointment's messages, the dispatcher with the `MessageGateway` port and its simulated SMS gateway, and the simulated inbox. It reads nothing from `catalogue`: the booking hands it the branch's and the service's short names with the appointment. |
 | `shared` | Built | Problem responses, correlation ids, security headers, the clock and configuration. |
 
 Inside every module the layers are `api` (HTTP only), `application` (use cases; the only layer that opens
@@ -157,8 +157,8 @@ Four ArchUnit rules in
 
 *Status: Built in M3. The tables, the two exclusion constraints and the indexes it relies on are from M1
 ([BR-8](domain-rules.md#br-8), proven). The concurrent proofs, twenty requests for one seat and two requests with
-one key, are planned for M5 ([BR-7](domain-rules.md#br-7), [BR-12](domain-rules.md#br-12),
-[BR-22](domain-rules.md#br-22)).*
+one key, are from M5 ([BR-7](domain-rules.md#br-7), [BR-12](domain-rules.md#br-12),
+[BR-22](domain-rules.md#br-22), proven).*
 
 [`BookAppointmentHandler.handle`](../api/src/main/java/za/co/fynbos/branchbook/booking/application/BookAppointmentHandler.java)
 runs ten steps in one `READ COMMITTED` transaction. The order is the design:
@@ -191,8 +191,7 @@ sequenceDiagram
   `branch_services` row. Every booking takes them in that order, so two bookings cannot deadlock each other.
 - **Retries are safe.** The idempotency row is the first statement, so a double-click or a network retry with the
   same key returns the same booking for 24 hours, whether or not the hourly purge has removed the key yet
-  ([BR-12](domain-rules.md#br-12)). This is proven for retries that arrive one after another; the proof for two that
-  arrive together is planned for M5.
+  ([BR-12](domain-rules.md#br-12)), whether the retries arrive one after another or together.
 - **Failures roll back together.** If any step fails, everything rolls back, including the idempotency row and the
   SMS row, so a retry starts clean.
 - **One re-run, then an answer.** A reference collision, a deadlock (`40P01`) or a serialisation failure (`40001`)
@@ -237,24 +236,25 @@ instead ([ADR-0004](adr/0004-restraint-no-login-no-id-number.md)).
 
 ## 5. The simulated confirmation
 
-*Status: Planned for M5 ([BR-17](domain-rules.md#br-17)). Built in M3: every booking writes its SMS as a PENDING
+*Status: Built in M5 ([BR-17](domain-rules.md#br-17), proven). Built in M3: every booking writes its SMS as a PENDING
 row in the booking transaction ([BR-16](domain-rules.md#br-16)). Built in M1: `notification_messages` and its 11
-named constraints, proven by `SchemaConstraintIT`.* Dashed states are reached only once the dispatcher exists.
+named constraints, proven by `SchemaConstraintIT`.* Only the retry of a FAILED message, and superseding by a
+cancellation, are planned (Tier 2).
 
 ```mermaid
 stateDiagram-v2
-    classDef planned stroke-dasharray: 5 4
     [*] --> PENDING: written with the booking
     PENDING --> SENT: gateway accepts
     PENDING --> PENDING: failed, retry in 2, 4, 8, 16 s
-    PENDING --> FAILED: fifth failure, or cancelled
+    PENDING --> FAILED: fifth failure, a failed mark, or cancelled (Tier 2)
     FAILED --> PENDING: retry (Tier 2)
-    class SENT, FAILED planned
 ```
 
-The dispatcher will run every two seconds on its own single thread. It will claim up to 20 due rows per tick, each
-in its own transaction with `FOR UPDATE SKIP LOCKED`, so a crash re-sends at most one message and two instances
-never send the same message. A FAILED row records why: `DELIVERY_FAILED` after the fifth failed attempt,
+The dispatcher runs every two seconds on its own single thread, `outbox-1`, kept apart from Spring's default
+scheduler so the hourly and daily jobs never share it. It claims up to 20 due rows per tick, each in its own
+transaction with `FOR UPDATE SKIP LOCKED`, so a crash re-sends at most one message and two instances never send the
+same message. The simulated gateway takes 150 ms and refuses every number ending in `0000`, such as the demo number
+082 555 0000, so a failed delivery can be shown: about 30 seconds of backoff later it is FAILED. A FAILED row records why: `DELIVERY_FAILED` after the fifth failed attempt,
 `SUPERSEDED_BY_CANCELLATION` when the appointment is cancelled before the message is sent (Tier 2), or
 `DISPATCH_ERROR` when recording the outcome of a send fails, so a poisoned row never loops. The schema and the API
 contract also list `RECIPIENT_DAILY_CAP`, which no v1 rule produces. `notification_messages`
@@ -344,8 +344,8 @@ the device's time zone. The containers and CI run in UTC, and CI runs the API's 
 
 ## 9. Personal information
 
-*Status: Built for every surface that exists ([BR-19](domain-rules.md#br-19)); the booking screens arrive in M4
-and the simulated inbox in M5.*
+*Status: Built for every surface that exists ([BR-19](domain-rules.md#br-19)), the simulated inbox's API among
+them; the booking screens arrive in M4.*
 
 BranchBook stores a first name, a last name and a South African mobile number, nothing more. The full number
 appears only to the person typing it, on the details and review steps, before the booking exists. Once booked, the

@@ -42,3 +42,24 @@ appointments, nor two upcoming appointments for the same service. Clients retry 
   DSQL or CockroachDB cannot run it.
 - The fixed lock order rules out deadlocks between bookings; a deadlock from any other path is retried once, then
   answered with `503 TRY_AGAIN`.
+
+## Notes
+
+**2026-10-26.** Facts that have changed or need stating more precisely since the record was accepted. The decision
+stands.
+
+- **The race is proven.** `ConcurrentBookingIT` (M5) releases twenty bookings at once through the whole application:
+  Polokwane's one FICA seat gives exactly one `201` and nineteen `409 SLOT_FULL`, and Sandton's three seats give
+  three `201`s on three different seats. The racers go through MockMvc rather than a running server; the
+  transactions, locks and connection pool are the real ones, and the HTTP layer is not what is under test. `make
+  demo-409` shows the same race against a running stack.
+- **A backstop violation gets the same answer as the check.** If a path ever skips the row lock,
+  `appointments_seat_no_overlap` and `appointments_customer_no_overlap` are translated by name into `409 SLOT_FULL`
+  and `409 CUSTOMER_OVERLAP` (`BookAppointmentIT.constraintViolationIsRaisedAtInsertNotAtCommit`).
+- **A lock not granted in 2 seconds is a 503.** Every session sets `lock_timeout` to 2 s and `statement_timeout` to 5
+  s, so a booking stuck behind a held seat lock answers `503 TRY_AGAIN` with `Retry-After: 2`
+  (`BookAppointmentIT.lockTimeoutReturns503TryAgainWithRetryAfter`).
+- **The deadlock re-run is proven by fault injection.** A test-only trigger raises `40P01` on the first insert, and
+  the re-run books; raised every time, the booking answers `503 TRY_AGAIN` and writes nothing
+  (`BookAppointmentIT.deadlockOnceIsRerunAndBooks`, `deadlockTwiceReturns503TryAgainAndLeavesNothing`). A second
+  reference collision in one booking means the random source is broken, and is a `500`.

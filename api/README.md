@@ -29,6 +29,7 @@ Run these from `api/`, or use the `make` targets in the repository root:
 | `./mvnw verify` | Adds the integration tests on PostgreSQL 17, the formatting check and the coverage report (`target/site/jacoco/index.html`). This is what CI runs; it then runs the unit and API tests again under `TZ=America/New_York`, as `make test-api` does. |
 | `./mvnw spotless:apply` | Formats every Java file with google-java-format. |
 | `./mvnw spring-boot:test-run` | Runs the API on port 8080 against a throwaway PostgreSQL in Docker (`make dev-api`). |
+| `make demo-409` (from the root) | After `make up`: races 20 bookings for Polokwane's last FICA seat and exits 1 unless exactly one wins. It books one appointment each run, so it is for a local stack. |
 | `make contract` (from the root) | After an intended API change: rewrites [docs/openapi.yaml](../docs/openapi.yaml) from the running API, then the web app's types from it. |
 
 ## What the build enforces
@@ -66,7 +67,10 @@ uses the same configuration, so Spring builds the context once and one container
 Tests that book through the API add `@ExtendWith(DatabaseReset.class)`, which empties the booking tables before
 and after each test and forgets the lookup counts. `Bookings` builds request bodies and sends bookings and lookups,
 and `ScriptedReferenceGenerator`, which replaces the random generator in every integration test, hands out the
-references a test scripts first, so a test can force a reference collision.
+references a test scripts first, so a test can force a reference collision. The dispatcher's own loop is off in the
+tests: a test that delivers calls `NotificationDispatcher.runOnce` with the instant it wants, so no test sleeps.
+`BookingPause` holds a booking at step 10, after it has written its appointment and SMS and before it commits, so a
+test can look from outside the transaction or send a second request into it at a moment it chooses.
 
 The schema is proven directly: `SchemaConstraintIT` runs raw SQL that bypasses the application and shows that each
 named constraint rejects what it should, and fails if a constraint is added without a case. It also shows that rows
@@ -83,6 +87,7 @@ environment supplies the rest:
 | `DB_URL` | JDBC URL of the PostgreSQL database | `compose.yaml` locally; planned for the hosted demo (after M6): the ECS task definition |
 | `DB_USER`, `DB_PASSWORD` | Database credentials | `compose.yaml` locally; planned for the hosted demo (after M6): AWS Secrets Manager |
 | `PORT` | HTTP port, 8080 by default | Optional |
+| `BRANCHBOOK_DISPATCHER_ENABLED` | Runs the dispatcher that delivers PENDING messages every 2 seconds on its own thread. `true` by default; its interval and the simulated gateway's latency are in application.yml. | Optional; the tests switch it off and drive it themselves |
 | `BRANCHBOOK_INBOX_ENABLED` | Switches on the simulated inbox, `GET /api/v1/messages`, an operator view of every booking's messages. `false` by default. | `compose.yaml` and `make dev-api` set it to `true`, and so do the tests |
 | `PUBLIC_BASE_URL` | The address customers reach the app at, which ends the confirmation SMS's `/manage` link. At most 28 characters with no trailing slash, so the longest SMS fits one segment; a longer value stops start-up. `http://localhost:8080` by default. | `compose.yaml` locally (it follows `APP_PORT`); planned for the hosted demo (after M6): the ECS task definition |
 

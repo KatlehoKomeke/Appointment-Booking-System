@@ -17,7 +17,7 @@ One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Soli
 
 | Area | Today |
 |---|---|
-| Stage | Milestone M3 complete: booking in one transaction that also writes the confirmation SMS, and lookup with the reference and the last four digits, on top of M2's slot rules and availability API. The web app's screens come next (M4), then the dispatcher that delivers the SMS and the race tests (M5). |
+| Stage | Milestones M0 to M3 and M5 built: booking in one transaction that also writes the confirmation SMS, lookup with the reference and the last four digits, and a dispatcher that delivers the SMS through a simulated gateway, with the race proofs. The web app's screens (M4) are being built. |
 | Design | The whole design, including planned work, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX); its header names the commit it was last checked against. The repository records what is built and wins where the two disagree. |
 | Run locally | `make up`, then open http://localhost:8080 |
 | Hosted demo | Not hosted yet. Planned after M6 in AWS Cape Town (af-south-1), defined in AWS CDK ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)). Today AWS holds the deploy role, a budget and a release record, and no part of the application ([infra/README.md](infra/README.md)). |
@@ -32,7 +32,7 @@ One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Soli
 | M2 | `SlotCalendar`, the availability API, the committed OpenAPI contract | Built |
 | M3 | Booking transaction with idempotency, the PENDING confirmation SMS in the same transaction, lookup with the last four digits and its rate limit | Built |
 | M4 | Booking UI: the five-step flow, the confirmation page, read-only `/manage` | Next |
-| M5 | The dispatcher and simulated SMS gateway, delivery status, the simulated inbox, the race and idempotency proofs | Planned |
+| M5 | The dispatcher and simulated SMS gateway, delivery status, the simulated inbox, the race and idempotency proofs | Built |
 | M6 | Tier 2 if time allows, UI states and accessibility, web and end-to-end tests, CI completion | Planned |
 | M7 | Final documentation pass, clean-clone rehearsal, release tag | Planned |
 | AWS | Hosted demo: deploy role, budget and release record built; DNS, data and app stacks after M6 | Partly built |
@@ -67,20 +67,20 @@ Every document, with its status: [docs/README.md](docs/README.md). Decisions: [d
 | Brief | What BranchBook does, and the tests that prove it |
 |---|---|
 | for customers | No login. A customer opens an appointment with its reference and the last four digits of the mobile number used to book: `GET /api/v1/appointments/{reference}` today, and the read-only `/manage` page in M4.<br>**Proof:** [`AppointmentApiIT.getWithWrongLast4Returns404NotForbidden`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven), [`AppointmentApiIT.sixthWrongLast4WithinHourReturns429`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven) |
-| to schedule | `POST /api/v1/appointments` books today; the web app's five-step flow (branch, service, date and time, your details, review) arrives in M4. Slots respect trading hours, public holidays, a two-hour lead time, a 30-day horizon and each service's capacity.<br>**Proof:** `ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201` (planned, M5), [`SlotCalendarTest.excludesSlotsStartingWithinTwoHoursOfNow`](api/src/test/java/za/co/fynbos/branchbook/scheduling/domain/SlotCalendarTest.java) (proven), [`AppointmentApiIT.postWhenSlotFullReturns409WithThreeAlternatives`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven) |
+| to schedule | `POST /api/v1/appointments` books today; the web app's five-step flow (branch, service, date and time, your details, review) arrives in M4. Slots respect trading hours, public holidays, a two-hour lead time, a 30-day horizon and each service's capacity.<br>**Proof:** [`ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201`](api/src/test/java/za/co/fynbos/branchbook/booking/application/ConcurrentBookingIT.java) (proven), [`SlotCalendarTest.excludesSlotsStartingWithinTwoHoursOfNow`](api/src/test/java/za/co/fynbos/branchbook/scheduling/domain/SlotCalendarTest.java) (proven), [`AppointmentApiIT.postWhenSlotFullReturns409WithThreeAlternatives`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven) |
 | branch appointments | Six fictional branches in six provinces, each with its own trading hours and per-service capacity, seeded by Flyway ([Reference data](#reference-data)).<br>**Proof:** [`SlotCalendarTest.saturdayFortyFiveMinuteLastStartIs1145`](api/src/test/java/za/co/fynbos/branchbook/scheduling/domain/SlotCalendarTest.java) (proven), [`PublicHolidayCalendarTest.sundayHoliday9Aug2026IsObservedOnMonday10Aug`](api/src/test/java/za/co/fynbos/branchbook/catalogue/domain/PublicHolidayCalendarTest.java) (proven) |
-| communicates a simulated confirmation | The booking transaction writes the SMS to an outbox table, so it commits with the booking or not at all. A dispatcher will deliver it through a simulated gateway with retries, and the confirmation page will show its status live (M5).<br>**Proof:** `ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically` (planned, M5), [`AppointmentApiIT.postReturns201WithLocationReferenceAndPendingNotifications`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven), [`BookAppointmentIT.failureAfterTheSmsIsWrittenRollsTheSmsBackWithTheBooking`](api/src/test/java/za/co/fynbos/branchbook/booking/application/BookAppointmentIT.java) (proven) |
+| communicates a simulated confirmation | The booking transaction writes the SMS to an outbox table, so it commits with the booking or not at all. A dispatcher delivers it through a simulated gateway, retrying after 2, 4, 8 and 16 seconds, and the confirmation page shows its status live (M4).<br>**Proof:** [`ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically`](api/src/test/java/za/co/fynbos/branchbook/notification/application/ConfirmationOutboxIT.java) (proven), [`NotificationDispatcherIT.retriesWithBackoffThenMarksFailedAfterFiveAttempts`](api/src/test/java/za/co/fynbos/branchbook/notification/application/NotificationDispatcherIT.java) (proven), [`BookAppointmentIT.failureAfterTheSmsIsWrittenRollsTheSmsBackWithTheBooking`](api/src/test/java/za/co/fynbos/branchbook/booking/application/BookAppointmentIT.java) (proven) |
 | front end and back end | A React 19 app served by one Spring Boot jar, over PostgreSQL 17; `make up` starts both.<br>**Proof:** `book-appointment.spec.ts` (planned, M6); today CI's `stack` job starts the image with PostgreSQL and runs [smoke.sh](scripts/smoke.sh) |
 
 ## What makes it correct
 
-- **Double booking is impossible.** *Partly built.* Exclusion constraints reject an overlapping seat from any code
-  path (BR-8), and booking takes the lowest free seat under a row lock in a fixed lock order (BR-7, BR-22). The
-  20-thread race proof is planned for M5 ([ADR-0002](docs/adr/0002-double-booking-prevention.md)).
-- **Retries are safe.** *Partly built (BR-12).* An `Idempotency-Key` replays the same booking for 24 hours, and the
-  same key with other details is refused; the proof for two retries that arrive together is planned for M5.
-- **The confirmation cannot be lost.** *Partly built.* The SMS commits with the booking or not at all (BR-16); a
-  dispatcher will deliver it with retries in M5 (BR-17, [ADR-0003](docs/adr/0003-transactional-outbox-for-confirmations.md)).
+- **Double booking is impossible.** *Built.* Exclusion constraints reject an overlapping seat from any code path
+  (BR-8), and booking takes the lowest free seat under a row lock in a fixed lock order (BR-7, BR-22): twenty racers
+  for one seat give exactly one booking, and `make demo-409` shows it ([ADR-0002](docs/adr/0002-double-booking-prevention.md)).
+- **Retries are safe.** *Built (BR-12).* An `Idempotency-Key` replays the same booking for 24 hours, even for two
+  retries that arrive together, and the same key with other details is refused.
+- **The confirmation cannot be lost.** *Built.* The SMS commits with the booking or not at all (BR-16), and a
+  dispatcher delivers it with retries, one transaction per message (BR-17, [ADR-0003](docs/adr/0003-transactional-outbox-for-confirmations.md)).
 - **A reference cannot be guessed or fished for.** *Built (BR-11, BR-13).* Eight random characters without
   look-alikes, plus the mobile number's last four digits; every mismatch is the same 404, and five wrong tries block
   the reference until an hour after the first.
