@@ -379,9 +379,10 @@ BranchBook stores a first name, a last name and a South African mobile number, n
 appears only to the person typing it, on the details and review steps, before the booking exists. Once booked, the
 API and the UI show it only masked: a caller who has just proved the last four digits sees `082 *** 0101`, and
 everyone else, including the simulated inbox, sees `082 *** ****`. Where `branchbook.inbox.redact-references` is
-on (`BRANCHBOOK_INBOX_REDACT_REFERENCES`, off by default and in compose, `make dev-api` and the tests), the inbox
-and its retry also show every reference as `APT-****-****`, in the reference field, the body and the subject, so the
-hosted demo could switch its inbox back on without handing visitors each other's references.
+on (`BRANCHBOOK_INBOX_REDACT_REFERENCES`, off by default and in compose, `make dev-api` and every test but
+`InboxReferencesHiddenIT`), the inbox and its retry also show every reference as `APT-****-****`, in the reference
+field, the body, the subject and the last error, so the hosted demo could switch its inbox back on without handing
+visitors each other's references.
 
 Logs, metrics and error bodies carry no personal data. Error bodies never quote the request, and unexpected
 exceptions are logged with their types and stack frames but not their messages, which can quote a name or a

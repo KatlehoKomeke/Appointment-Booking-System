@@ -81,7 +81,8 @@ One request yields exactly one code:
   was. A second cancel of the same appointment at the same moment is not an error: its version check fails, it
   reads the appointment once more and returns the same `200`. A lock not granted within 2 s is `503 TRY_AGAIN`. An
   appointment that the 48-hour retention purge has deleted, before the cancel or while it runs, is
-  `404 APPOINTMENT_NOT_FOUND`, never a `500`.
+  `404 APPOINTMENT_NOT_FOUND`, never a `500`; one the purge deletes after the cancel checked its digits is not
+  counted as a wrong try.
 - **Retry** (`POST /api/v1/messages/{id}/retry`, only while `branchbook.inbox.enabled` is true): an `id` that is not
   a UUID is `400 VALIDATION_FAILED`; then an unknown id is `404 MESSAGE_NOT_FOUND`. Any message that exists is a
   `200`: reset to PENDING if a retry could send it, otherwise returned unchanged with `retryable` false. While

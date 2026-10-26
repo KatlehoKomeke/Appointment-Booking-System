@@ -79,9 +79,9 @@ nothing. Both have been live since 2026-10-26 (058e6fd): a number outside the ra
 DEMO_NUMBER_REQUIRED` and nothing is written, and the deletion runs every hour. The simulated inbox is off on the hosted demo
 (`BRANCHBOOK_INBOX_ENABLED=false`), so other visitors cannot see anyone's booking; each booker still sees their own
 SMS and its status on the confirmation page. `BRANCHBOOK_INBOX_REDACT_REFERENCES=true` (off by default, and off in
-compose, `make dev-api` and the tests) shows every reference in the inbox and its retry as `APT-****-****`, in the
-reference field, the body and the subject, so the hosted demo could switch the inbox back on without handing anyone
-another booking's reference.
+compose, `make dev-api` and every test but `InboxReferencesHiddenIT`) shows every reference in the inbox and its
+retry as `APT-****-****`, in the reference field, the body, the subject and the last error, so the hosted demo
+could switch the inbox back on without handing anyone another booking's reference.
 
 The hosted demo's other controls, all in [infra/lib/app-stack.ts](infra/lib/app-stack.ts) and
 [infra/lib/data-stack.ts](infra/lib/data-stack.ts): AWS WAF on the load balancer blocks `/actuator` (403), allows 30
