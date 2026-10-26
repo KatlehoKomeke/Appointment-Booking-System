@@ -1,0 +1,95 @@
+/*
+ * The design tokens: every colour, size and shadow the screens use, from web/README.md "Foundations".
+ *
+ * Components never write a raw value; they read one of these, so a change to the design is a change here. Light
+ * theme only: dark mode is a recorded non-goal, so there is no second set.
+ */
+:root {
+  /* Colour. Each ratio in the README is WCAG 2.2 contrast against the background the colour is used on. */
+  --colour-primary: #1e6b52;
+  --colour-primary-strong: #175541;
+  --colour-primary-tint: #e6f1ec;
+  --colour-accent: #b8405e;
+  --colour-accent-strong: #9a2f4a;
+  --colour-accent-tint: #f8e8ec;
+  --colour-warn: #775c10;
+  --colour-warn-tint: #fbf3dc;
+  --colour-text: #2b2b2b;
+  --colour-text-muted: #5b615c;
+  --colour-surface: #f6f7f5;
+  --colour-card: #ffffff;
+  --colour-border: #dde2dc;
+  --colour-control: #7d867f;
+  --colour-control-soft: #87908a;
+
+  /* Supporting colours, for edges, fills and disabled states. None carries text below its ratio. */
+  --colour-banner-edge: #e5d49f;
+  --colour-alert-edge: #e3b3c0;
+  --colour-fill-muted: #eef0ed; /* full times, the SMS frame, chips; text-muted on it is 5.5:1 */
+  --colour-unavailable-edge: #b5beb7; /* the edge of a full time or a closed date */
+  --colour-disabled: #e3e7e3; /* a disabled button; text-muted on it is 5.1:1 */
+  --colour-disabled-icon: #a3aba5; /* a disabled pager's icon */
+  --colour-leaf-inner: #4fa383; /* the inner leaf of the mark */
+
+  /* Type. Nunito Sans is self-hosted (main.tsx) because the Content Security Policy allows no font origin. */
+  --font-sans:
+    'Nunito Sans', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  /* The reference is monospace so each character can be read back one by one. */
+  --font-mono:
+    ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+  --weight-regular: 400;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --type-page-heading-size: 28px;
+  --type-page-heading-line: 32px;
+  --type-section-heading-size: 20px;
+  --type-section-heading-line: 28px;
+  --type-alert-title-size: 18px;
+  --type-alert-title-line: 24px;
+  --type-date-size: 18px;
+  --type-date-line: 24px;
+  --type-card-heading-size: 16px;
+  --type-card-heading-line: 24px;
+  --type-body-size: 16px;
+  --type-body-line: 24px;
+  --type-small-size: 14px;
+  --type-small-line: 20px;
+  --type-meta-size: 13px;
+  --type-meta-line: 18px;
+  --type-badge-size: 13px;
+  --type-badge-line: 18px;
+  --type-status-badge-size: 14px; /* the delivery status on the confirmation page */
+  --type-status-badge-line: 20px;
+  --type-label-size: 12px;
+  --type-label-line: 16px;
+  --type-caption-size: 11px;
+  --type-caption-line: 14px;
+  --type-reference-size: 26px;
+  --type-reference-line: 32px;
+
+  /* Space: steps of 4, 8, 12, 16, 24 and 32 px. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+
+  /* Shape. */
+  --radius: 6px;
+  --radius-bubble: 16px; /* an SMS bubble, with one corner of --radius-bubble-tail */
+  --radius-bubble-tail: 4px;
+  --radius-segment: 2px; /* the stepper's segments */
+  --radius-pill: 999px;
+
+  /* Shadows mark only cards in a list, the review summary and the reference card, and the time step's action bar. */
+  --shadow-card: 0 1px 2px rgb(0 0 0 / 6%);
+  --shadow-action-bar: 0 -2px 8px rgb(0 0 0 / 6%);
+
+  /* Layout: one column, phone first. */
+  --gutter: 16px;
+  --content-max: 640px;
+  --target-min: 44px; /* every target, except links inside a line of text */
+  --button-height: 48px; /* every primary button */
+}

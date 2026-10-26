@@ -17,6 +17,22 @@ export type Problem = components['schemas']['Problem'];
 /** The response header that carries the id the server logged the request under. */
 export const CORRELATION_ID_HEADER = 'X-Correlation-Id';
 
+/** The response header that says, in seconds, how long to wait before trying again (429 and 503). */
+export const RETRY_AFTER_HEADER = 'Retry-After';
+
+/** The response header that marks a booking an earlier request with the same idempotency key already made. */
+export const IDEMPOTENT_REPLAYED_HEADER = 'Idempotent-Replayed';
+
+/**
+ * Where the API is when no base URL is given: the page's own origin, which serves both the app and the API.
+ *
+ * It is the absolute origin rather than `''` because the client builds a `Request`, and outside a browser (Node,
+ * where the tests run) a `Request` needs an absolute URL. In the browser the two are the same.
+ */
+export function defaultBaseUrl(): string {
+  return typeof globalThis.location === 'undefined' ? '' : globalThis.location.origin;
+}
+
 /** Options for {@link createApiClient}. The defaults suit the browser. */
 export interface ApiClientOptions {
   /** Where the API is served. Defaults to the page's own origin, which serves both the app and the API. */
@@ -33,8 +49,10 @@ export interface ApiClientOptions {
  */
 export function createApiClient(options: ApiClientOptions = {}) {
   return createClient<paths>({
-    baseUrl: options.baseUrl ?? '',
-    ...(options.fetch ? { fetch: options.fetch } : {}),
+    baseUrl: options.baseUrl ?? defaultBaseUrl(),
+    // The global fetch is looked up on each call, not when the client is made, so a fake installed later (MSW in
+    // the tests) still sees every request.
+    fetch: options.fetch ?? ((request) => globalThis.fetch(request)),
   });
 }
 
@@ -63,6 +81,9 @@ export class ApiProblem extends Error {
   /** The whole problem, when the response carried one. */
   readonly problem: Problem | undefined;
 
+  /** How many seconds the API asked the caller to wait before trying again, from `Retry-After`; 429 and 503 only. */
+  readonly retryAfterSeconds: number | undefined;
+
   /**
    * Creates the error from an error response.
    *
@@ -78,7 +99,36 @@ export class ApiProblem extends Error {
     this.correlationId =
       problem?.correlationId ?? response.headers.get(CORRELATION_ID_HEADER) ?? undefined;
     this.problem = problem;
+    this.retryAfterSeconds = retryAfterSeconds(response);
   }
+}
+
+/**
+ * Reads `Retry-After` from a response: a number of seconds, or an HTTP date, which is turned into the seconds left.
+ *
+ * @param response - any response
+ * @returns the seconds to wait, never negative, or `undefined` when the header is absent or unreadable
+ */
+export function retryAfterSeconds(response: Response): number | undefined {
+  const value = response.headers.get(RETRY_AFTER_HEADER)?.trim();
+  if (value === undefined || value === '') {
+    return undefined;
+  }
+  if (/^\d+$/.test(value)) {
+    return Number(value);
+  }
+  const at = Date.parse(value);
+  return Number.isNaN(at) ? undefined : Math.max(0, Math.ceil((at - Date.now()) / 1000));
+}
+
+/**
+ * Tells whether a booking response replays an earlier request with the same idempotency key, rather than a new
+ * booking. Either way the appointment in the body is the one booked.
+ *
+ * @param response - the response to `POST /api/v1/appointments`
+ */
+export function isIdempotentReplay(response: Response): boolean {
+  return response.headers.get(IDEMPOTENT_REPLAYED_HEADER) === 'true';
 }
 
 /**
@@ -96,9 +146,23 @@ export class ApiProblem extends Error {
 export async function unwrap<T>(
   call: Promise<{ data?: T; error?: unknown; response: Response }>,
 ): Promise<T> {
+  return (await unwrapWithResponse(call)).data;
+}
+
+/**
+ * Like {@link unwrap}, but also returns the response, for a caller that needs its headers, such as
+ * {@link isIdempotentReplay}.
+ *
+ * @param call - a call made with the client, for an operation whose success has a body
+ * @returns the response body, typed by the contract, and the response it came in
+ * @throws {ApiProblem} when the API answers with an error; a network failure rejects with the browser's own error
+ */
+export async function unwrapWithResponse<T>(
+  call: Promise<{ data?: T; error?: unknown; response: Response }>,
+): Promise<{ data: T; response: Response }> {
   const { data, error, response } = await call;
   if (response.ok && data !== undefined) {
-    return data;
+    return { data, response };
   }
   throw new ApiProblem(response, error);
 }

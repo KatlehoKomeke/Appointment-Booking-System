@@ -1,0 +1,145 @@
+/*
+ * The reset and the base styles every page shares, on top of the tokens in tokens.css.
+ *
+ * Margins are reset to zero so each component sets its own spacing from the --space steps, rather than inheriting
+ * the browser's defaults.
+ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--colour-surface);
+  color: var(--colour-text);
+  font-family: var(--font-sans);
+  font-size: var(--type-body-size);
+  line-height: var(--type-body-line);
+  font-weight: var(--weight-regular);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  margin: 0;
+  font-weight: var(--weight-bold);
+  color: var(--colour-text);
+}
+
+h1 {
+  font-size: var(--type-page-heading-size);
+  line-height: var(--type-page-heading-line);
+}
+
+h2 {
+  font-size: var(--type-section-heading-size);
+  line-height: var(--type-section-heading-line);
+}
+
+h3 {
+  font-size: var(--type-card-heading-size);
+  line-height: var(--type-card-heading-line);
+}
+
+p,
+ul,
+ol,
+dl,
+dd,
+figure,
+blockquote,
+fieldset {
+  margin: 0;
+}
+
+/* Lists are indented 24 px; a list used for layout resets this itself. */
+ul,
+ol {
+  padding-left: var(--space-5);
+}
+
+fieldset {
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+a {
+  color: var(--colour-primary);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.15em;
+}
+
+a:hover {
+  color: var(--colour-primary-strong);
+  text-decoration-thickness: 2px;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+svg {
+  flex-shrink: 0;
+}
+
+/* One focus ring everywhere: a 2 px primary outline, 2 px out from the edge. */
+:focus-visible {
+  outline: 2px solid var(--colour-primary);
+  outline-offset: 2px;
+}
+
+/*
+ * Headings and <main> take focus only from code (tabIndex -1), when a page or step changes or the skip link is
+ * used. A ring there would look like a control, so they show none; the screen reader still announces them.
+ */
+[tabindex='-1']:focus {
+  outline: none;
+}
+
+/* Numbers that line up, such as times and counts, use tabular figures. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Text for screen readers only, such as the full name behind a short visible label. */
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

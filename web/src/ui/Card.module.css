@@ -1,0 +1,15 @@
+.card {
+  padding: var(--space-4);
+  border: 1px solid var(--colour-border);
+  border-radius: var(--radius);
+  background: var(--colour-card);
+  list-style: none;
+}
+
+.shadow {
+  box-shadow: var(--shadow-card);
+}
+
+.flush {
+  padding: 0;
+}

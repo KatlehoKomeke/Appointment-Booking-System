@@ -1,0 +1,45 @@
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--type-badge-size);
+  line-height: var(--type-badge-line);
+  font-weight: var(--weight-bold);
+  white-space: nowrap;
+}
+
+/* The other sizes come after .badge, so they override its size at the same specificity. */
+.label {
+  font-size: var(--type-label-size);
+  line-height: var(--type-label-line);
+}
+
+.large {
+  padding: var(--space-1) var(--space-3);
+  font-size: var(--type-status-badge-size);
+  line-height: var(--type-status-badge-line);
+}
+
+.pending,
+.demo {
+  background: var(--colour-warn-tint);
+  color: var(--colour-warn);
+}
+
+.sent {
+  background: var(--colour-primary-tint);
+  color: var(--colour-primary-strong);
+}
+
+.failed,
+.unavailable {
+  background: var(--colour-accent-tint);
+  color: var(--colour-accent-strong);
+}
+
+.neutral {
+  background: var(--colour-fill-muted);
+  color: var(--colour-text-muted);
+}

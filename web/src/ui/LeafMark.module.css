@@ -1,0 +1,15 @@
+.mark {
+  display: block;
+}
+
+/* Fill and a matching round-joined stroke, so the cup's two tips are rounded as in the mockups. */
+.cup {
+  fill: var(--colour-primary);
+  stroke: var(--colour-primary);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.leaf {
+  fill: var(--colour-leaf-inner);
+}
