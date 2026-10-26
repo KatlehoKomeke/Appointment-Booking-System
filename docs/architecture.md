@@ -4,7 +4,7 @@ This document explains how BranchBook is built and why. The decisions behind it 
 [docs/adr](adr/README.md); the business rules are in [domain-rules.md](domain-rules.md). The whole design,
 including the parts not built yet, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX).
 
-**Status: design complete; milestones M0 to M5 are built.** M0 is the skeleton: one jar that serves the app,
+**Status: design complete; milestones M0 to M5 are built, and M6's Tier 2 API.** M0 is the skeleton: one jar that serves the app,
 PostgreSQL 17 migrated by Flyway, health probes and security headers. M1 adds the whole schema, the seeded
 catalogue, the `catalogue` module with the public-holiday rule, and the shared error and correlation-id handling. M2
 adds the `scheduling` module (`SlotCalendar` and the availability API) and the committed OpenAPI contract that the
@@ -12,7 +12,9 @@ web app's types are generated from. M3 adds the `booking` module's transaction a
 `notification` that writes and reads the confirmation SMS. M4 adds the web app's screens: the five-step booking
 flow, the confirmation page with its live delivery status, `/manage` and the simulated inbox, built to the
 [UI design](../web/README.md#ui-design). M5 adds the dispatcher that delivers the SMS through a simulated gateway,
-the simulated inbox's API and the concurrent proofs. Each section opens with its status. Diagrams are Mermaid, or SVG files in
+the simulated inbox's API and the concurrent proofs. M6 adds the Tier 2 API: cancelling an appointment with its
+cancellation SMS, retrying a failed message from the simulated inbox, demo data for a fresh compose stack, and two
+meters on `/actuator/prometheus`; the web app's cancel and retry screens are still to come. Each section opens with its status. Diagrams are Mermaid, or SVG files in
 [assets/diagrams](assets/diagrams/README.md); solid parts are built and dashed parts are planned, with their
 milestone.
 
@@ -31,8 +33,8 @@ milestone.
 ## 1. What the system does
 
 *Status: describes the finished v1. Built so far: branches and availability (M1, M2), and booking and lookup with
-the confirmation SMS written as PENDING (M3), the booking screens (M4), and the SMS's delivery (M5). Cancellation
-is Tier 2.*
+the confirmation SMS written as PENDING (M3), the booking screens (M4), the SMS's delivery (M5), and cancellation
+through the API (M6). The web app's cancel screen is still to come.*
 
 A customer of the fictional Fynbos Bank picks a branch, a service, a date and a time slot, enters a name and a
 South African mobile number, and gets a booking reference such as `APT-7K3M-9Q2X`. A simulated SMS confirmation
@@ -41,9 +43,10 @@ look the appointment up, and cancel it, with the reference and the last four dig
 
 ## 2. System context and containers
 
-*Status: Built, except cancellation (Tier 2): the jar, the React app's booking screens over its typed API client
-(M4), the branch, availability, booking and lookup API, the confirmation SMS with its dispatcher and simulated SMS
-gateway (M5), and PostgreSQL 17.*
+*Status: Built, except the web app's cancel and retry screens: the jar, the React app's booking screens over its
+typed API client (M4), the branch, availability, booking and lookup API, the confirmation SMS with its dispatcher and
+simulated SMS gateway (M5), the cancel and retry API (M6), and PostgreSQL 17. The picture still draws cancel dashed;
+its API is built.*
 
 ![BranchBook at a glance: one Spring Boot jar serves the React app and the REST API over PostgreSQL 17. Built: the booking screens, branches, availability, the OpenAPI contract, booking and lookup with the PENDING confirmation SMS, and the dispatcher that sends it through a simulated SMS gateway. Dashed and planned: cancel (Tier 2). Code ships through GitHub Actions and OpenID Connect to AWS, where the hosted demo at branchbook.click is deployed by hand.](assets/diagrams/system-at-a-glance.svg)
 
@@ -55,7 +58,14 @@ gateway (M5), and PostgreSQL 17.*
   delivers the outbox rows the booking transaction writes
   ([ADR-0003](adr/0003-transactional-outbox-for-confirmations.md)). `RetentionPurgeJob` runs every hour only where a
   deployment switches it on, as the hosted demo does, and deletes each booking 48 hours after it was made
-  ([runbook](runbook.md#did-the-48-hour-purge-run)).
+  ([runbook](runbook.md#did-the-48-hour-purge-run)). `DemoDataLoader` runs once after start-up where
+  `branchbook.demo-data.enabled` is on, which only compose sets: on an empty database it books three demo
+  appointments through the booking handler, and where `branchbook.booking.demo-numbers-only` is on it skips with one
+  INFO line, because its numbers are not demo numbers (M6, [api/README.md](../api/README.md#demo-data)).
+- **Observable without personal data.** `/actuator/prometheus` serves Spring Boot's meters and two of BranchBook's
+  (M6): `appointments_booked_total{outcome}`, every booking request by how it ended, and `outbox_pending`, the
+  messages still PENDING after the dispatcher's last tick ([runbook](runbook.md#read-the-metrics)). The hosted demo's
+  WAF blocks `/actuator`.
 - **Real gateways plug in later.** The dispatcher sends through a `MessageGateway` port, which the simulated SMS
   gateway implements; a real SMS provider would be one more implementation of it.
 
@@ -111,16 +121,17 @@ returns no slots without reading the appointments.
 
 ## 3. Modules and the dependency rule
 
-*Status: Built. `catalogue`, `scheduling`, `booking` and `shared` are built; `notification` writes and reads the
-outbox, delivers it through its dispatcher (M5), and serves the simulated inbox.*
+*Status: Built. `catalogue`, `scheduling`, `booking` (cancellation from M6) and `shared` are built; `notification`
+writes and reads the outbox, delivers it through its dispatcher (M5), and serves the simulated inbox and its retry
+(M6).*
 
 The back end is a modular monolith ([ADR-0001](adr/0001-modular-monolith.md)), packaged by capability. Each arrow
 reads "depends on".
 
 ```mermaid
 flowchart TB
-    notification["notification · built, M3 and M5<br/>outbox writer, dispatcher, inbox"]
-    booking["booking · built, M3<br/>Appointment, booking, lookup"]
+    notification["notification · built, M3, M5 and M6<br/>outbox writer, dispatcher, inbox, retry"]
+    booking["booking · built, M3 and M6<br/>Appointment, booking, lookup, cancel"]
     scheduling["scheduling · built, M2<br/>SlotCalendar, availability"]
     catalogue["catalogue · built, M1<br/>branches, services, hours, holidays"]
     notification -- "implements ConfirmationOutbox" --> booking
@@ -136,8 +147,8 @@ Every module may use `shared` (config, correlation, problem, security, time, web
 |---|---|---|
 | `catalogue` | Built (M1, M2) | Branches, services, weekday trading hours, capacities and public holidays. Read-only at runtime; seeded by Flyway. |
 | `scheduling` | Built (M2) | `SlotCalendar`, a pure function that computes and validates slots in the branch's time zone, and the availability query. It learns which seats are taken through the `BookedIntervalsPort`, which `booking` implements, so it never reads the appointments table itself. |
-| `booking` | Built (M3); cancellation Tier 2 | The `Appointment` aggregate, the booking transaction, idempotency and lookup; cancellation in Tier 2. |
-| `notification` | Built (M3, M5) | The outbox writer, the message templates, the read of an appointment's messages, the dispatcher with the `MessageGateway` port and its simulated SMS gateway, and the simulated inbox. It reads nothing from `catalogue`: the booking hands it the branch's and the service's short names with the appointment. |
+| `booking` | Built (M3, M6) | The `Appointment` aggregate, the booking transaction, idempotency, lookup, cancellation (M6), the 48-hour retention purge, the demo data (M6) and the `appointments_booked_total` counter (M6). |
+| `notification` | Built (M3, M5, M6) | The outbox writer, the confirmation and cancellation templates, the read of an appointment's messages, the dispatcher with the `MessageGateway` port and its simulated SMS gateway, the simulated inbox, the retry of a FAILED message (M6) and the `outbox_pending` gauge (M6). It reads nothing from `catalogue`: the booking hands it the branch's and the service's short names with the appointment. |
 | `shared` | Built | Problem responses, correlation ids, security headers, the clock and configuration. |
 
 Inside every module the layers are `api` (HTTP only), `application` (use cases; the only layer that opens
@@ -242,16 +253,18 @@ instead ([ADR-0004](adr/0004-restraint-no-login-no-id-number.md)).
 
 *Status: Built in M5 ([BR-17](domain-rules.md#br-17), proven). Built in M3: every booking writes its SMS as a PENDING
 row in the booking transaction ([BR-16](domain-rules.md#br-16)). Built in M1: `notification_messages` and its 11
-named constraints, proven by `SchemaConstraintIT`.* Only the retry of a FAILED message, and superseding by a
-cancellation, are planned (Tier 2).
+named constraints, proven by `SchemaConstraintIT`. Built in M6: the cancellation SMS, written in the cancel's
+transaction ([BR-16](domain-rules.md#br-16)), superseding a confirmation by a cancellation
+([BR-24](domain-rules.md#br-24), proven) and the retry of a FAILED message from the simulated inbox
+([BR-17](domain-rules.md#br-17), proven).*
 
 ```mermaid
 stateDiagram-v2
-    [*] --> PENDING: written with the booking
+    [*] --> PENDING: written with the booking or the cancel
     PENDING --> SENT: gateway accepts
     PENDING --> PENDING: failed, retry in 2, 4, 8, 16 s
-    PENDING --> FAILED: fifth failure, a failed mark, or cancelled (Tier 2)
-    FAILED --> PENDING: retry (Tier 2)
+    PENDING --> FAILED: fifth failure, a failed mark, or cancelled (M6)
+    FAILED --> PENDING: retry from the inbox (M6)
 ```
 
 The dispatcher runs every two seconds on its own single thread, `outbox-1`, kept apart from Spring's default
@@ -259,17 +272,25 @@ scheduler so the hourly and daily jobs never share it. It claims up to 20 due ro
 transaction with `FOR UPDATE SKIP LOCKED`, so a crash re-sends at most one message and two instances never send the
 same message. The simulated gateway takes 150 ms and refuses every number ending in `0000`, such as the demo number
 082 555 0000, so a failed delivery can be shown: about 30 seconds of backoff later it is FAILED. A FAILED row records why: `DELIVERY_FAILED` after the fifth failed attempt,
-`SUPERSEDED_BY_CANCELLATION` when the appointment is cancelled before the message is sent (Tier 2), or
+`SUPERSEDED_BY_CANCELLATION` when the appointment is cancelled before the message is sent, or
 `DISPATCH_ERROR` when recording the outcome of a send fails, so a poisoned row never loops. The schema and the API
 contract also list `RECIPIENT_DAILY_CAP`, which no v1 rule produces. `notification_messages`
 already enforces the shape of this state machine with its named constraints: three statuses, at most five attempts,
 a failure reason exactly when FAILED and a sent time exactly when SENT. An appointment's status never depends on
 delivery: the seat is what the customer booked.
 
+`POST /api/v1/messages/{id}/retry`, which exists only while the simulated inbox is switched on
+(`branchbook.inbox.enabled`), resets a FAILED message with `DELIVERY_FAILED` or `DISPATCH_ERROR` to PENDING, due
+now, unless it is the confirmation of an appointment that is cancelled or has started; any other message comes back
+unchanged. It locks the message and waits up to 2 seconds for a send in flight, so it never races the dispatcher or
+a cancel. Where the inbox is off, the guarded SQL in the [runbook](runbook.md#replay-a-failed-message) replays a
+message instead.
+
 ## 6. Appointment lifecycle
 
 *Status: Built in M1 as domain code (`AppointmentStatus`, [BR-15](domain-rules.md#br-15), proven). Booking
-creates CONFIRMED appointments from M3; cancellation through the API is Tier 2 ([BR-14](domain-rules.md#br-14)).*
+creates CONFIRMED appointments from M3; cancellation through the API is built in M6 ([BR-14](domain-rules.md#br-14),
+proven).*
 
 ```mermaid
 stateDiagram-v2
@@ -283,7 +304,11 @@ stateDiagram-v2
     NO_SHOW --> [*]
 ```
 
-Cancellation is the only transition the API will offer, in Tier 2. The staff transitions are modelled and tested
+Cancellation is the only transition the API offers: `POST /api/v1/appointments/{reference}/cancel` with
+`X-Mobile-Last4`, through the same check and rate limit as a lookup. Before the start it frees the seat at once,
+supersedes a confirmation not yet sent and writes the cancellation SMS, all in one transaction; a repeat is the same
+`200`; at or after the start it is `409 TOO_LATE_TO_CANCEL`; and an appointment the 48-hour purge has deleted is
+`404 APPOINTMENT_NOT_FOUND`, never a `500`. The staff transitions are modelled and tested
 so the next feature, branch check-in, has a correct foundation
 ([ADR-0004](adr/0004-restraint-no-login-no-id-number.md)).
 
@@ -353,14 +378,18 @@ simulated inbox among them.*
 BranchBook stores a first name, a last name and a South African mobile number, nothing more. The full number
 appears only to the person typing it, on the details and review steps, before the booking exists. Once booked, the
 API and the UI show it only masked: a caller who has just proved the last four digits sees `082 *** 0101`, and
-everyone else, including the simulated inbox, sees `082 *** ****`.
+everyone else, including the simulated inbox, sees `082 *** ****`. Where `branchbook.inbox.redact-references` is
+on (`BRANCHBOOK_INBOX_REDACT_REFERENCES`, off by default and in compose, `make dev-api` and the tests), the inbox
+and its retry also show every reference as `APT-****-****`, in the reference field, the body and the subject, so the
+hosted demo could switch its inbox back on without handing visitors each other's references.
 
 Logs, metrics and error bodies carry no personal data. Error bodies never quote the request, and unexpected
 exceptions are logged with their types and stack frames but not their messages, which can quote a name or a
-number. Log lines name an appointment by its id, never by its reference.
+number. Log lines name an appointment by its id, never by its reference. Meter tags are fixed words, such as a
+booking's outcome or a URI template, never a value a customer typed (`MetricsIT.scrapeHoldsNoPersonalData`).
 [`LogRedactionIT`](../api/src/test/java/za/co/fynbos/branchbook/LogRedactionIT.java) takes one customer through
-every outcome of a booking and a lookup and checks both the application's log and PostgreSQL's for their name,
-number and reference. How the data is protected, and what is planned, is in
+every outcome of a booking and a lookup, and through a cancellation and a retry, and checks both the application's
+log and PostgreSQL's for their name, number and reference. How the data is protected, and what is planned, is in
 [SECURITY.md](../SECURITY.md#personal-information-popia).
 
 ## 10. Deployment

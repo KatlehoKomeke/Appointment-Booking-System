@@ -17,7 +17,9 @@ file is a synthetic demo number.
 ## What happened to a message?
 
 The dispatcher delivers PENDING messages every 2 seconds, on its own thread, `outbox-1`
-([BR-17](domain-rules.md#br-17)). The simulated inbox lists the newest messages of every booking, recipients redacted:
+([BR-17](domain-rules.md#br-17)). The simulated inbox lists the newest messages of every booking, recipients redacted,
+and references too, as `APT-****-****`, where `BRANCHBOOK_INBOX_REDACT_REFERENCES` is on (it is off in `make up`);
+each message's `id` identifies it either way:
 
 ```bash
 curl -s 'localhost:8080/api/v1/messages?limit=20'
@@ -102,7 +104,9 @@ retention.purged appointments=12 messages=12 keys=3
 
 `appointments=0 messages=0 keys=0` means nothing was old enough. No such line at all means the job is not running:
 `branchbook.retention.enabled` is not true in that deployment. `keys` is usually lower than `appointments`: the
-hourly key purge has normally removed a key by the time its booking is 48 hours old.
+hourly key purge has normally removed a key by the time its booking is 48 hours old. A purged booking is gone for
+its customer too: a lookup or a cancel of it is `404 APPOINTMENT_NOT_FOUND`, even when the purge deletes it while
+the cancel runs, never a `500` ([errors.md](errors.md)).
 
 A WARN line means a batch of up to 500 appointments could not be deleted and was rolled back:
 

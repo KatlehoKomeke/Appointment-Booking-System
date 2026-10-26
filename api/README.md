@@ -1,14 +1,16 @@
 # BranchBook API
 
 The Spring Boot application at the heart of BranchBook. It serves the booking API and the React app from
-[web/](../web/README.md) on the same origin, and will run the confirmation dispatcher (M5). How it is structured and
+[web/](../web/README.md) on the same origin, and runs the dispatcher that delivers its SMS. How it is structured and
 why is in [docs/architecture.md](../docs/architecture.md).
 
-**Status (M3):** the schema, the seeded catalogue, the branch API, availability, booking and lookup. The
-application starts, migrates PostgreSQL, answers its health probes, serves the app, lists branches with their
-bookable dates and each day's slots with the seats left, books an appointment with its confirmation SMS in one
-transaction, and opens it again with its reference and the last four digits. It publishes its OpenAPI contract. The
-dispatcher that delivers the SMS arrives in M5.
+**Status (M6, Tier 2 API built):** the application starts, migrates PostgreSQL, answers its health probes, serves
+the app, lists branches with their bookable dates and each day's slots with the seats left, books an appointment with
+its confirmation SMS in one transaction, opens it again with its reference and the last four digits, and delivers the
+SMS through a simulated gateway (M5). From M6 it also cancels an appointment before it starts, with its cancellation
+SMS; retries a failed message from the simulated inbox; books three demo appointments on a fresh compose stack; and
+serves two meters of its own on `/actuator/prometheus`. Where a deployment switches them on, it takes bookings only
+from the demo numbers and deletes each booking 48 hours after it was made. It publishes its OpenAPI contract.
 
 ## Prerequisites
 
@@ -94,7 +96,8 @@ environment supplies the rest:
 | `PORT` | HTTP port, 8080 by default | Optional |
 | `BRANCHBOOK_DISPATCHER_ENABLED` | Runs the dispatcher that delivers PENDING messages every 2 seconds on its own thread. `true` by default; its interval and the simulated gateway's latency are in application.yml. | Optional; the tests switch it off and drive it themselves |
 | `BRANCHBOOK_INBOX_ENABLED` | Switches on the simulated inbox, `GET /api/v1/messages`, an operator view of every booking's messages, and its retry, `POST /api/v1/messages/{id}/retry`. `false` by default. | `compose.yaml` and `make dev-api` set it to `true`, and so do the tests |
-| `BRANCHBOOK_DEMO_DATA_ENABLED` | Books three demo appointments once the application is ready, if the database has none ([Demo data](#demo-data)). `false` by default. | `compose.yaml` only; `make dev-api` and the tests leave it off |
+| `BRANCHBOOK_INBOX_REDACT_REFERENCES` | `branchbook.inbox.redact-references`. Shows every reference as `APT-****-****` in the inbox list and the retry's response: in the `reference` field, the body and the subject. With it, a public deployment could switch the inbox on without listing other visitors' references. `false` by default. | Nothing sets it today: `compose.yaml`, `make dev-api` and the tests leave it off, and the hosted demo keeps the inbox off (`BRANCHBOOK_INBOX_ENABLED=false`) |
+| `BRANCHBOOK_DEMO_DATA_ENABLED` | Books three demo appointments once the application is ready, if the database has none ([Demo data](#demo-data)). `false` by default; skipped with one INFO line while `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` is on. | `compose.yaml` only; `make dev-api` and the tests leave it off |
 | `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` | Takes bookings only from the published demo numbers, 082 555 0000 to 0199, so a public demo is never given a real person's number ([ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md)). Any other South African mobile is `422 DEMO_NUMBER_REQUIRED`. `false` by default. | The hosted demo's ECS task definition sets it to `true`, and `EXPECT_DEMO_NUMBERS_ONLY=1 scripts/smoke.sh <url>` fails if a deployment has it off. The start-up log says which numbers bookings take. `compose.yaml` and `make dev-api` leave it off, and the shared test configuration sets it to `false`; `DemoNumbersOnlyIT` switches it on |
 | `BRANCHBOOK_RETENTION_ENABLED` | `branchbook.retention.enabled`. Switches on the hourly retention job, which deletes every appointment older than the max-age below, with its messages and idempotency keys, keeping the hosted demo's 48-hour promise ([SECURITY.md](../SECURITY.md#personal-information-popia)). `false` by default. | The hosted demo's ECS task definition sets it to `true`, and nothing else does. `compose.yaml`, `make dev-api` and the tests leave it off; the tests call `RetentionPurge` themselves |
 | `BRANCHBOOK_RETENTION_MAX_AGE` | `branchbook.retention.max-age`. How long after its booking an appointment is deleted, as an ISO-8601 duration. `PT48H` by default; less than `PT24H`, the life of an `Idempotency-Key`, stops start-up. | Optional; the default is the hosted demo's promise |
@@ -117,12 +120,12 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 | `POST /api/v1/appointments` | Book a slot, with an `Idempotency-Key`. `201` with the appointment, its `Location` and its PENDING SMS |
 | `GET /api/v1/appointments/{reference}` | Open an appointment again, with `X-Mobile-Last4` |
 | `POST /api/v1/appointments/{reference}/cancel` | Cancel an appointment before it starts, with `X-Mobile-Last4`. `200` with the appointment as a lookup now shows it: `CANCELLED`, its PENDING or FAILED confirmation superseded and its cancellation SMS PENDING |
-| `GET /api/v1/messages?limit=` | The simulated inbox: the newest messages of every booking, recipients redacted to `082 *** ****`. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
-| `POST /api/v1/messages/{id}/retry` | Make a FAILED message due again, as the inbox's Retry button does; any other message is returned unchanged. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
+| `GET /api/v1/messages?limit=` | The simulated inbox: the newest messages of every booking, recipients redacted to `082 *** ****`, and references to `APT-****-****` while `branchbook.inbox.redact-references` is true. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
+| `POST /api/v1/messages/{id}/retry` | Make a FAILED message due again, as the inbox's Retry button does; any other message is returned unchanged. The answer is the message as the inbox shows it, its reference redacted the same way. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
 | `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml) |
 | `/swagger-ui.html` | Swagger UI, to read and try the API |
 | `/` and the app's routes (`/book`, `/manage`, `/messages`, `/privacy`, `/appointments/{reference}`) | The React app |
-| `/readyz` | Readiness: up once the app has started and PostgreSQL answers. Used by the image's Docker health check; the planned load balancer will use it too. |
+| `/readyz` | Readiness: up once the app has started and PostgreSQL answers. Used by the image's Docker health check and the hosted demo's load balancer. |
 | `/livez` | Liveness: up while the process is healthy. Deliberately ignores the database. |
 | `/actuator/health`, `/actuator/info` | Overall health (no details) and build information |
 | `/actuator/prometheus` | Every meter in Prometheus's text format, the application's two included ([Metrics](#metrics)) |
@@ -215,6 +218,8 @@ How a cancel is decided (BR-13, BR-14, BR-16, BR-24):
 - A repeat is the same `200` and writes nothing. Two cancels at the same moment both get it: the second one's version
   check fails, and it reads the appointment once more and finds it cancelled.
 - At or after the start it is `409 TOO_LATE_TO_CANCEL`, and the appointment stays `CONFIRMED`.
+- An appointment the 48-hour retention purge has deleted, before the cancel or while it runs, is the same
+  `404 APPOINTMENT_NOT_FOUND` as an unknown reference, never a `500`.
 
 `POST /api/v1/appointments/APT-7K3M-9Q2X/cancel` with `X-Mobile-Last4: 0101`, shortened:
 
@@ -320,7 +325,9 @@ smoke test and the README's walkthrough use. The three confirmations carry one c
 to the number ending 0000 fails all five attempts by design and shows as FAILED in the inbox about 30 seconds after
 start-up. The load runs on a virtual thread of its own, `demo-data`, so it never delays readiness, and a fixture that
 cannot be booked is logged as a warning by its branch and service only (`demo_data.fixture_failed`); the application
-carries on. A restart books nothing more while any appointment exists. `DemoDataLoaderIT` drives the loader
+carries on. A restart books nothing more while any appointment exists. While
+`branchbook.booking.demo-numbers-only` is on, the loader books nothing and logs one INFO line saying so, because its
+`+27 60 000` numbers are outside the demo block and every booking would be refused. `DemoDataLoaderIT` drives the loader
 directly, and checks that the loader the application builds hands the load to that thread; `DemoDataPropertiesTest`
 reads `compose.yaml` and checks that the app's environment there switches the loader on.
 

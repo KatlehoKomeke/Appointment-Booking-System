@@ -33,7 +33,7 @@ One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Soli
 | M3 | Booking transaction with idempotency, the PENDING confirmation SMS in the same transaction, lookup with the last four digits and its rate limit | Built |
 | M4 | Booking UI: the five-step flow, the confirmation page, read-only `/manage`, the simulated inbox | Built |
 | M5 | The dispatcher and simulated SMS gateway, delivery status, the simulated inbox, the race and idempotency proofs | Built |
-| M6 | Tier 2 if time allows, UI states and accessibility, web and end-to-end tests, CI completion | Planned |
+| M6 | Tier 2 if time allows, UI states and accessibility, web and end-to-end tests, CI completion | In progress: the Tier 2 API (cancel, retry, demo data, two metrics) and the end-to-end test built; the web cancel and retry screens to come |
 | M7 | Final documentation pass, clean-clone rehearsal, release tag | Planned |
 | AWS | Hosted demo: the deploy role, budget and release record, and the data and app stacks, deployed by hand on 2026-10-26 | Built |
 
@@ -157,7 +157,7 @@ The plan is about 35 focused hours, split into tiers so that a short week still 
 | Tier | Contents |
 |---|---|
 | Tier 1: never cut | Booking with every proof, lookup and the confirmation page, the read-only `/manage` lookup, the SMS outbox and dispatcher, the simulated inbox, the lookup rate limit, race tests, smoke scripts, the main end-to-end test |
-| Tier 2: if time allows | Cancellation, retrying a failed message from the inbox, demo data, custom metrics |
+| Tier 2: if time allows | Cancellation, retrying a failed message from the inbox, demo data, custom metrics. API built in M6; the web cancel and retry screens to come |
 | Tier 3: cut by default | The email channel, a per-recipient SMS cap, more end-to-end tests, a README animation |
 
 Deliberately out of scope, each with its reason in the ADRs: customer login, staff screens, rescheduling, reminders,
