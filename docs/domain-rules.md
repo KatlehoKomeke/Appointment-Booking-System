@@ -259,11 +259,11 @@ How to read a rule:
 
 **Rule.** Time: every instant is stored as timestamptz (UTC), slots are computed in Branch.timezone through an injected Clock, application SQL never calls now() (every time-dependent statement binds :now from the Clock; DEFAULT now() is a raw-insert convenience only), the API emits ISO-8601 with the branch offset (+02:00) through one explicit formatter, the UI formats with Intl timeZone Africa/Johannesburg and prints SAST, and JVM/containers/CI run TZ=UTC so slot output is identical under any default zone.
 
-**Enforced in.** domain (SlotCalendar) + application service (explicit ISO_OFFSET_DATE_TIME rendering at Branch.timezone, independent of Jackson 2/3 time-zone features; :now bound in every native statement) + UI (lib/formatSast)
+**Enforced in.** domain (SlotCalendar) + application service (explicit ISO_OFFSET_DATE_TIME rendering at Branch.timezone, independent of Jackson 2/3 time-zone features; :now bound in every native statement) + UI (web/src/lib/time.ts, Intl with Africa/Johannesburg)
 
-**Proven by.** `AvailabilityApiIT.rendersStartsAtWithJohannesburgOffset`, `SlotCalendarTest.producesSameSlotsUnderAnyJvmDefaultZone`, `NativeSqlUsesBoundNowTest.noJavaSqlLiteralCallsNow`
+**Proven by.** `AvailabilityApiIT.rendersStartsAtWithJohannesburgOffset`, `SlotCalendarTest.producesSameSlotsUnderAnyJvmDefaultZone`, `NativeSqlUsesBoundNowTest.noJavaSqlLiteralCallsNow`, `time.test.ts`
 
-**Status.** Planned for M4, when the web app formats times in SAST. Built in M2 and proven by the tests above: slots computed in the branch's zone from the injected clock, every native statement binding its instants, and the API writing every instant with the +02:00 offset. Built in M3: booking and lookup write `startsAt` and `endsAt` with the offset (`AppointmentApiIT.postReturns201WithLocationReferenceAndPendingNotifications`), and the SMS states the time in SAST. CI also runs the API's unit and API tests under `TZ=America/New_York`.
+**Status.** Proven. Built in M2 and proven by the tests above: slots computed in the branch's zone from the injected clock, every native statement binding its instants, and the API writing every instant with the +02:00 offset. Built in M3: booking and lookup write `startsAt` and `endsAt` with the offset (`AppointmentApiIT.postReturns201WithLocationReferenceAndPendingNotifications`), and the SMS states the time in SAST. CI also runs the API's unit and API tests under `TZ=America/New_York`. Built in M4: the web app formats every time in SAST whatever the device's zone (`time.test.ts`), and CI runs the whole web suite under `TZ=UTC` and `TZ=America/New_York`.
 
 <a id="br-21"></a>
 ## BR-21: One validation code, fixed precedence

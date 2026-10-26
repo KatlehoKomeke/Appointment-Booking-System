@@ -49,13 +49,13 @@ files live in `.github/workflows/`.
 
 | Diagram | Watch paths | Expected to change at | Verified at |
 | --- | --- | --- | --- |
-| system-at-a-glance | the module packages and their controllers; `web/src/`; `api/src/main/resources/application.yml`; `infra/bin/branchbook.ts` | M4, M5, Tier 2, after M6 | `85cd726` |
+| system-at-a-glance | the module packages and their controllers; `web/src/`; `api/src/main/resources/application.yml`; `infra/bin/branchbook.ts` | Tier 2, after M6 | `3985f40` |
 | request-flow | `scheduling/`; `catalogue/application/BranchCalendarProvider.java`; `catalogue/infrastructure/`; `booking/infrastructure/JdbcBookedIntervals.java`; `shared/correlation/`; `shared/security/`; `shared/problem/` | when the availability path changes | `85cd726` |
 | module-map | the top-level packages; `ArchitectureTest.java` in `api/src/test/` | M3, M5 | `85cd726` |
 | booking-transaction | `booking/application/`; `V2__schema.sql` | M3 | `85cd726` |
 | confirmation-states | `notification/`; the `notification_messages` table in `V2__schema.sql` | M5 | `85cd726` |
 | appointment-lifecycle | `booking/domain/AppointmentStatus.java` | Tier 2 | `85cd726` |
-| data-model | `api/src/main/resources/db/migration/`; the writers in `booking/application/` and `notification/application/` | M5 (the notification status line); with a new migration | `85cd726` |
+| data-model | `api/src/main/resources/db/migration/`; the writers in `booking/application/` and `notification/application/` | With a new migration | `3985f40` |
 | local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; the `Makefile` up and dev targets; `web/vite.config.ts`; `application.yml` (probes, connection pool); the controllers (the routes in the API box) | Tier 2 (the cancel route); after M6 | `85cd726` |
 | delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/bin/branchbook.ts`; the `main` ruleset and the `aws-demo` environment | when `deploy` waits for `ci`; after M6 | `85cd726` |
 | push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured only when the job structure changes | `85cd726` (measured at `c5feafe`) |

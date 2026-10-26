@@ -4,13 +4,15 @@ This document explains how BranchBook is built and why. The decisions behind it 
 [docs/adr](adr/README.md); the business rules are in [domain-rules.md](domain-rules.md). The whole design,
 including the parts not built yet, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX).
 
-**Status: design complete; milestones M0 to M3 and M5 are built.** M0 is the skeleton: one jar that serves the app,
+**Status: design complete; milestones M0 to M5 are built.** M0 is the skeleton: one jar that serves the app,
 PostgreSQL 17 migrated by Flyway, health probes and security headers. M1 adds the whole schema, the seeded
 catalogue, the `catalogue` module with the public-holiday rule, and the shared error and correlation-id handling. M2
 adds the `scheduling` module (`SlotCalendar` and the availability API) and the committed OpenAPI contract that the
 web app's types are generated from. M3 adds the `booking` module's transaction and lookup, and the part of
-`notification` that writes and reads the confirmation SMS. M5 adds the dispatcher that delivers it through a
-simulated gateway, the simulated inbox's API and the concurrent proofs. The web app's screens arrive in M4. Each section opens with its status. Diagrams are Mermaid, or SVG files in
+`notification` that writes and reads the confirmation SMS. M4 adds the web app's screens: the five-step booking
+flow, the confirmation page with its live delivery status, `/manage` and the simulated inbox, built to the
+[UI design](../web/README.md#ui-design). M5 adds the dispatcher that delivers the SMS through a simulated gateway,
+the simulated inbox's API and the concurrent proofs. Each section opens with its status. Diagrams are Mermaid, or SVG files in
 [assets/diagrams](assets/diagrams/README.md); solid parts are built and dashed parts are planned, with their
 milestone.
 
@@ -29,8 +31,8 @@ milestone.
 ## 1. What the system does
 
 *Status: describes the finished v1. Built so far: branches and availability (M1, M2), and booking and lookup with
-the confirmation SMS written as PENDING (M3), and its delivery (M5). The booking screens arrive in M4, and
-cancellation in Tier 2.*
+the confirmation SMS written as PENDING (M3), the booking screens (M4), and the SMS's delivery (M5). Cancellation
+is Tier 2.*
 
 A customer of the fictional Fynbos Bank picks a branch, a service, a date and a time slot, enters a name and a
 South African mobile number, and gets a booking reference such as `APT-7K3M-9Q2X`. A simulated SMS confirmation
@@ -39,11 +41,11 @@ look the appointment up, and cancel it, with the reference and the last four dig
 
 ## 2. System context and containers
 
-*Status: Partly built. Built: the jar, the React app's shell and typed API client, the branch, availability,
-booking and lookup API, the confirmation SMS with its dispatcher and simulated SMS gateway (M5), and PostgreSQL 17.
-Planned: the booking screens (M4).*
+*Status: Built, except cancellation (Tier 2): the jar, the React app's booking screens over its typed API client
+(M4), the branch, availability, booking and lookup API, the confirmation SMS with its dispatcher and simulated SMS
+gateway (M5), and PostgreSQL 17.*
 
-![BranchBook at a glance: one Spring Boot jar serves the React app and the REST API over PostgreSQL 17. Built: branches, availability, the OpenAPI contract, booking and lookup with the PENDING confirmation SMS. Dashed and planned: the booking screens (M4), the dispatcher and simulated SMS (M5). Code ships through GitHub Actions and OpenID Connect to AWS, which today holds the deploy role, a budget and a release record; hosting follows M6.](assets/diagrams/system-at-a-glance.svg)
+![BranchBook at a glance: one Spring Boot jar serves the React app and the REST API over PostgreSQL 17. Built: the booking screens, branches, availability, the OpenAPI contract, booking and lookup with the PENDING confirmation SMS, and the dispatcher that sends it through a simulated SMS gateway. Dashed and planned: cancel (Tier 2). Code ships through GitHub Actions and OpenID Connect to AWS, which today holds the deploy role, a budget and a release record; hosting follows M6.](assets/diagrams/system-at-a-glance.svg)
 
 - **One deployable, one database.** The jar serves the single-page app and the REST API under `/api/v1`, so there
   is one origin and no CORS. Locally it is plain HTTP on `127.0.0.1`; HTTPS arrives with the load balancer planned
@@ -331,21 +333,20 @@ no customers table and no login.
 
 ## 8. Time
 
-*Status: Built in M2 and M3; formatting times in SAST in the web app is planned for M4
-([BR-20](domain-rules.md#br-20)).*
+*Status: Built in M2 and M3, and in the web app in M4 ([BR-20](domain-rules.md#br-20)).*
 
 Every instant is stored as `timestamptz` (UTC). Trading hours are wall-clock times converted through the branch's
 IANA time zone (`Africa/Johannesburg`), never by adding two hours by hand. A `java.time.Clock` is injected
 everywhere, and SQL binds `:now` from it rather than calling `now()`, so tests control time;
 `NativeSqlUsesBoundNowTest` fails if a SQL string reads the database's clock. The API returns offsets explicitly,
-for example `2026-10-27T09:30:00+02:00`, and the web app will format times in South African Standard Time whatever
-the device's time zone. The containers and CI run in UTC, and CI runs the API's unit and API tests again in
+for example `2026-10-27T09:30:00+02:00`, and the web app formats times in South African Standard Time whatever
+the device's time zone: its tests run twice, under `TZ=UTC` and `TZ=America/New_York`. The containers and CI run in UTC, and CI runs the API's unit and API tests again in
 `America/New_York` to prove the slots do not depend on the JVM's zone.
 
 ## 9. Personal information
 
-*Status: Built for every surface that exists ([BR-19](domain-rules.md#br-19)), the simulated inbox's API among
-them; the booking screens arrive in M4.*
+*Status: Built for every surface that exists ([BR-19](domain-rules.md#br-19)), the booking screens and the
+simulated inbox among them.*
 
 BranchBook stores a first name, a last name and a South African mobile number, nothing more. The full number
 appears only to the person typing it, on the details and review steps, before the booking exists. Once booked, the

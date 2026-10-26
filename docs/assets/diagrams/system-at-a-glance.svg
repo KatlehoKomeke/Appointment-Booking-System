@@ -1,18 +1,19 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
   <title id="title">BranchBook at a glance</title>
-  <desc id="desc">BranchBook at a glance, read top to bottom. Upper band, what runs today with make up. A Customer, using a browser on a phone or laptop, reaches the app over HTTP, locally at 127.0.0.1:8080. Everything runs in one Spring Boot 4.1 jar, branchbook.jar, on Java 25. The main path runs from the Customer to the Web app, to the REST API, to PostgreSQL. The Web app is partly built: React 19 and TypeScript, served by the jar from one origin, so there is no CORS. Its placeholder page and typed API client are built; the booking screens are planned for M4. The Web app calls the REST API under /api/v1 with JSON whose types are generated from docs/openapi.yaml, and each request runs on a virtual thread. Built in the REST API: branches (M1), availability (M2), the OpenAPI 3.1 contract with Swagger UI (M2), and book and look up (M3). Planned: cancel (Tier 2). The REST API reaches PostgreSQL through JdbcClient and JPA, one transaction per use case. Modules: catalogue (built, M1), scheduling (built, M2), notification (partly built: it writes the confirmation SMS from M3, and the sending is planned for M5) and booking (built, M3). A flow from booking writes the appointment and its PENDING confirmation SMS row in one transaction. The shared module holds the packages problem, correlation, security, time, config and web. ArchitectureTest checks that the modules have no cycles and that only application code opens transactions. Background jobs: IdempotencyKeyPurgeJob (built) deletes expired idempotency keys every hour. HolidayCoverageCheck (built) runs at start-up and daily at 06:00 SAST. NotificationDispatcher (planned, M5) runs every 2 s, claims due rows from PostgreSQL (M5) and sends through SimulatedSmsGateway (planned, M5), which sends no real message. PostgreSQL 17 is migrated by Flyway with the btree_gist extension; it has 8 tables and 54 named constraints, and 2 exclusion constraints stop double booking. Lower band, how it ships, left to right: Laptop, where an opt-in pre-commit hook scans for secrets; GitHub, with the workflows ci, secret-scan, infra and deploy; the deploy workflow signs in to AWS through OpenID Connect, so no keys are stored; AWS us-east-1, where the BranchbookAccount stack holds the deploy role and the budget; AWS af-south-1, where the BranchbookRelease stack records the deployed commit; then, planned after M6, the hosted demo: the stacks BranchbookDns, BranchbookData and BranchbookApp for DNS, data and the app.</desc>
+  <desc id="desc">BranchBook at a glance, read top to bottom. Upper band, what runs today with make up. A Customer, using a browser on a phone or laptop, reaches the app over HTTP, locally at 127.0.0.1:8080. Everything runs in one Spring Boot 4.1 jar, branchbook.jar, on Java 25. The main path runs from the Customer to the Web app, to the REST API, to PostgreSQL. The Web app is built (M4): React 19 and TypeScript, served by the jar from one origin, so there is no CORS. Its booking screens call the API through a typed client and TanStack Query. The Web app calls the REST API under /api/v1 with JSON whose types are generated from docs/openapi.yaml, and each request runs on a virtual thread. Built in the REST API: branches (M1), availability (M2), the OpenAPI 3.1 contract with Swagger UI (M2), and book and look up (M3). Planned: cancel (Tier 2). The REST API reaches PostgreSQL through JdbcClient and JPA, one transaction per use case. Modules: catalogue (built, M1), scheduling (built, M2), notification (built, M5: it writes the confirmation SMS from M3 and sends it from M5) and booking (built, M3). A flow from booking writes the appointment and its PENDING confirmation SMS row in one transaction. The shared module holds the packages problem, correlation, security, time, config and web. ArchitectureTest checks that the modules have no cycles and that only application code opens transactions. Background jobs: IdempotencyKeyPurgeJob (built) deletes expired idempotency keys every hour. HolidayCoverageCheck (built) runs at start-up and daily at 06:00 SAST. NotificationDispatcher (built, M5) runs every 2 s, claims due rows from PostgreSQL and sends through SimulatedSmsGateway (built, M5), which sends no real message. PostgreSQL 17 is migrated by Flyway with the btree_gist extension; it has 8 tables and 54 named constraints, and 2 exclusion constraints stop double booking. Lower band, how it ships, left to right: Laptop, where an opt-in pre-commit hook scans for secrets; GitHub, with the workflows ci, secret-scan, infra and deploy; the deploy workflow signs in to AWS through OpenID Connect, so no keys are stored; AWS us-east-1, where the BranchbookAccount stack holds the deploy role and the budget; AWS af-south-1, where the BranchbookRelease stack records the deployed commit; then, planned after M6, the hosted demo: the stacks BranchbookDns, BranchbookData and BranchbookApp for DNS, data and the app.</desc>
   <!--
     Diagram id: system-at-a-glance
     Shown in: README.md (hero, under the fictional-bank notice); docs/architecture.md (2. System context and containers)
     Sources: api/pom.xml; api/src/main/resources/application.yml; api/src/main/java/za/co/fynbos/branchbook/
-      (catalogue, scheduling, booking, notification, shared); api/src/main/resources/db/migration/V1__enable_btree_gist.sql and
+      (catalogue, scheduling, booking, notification, shared;
+      notification/application/NotificationDispatcher.java, notification/infrastructure/SimulatedSmsGateway.java); api/src/main/resources/db/migration/V1__enable_btree_gist.sql and
       V2__schema.sql; api/src/test/java/za/co/fynbos/branchbook/ArchitectureTest.java; web/package.json;
-      web/src/App.tsx; web/src/api/client.ts; compose.yaml; Makefile; Dockerfile; docs/domain-rules.md (Status lines);
+      web/src/routes.tsx; web/src/api/client.ts; web/src/api/queries.ts; compose.yaml; Makefile; Dockerfile; docs/domain-rules.md (Status lines);
       docs/architecture.md; .githooks/pre-commit; .github/workflows/ci.yml, secret-scan.yml, infra.yml, deploy.yml;
       infra/bin/branchbook.ts; infra/lib/account-stack.ts; infra/lib/release-stack.ts; infra/README.md
-    Verified at 85cd726 (2026-10-26)
+    Verified at 3985f40 (2026-10-26)
     Conventions: docs/assets/diagrams/README.md
-    Planned elements carry class="planned" data-milestone="M4|M5|tier2|after-M6".
+    Planned elements carry class="planned" data-milestone="tier2|after-M6".
   -->
   <style>
 :root{--bg:#F2F5F2;--surface:#FFFFFF;--surface-2:#E8EEE9;--ink:#15201A;--ink-2:#46534C;--ink-3:#69766E;--line:#D3DCD5;--line-strong:#AEBDB3;--accent:#1E6B52;--accent-strong:#164F3D;--accent-soft:#DCEDE4;--bad:#A63650;--bad-soft:#F6E0E6;--warn:#775C10;--warn-soft:#F5ECCD}
@@ -70,16 +71,16 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <g id="node-web-app">
       <rect class="box" x="40.5" y="128.5" width="511" height="91" rx="8"/>
       <text class="t" x="52" y="150">Web app</text>
-      <rect class="pill-warn" x="128.5" y="136.5" width="87" height="19" rx="9.5"/>
-      <text class="pill-warn-t" x="172" y="150" text-anchor="middle">partly built</text>
+      <rect class="pill-built" x="128.5" y="136.5" width="75" height="19" rx="9.5"/>
+      <text class="pill-built-t" x="166" y="150" text-anchor="middle">built · M4</text>
       <text class="s" x="52" y="169">React 19 + TypeScript, served by the jar: one origin, no CORS</text>
       <rect class="box" x="52.5" y="180.5" width="247" height="27" rx="6"/>
-      <text class="s" x="64" y="199">placeholder page · typed API client</text>
-      <g id="chip-booking-screens" class="planned" data-milestone="M4">
-        <rect class="box-dash" x="308.5" y="180.5" width="231" height="27" rx="6"/>
+      <text class="s" x="64" y="199">typed API client · TanStack Query</text>
+      <g id="chip-booking-screens">
+        <rect class="box" x="308.5" y="180.5" width="231" height="27" rx="6"/>
         <text class="s" x="320" y="199">booking screens</text>
-        <rect class="pill-plan" x="436.5" y="184.5" width="99" height="19" rx="9.5"/>
-        <text class="pill-plan-t" x="486" y="198" text-anchor="middle">planned · M4</text>
+        <rect class="pill-built" x="460.5" y="184.5" width="75" height="19" rx="9.5"/>
+        <text class="pill-built-t" x="498" y="198" text-anchor="middle">built · M4</text>
       </g>
     </g>
     <g id="node-rest-api">
@@ -123,8 +124,8 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
       <g id="module-notification">
         <rect class="box" x="300.5" y="398.5" width="121" height="47" rx="6"/>
         <text class="t mono" x="312" y="416">notification</text>
-        <rect class="pill-warn" x="312.5" y="421.5" width="87" height="19" rx="9.5"/>
-        <text class="pill-warn-t" x="356" y="435" text-anchor="middle">partly built</text>
+        <rect class="pill-built" x="312.5" y="421.5" width="75" height="19" rx="9.5"/>
+        <text class="pill-built-t" x="350" y="435" text-anchor="middle">built · M5</text>
       </g>
       <g id="module-booking">
         <rect class="box" x="430.5" y="398.5" width="121" height="47" rx="6"/>
@@ -147,19 +148,19 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
         <text class="s" x="52" y="557">at start-up and daily</text>
         <text class="s" x="52" y="575">at 06:00 SAST</text>
       </g>
-      <g id="node-simulated-sms-gateway" class="planned" data-milestone="M5">
-        <rect class="box-dash" x="244.5" y="516.5" width="187" height="71" rx="8"/>
-        <text class="t mono tp" x="256" y="538">SimulatedSmsGateway</text>
+      <g id="node-simulated-sms-gateway">
+        <rect class="box" x="244.5" y="516.5" width="187" height="71" rx="8"/>
+        <text class="t mono" x="256" y="538">SimulatedSmsGateway</text>
         <text class="s" x="256" y="557">no real message is sent</text>
-        <rect class="pill-plan" x="256.5" y="563.5" width="99" height="19" rx="9.5"/>
-        <text class="pill-plan-t" x="306" y="577" text-anchor="middle">planned · M5</text>
+        <rect class="pill-built" x="256.5" y="563.5" width="75" height="19" rx="9.5"/>
+        <text class="pill-built-t" x="294" y="577" text-anchor="middle">built · M5</text>
       </g>
-      <g id="node-notification-dispatcher" class="planned" data-milestone="M5">
-        <rect class="box-dash" x="512.5" y="516.5" width="195" height="71" rx="8"/>
-        <text class="t mono tp" x="524" y="538">NotificationDispatcher</text>
+      <g id="node-notification-dispatcher">
+        <rect class="box" x="512.5" y="516.5" width="195" height="71" rx="8"/>
+        <text class="t mono" x="524" y="538">NotificationDispatcher</text>
         <text class="s" x="524" y="557">every 2 s</text>
-        <rect class="pill-plan" x="524.5" y="563.5" width="99" height="19" rx="9.5"/>
-        <text class="pill-plan-t" x="574" y="577" text-anchor="middle">planned · M5</text>
+        <rect class="pill-built" x="524.5" y="563.5" width="75" height="19" rx="9.5"/>
+        <text class="pill-built-t" x="562" y="577" text-anchor="middle">built · M5</text>
       </g>
     </g>
   </g>
@@ -192,13 +193,13 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <text class="l halo-2" x="664" y="414" text-anchor="middle">appointment + PENDING</text>
     <text class="l halo-2" x="664" y="438" text-anchor="middle">SMS row, one transaction</text>
   </g>
-  <g id="edge-claim-due-rows" class="planned" data-milestone="M5">
-    <path class="edge-dash" d="M610,516 V490 A6,6 0 0 1 616,484 H776" marker-end="url(#ah-dash)"/>
-    <text class="l halo-2" x="684" y="476" text-anchor="middle">claims due rows · M5</text>
+  <g id="edge-claim-due-rows">
+    <path class="edge" d="M610,516 V490 A6,6 0 0 1 616,484 H776" marker-end="url(#ah)"/>
+    <text class="l halo-2" x="684" y="476" text-anchor="middle">claims due rows</text>
   </g>
-  <g id="edge-send" class="planned" data-milestone="M5">
-    <path class="edge-dash" d="M512,552 H432" marker-end="url(#ah-dash)"/>
-    <text class="l halo-2" x="472" y="544" text-anchor="middle">send · M5</text>
+  <g id="edge-send">
+    <path class="edge" d="M512,552 H432" marker-end="url(#ah)"/>
+    <text class="l halo-2" x="472" y="544" text-anchor="middle">send</text>
   </g>
   <g id="band-how-it-ships">
     <text class="g" x="24" y="632">How it ships</text>

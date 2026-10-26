@@ -9,7 +9,7 @@ a simulated SMS confirmation that cannot be lost.
 > affiliated with Capitec Bank or any other bank. Every branch, person and phone number in it is made up, and no
 > real message is ever sent.
 
-![BranchBook at a glance: one Spring Boot jar serves the React app and the REST API over PostgreSQL 17. Built: branches, availability, the OpenAPI contract, and booking and lookup, with the confirmation SMS written in the booking transaction. Planned: the booking screens (M4), the dispatcher and the simulated SMS gateway (M5). Code ships through GitHub Actions and OpenID Connect to AWS, which holds a release record and the deploy role but no part of the application; hosting follows M6.](docs/assets/diagrams/system-at-a-glance.svg)
+![BranchBook at a glance: one Spring Boot jar serves the React app and the REST API over PostgreSQL 17. Built: the booking screens, branches, availability, the OpenAPI contract, booking and lookup with the confirmation SMS written in the booking transaction, and the dispatcher that sends it through a simulated SMS gateway. Planned: cancel (Tier 2). Code ships through GitHub Actions and OpenID Connect to AWS, which holds a release record and the deploy role but no part of the application; hosting follows M6.](docs/assets/diagrams/system-at-a-glance.svg)
 
 One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Solid parts are built; dashed parts are planned, with their milestone ([key](docs/assets/diagrams/README.md#key)).
 
@@ -17,7 +17,7 @@ One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Soli
 
 | Area | Today |
 |---|---|
-| Stage | Milestones M0 to M3 and M5 built: booking in one transaction that also writes the confirmation SMS, lookup with the reference and the last four digits, and a dispatcher that delivers the SMS through a simulated gateway, with the race proofs. The web app's screens (M4) are being built. |
+| Stage | Milestones M0 to M5 built: the web app's five-step booking flow, confirmation page, `/manage` and simulated inbox; booking in one transaction that also writes the confirmation SMS; lookup with the reference and the last four digits; and a dispatcher that delivers the SMS through a simulated gateway, with the race proofs. |
 | Design | The whole design, including planned work, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX); its header names the commit it was last checked against. The repository records what is built and wins where the two disagree. |
 | Run locally | `make up`, then open http://localhost:8080 |
 | Hosted demo | Not hosted yet. Planned after M6 in AWS Cape Town (af-south-1), defined in AWS CDK ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)). Today AWS holds the deploy role, a budget and a release record, and no part of the application ([infra/README.md](infra/README.md)). |
@@ -31,7 +31,7 @@ One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Soli
 | M1 | Schema and named constraints, reference data, public holidays, branch API, ArchUnit rules | Built |
 | M2 | `SlotCalendar`, the availability API, the committed OpenAPI contract | Built |
 | M3 | Booking transaction with idempotency, the PENDING confirmation SMS in the same transaction, lookup with the last four digits and its rate limit | Built |
-| M4 | Booking UI: the five-step flow, the confirmation page, read-only `/manage` | Next |
+| M4 | Booking UI: the five-step flow, the confirmation page, read-only `/manage`, the simulated inbox | Built |
 | M5 | The dispatcher and simulated SMS gateway, delivery status, the simulated inbox, the race and idempotency proofs | Built |
 | M6 | Tier 2 if time allows, UI states and accessibility, web and end-to-end tests, CI completion | Planned |
 | M7 | Final documentation pass, clean-clone rehearsal, release tag | Planned |
@@ -66,8 +66,8 @@ Every document, with its status: [docs/README.md](docs/README.md). Decisions: [d
 
 | Brief | What BranchBook does, and the tests that prove it |
 |---|---|
-| for customers | No login. A customer opens an appointment with its reference and the last four digits of the mobile number used to book: `GET /api/v1/appointments/{reference}` today, and the read-only `/manage` page in M4.<br>**Proof:** [`AppointmentApiIT.getWithWrongLast4Returns404NotForbidden`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven), [`AppointmentApiIT.sixthWrongLast4WithinHourReturns429`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven) |
-| to schedule | `POST /api/v1/appointments` books today; the web app's five-step flow (branch, service, date and time, your details, review) arrives in M4. Slots respect trading hours, public holidays, a two-hour lead time, a 30-day horizon and each service's capacity.<br>**Proof:** [`ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201`](api/src/test/java/za/co/fynbos/branchbook/booking/application/ConcurrentBookingIT.java) (proven), [`SlotCalendarTest.excludesSlotsStartingWithinTwoHoursOfNow`](api/src/test/java/za/co/fynbos/branchbook/scheduling/domain/SlotCalendarTest.java) (proven), [`AppointmentApiIT.postWhenSlotFullReturns409WithThreeAlternatives`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven) |
+| for customers | No login. A customer opens an appointment with its reference and the last four digits of the mobile number used to book: the read-only `/manage` page, over `GET /api/v1/appointments/{reference}`.<br>**Proof:** [`AppointmentApiIT.getWithWrongLast4Returns404NotForbidden`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven), [`AppointmentApiIT.sixthWrongLast4WithinHourReturns429`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven) |
+| to schedule | The web app's five-step flow (branch, service, date and time, your details, review) books through `POST /api/v1/appointments`. Slots respect trading hours, public holidays, a two-hour lead time, a 30-day horizon and each service's capacity.<br>**Proof:** [`ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201`](api/src/test/java/za/co/fynbos/branchbook/booking/application/ConcurrentBookingIT.java) (proven), [`SlotCalendarTest.excludesSlotsStartingWithinTwoHoursOfNow`](api/src/test/java/za/co/fynbos/branchbook/scheduling/domain/SlotCalendarTest.java) (proven), [`AppointmentApiIT.postWhenSlotFullReturns409WithThreeAlternatives`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven) |
 | branch appointments | Six fictional branches in six provinces, each with its own trading hours and per-service capacity, seeded by Flyway ([Reference data](#reference-data)).<br>**Proof:** [`SlotCalendarTest.saturdayFortyFiveMinuteLastStartIs1145`](api/src/test/java/za/co/fynbos/branchbook/scheduling/domain/SlotCalendarTest.java) (proven), [`PublicHolidayCalendarTest.sundayHoliday9Aug2026IsObservedOnMonday10Aug`](api/src/test/java/za/co/fynbos/branchbook/catalogue/domain/PublicHolidayCalendarTest.java) (proven) |
 | communicates a simulated confirmation | The booking transaction writes the SMS to an outbox table, so it commits with the booking or not at all. A dispatcher delivers it through a simulated gateway, retrying after 2, 4, 8 and 16 seconds, and the confirmation page shows its status live (M4).<br>**Proof:** [`ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically`](api/src/test/java/za/co/fynbos/branchbook/notification/application/ConfirmationOutboxIT.java) (proven), [`NotificationDispatcherIT.retriesWithBackoffThenMarksFailedAfterFiveAttempts`](api/src/test/java/za/co/fynbos/branchbook/notification/application/NotificationDispatcherIT.java) (proven), [`BookAppointmentIT.failureAfterTheSmsIsWrittenRollsTheSmsBackWithTheBooking`](api/src/test/java/za/co/fynbos/branchbook/booking/application/BookAppointmentIT.java) (proven) |
 | front end and back end | A React 19 app served by one Spring Boot jar, over PostgreSQL 17; `make up` starts both.<br>**Proof:** `book-appointment.spec.ts` (planned, M6); today CI's `stack` job starts the image with PostgreSQL and runs [smoke.sh](scripts/smoke.sh) |
@@ -84,10 +84,9 @@ Every document, with its status: [docs/README.md](docs/README.md). Decisions: [d
 - **A reference cannot be guessed or fished for.** *Built (BR-11, BR-13).* Eight random characters without
   look-alikes, plus the mobile number's last four digits; every mismatch is the same 404, and five wrong tries block
   the reference until an hour after the first.
-- **It is built for South Africa.** *Partly built.* Public holidays with the Sunday-to-Monday rule (BR-3) and
-  normalised mobile numbers (BR-19) are built; times are stored in UTC, sent with +02:00, and shown in SAST by the
-  web app from M4 (BR-20).
-- **It collects as little as possible.** *Built for the API; the form arrives in M4.* A name and a mobile number,
+- **It is built for South Africa.** *Built.* Public holidays with the Sunday-to-Monday rule (BR-3), normalised mobile
+  numbers (BR-19), and times stored in UTC, sent with +02:00 and shown in SAST on any device (BR-20).
+- **It collects as little as possible.** *Built.* A name and a mobile number, kept out of the booking's URL,
   and a test checks that neither reaches the application's log or PostgreSQL's (BR-19, [SECURITY.md](SECURITY.md)).
 
 Every rule, with its status and the test that proves it, is in [docs/domain-rules.md](docs/domain-rules.md).
@@ -95,7 +94,7 @@ Every rule, with its status and the test that proves it, is in [docs/domain-rule
 ## How it is built
 
 One Spring Boot jar serves the React app and the REST API, over PostgreSQL 17. It is packaged by capability
-(`catalogue`, `scheduling` and `booking` built, `notification` partly built), with up to four layers each (`api`,
+(`catalogue`, `scheduling`, `booking` and `notification`), with up to four layers each (`api`,
 `application`, `domain`, `infrastructure`). ArchUnit fails the build on a cycle between modules, a controller that
 reaches a database adapter, or a transaction opened outside the application layer ([docs/architecture.md](docs/architecture.md)).
 
@@ -117,14 +116,14 @@ reaches a database adapter, or a transaction opened outside the application laye
 |---|---|
 | Back end | Java 25 LTS, Spring Boot 4.1, Spring Data JPA, Flyway |
 | Database | PostgreSQL 17 with `btree_gist` |
-| Front end | React 19, TypeScript (strict), Vite; TanStack Query, react-hook-form with zod (planned, M4) |
+| Front end | React 19, TypeScript (strict), Vite; React Router, TanStack Query, react-hook-form with zod, CSS Modules |
 | API contract | OpenAPI 3.1, generated from the controllers by springdoc and committed; the web app's types are generated from it ([ADR-0005](docs/adr/0005-committed-openapi-contract.md)) |
 | Tests | JUnit, Testcontainers on real PostgreSQL, ArchUnit, Vitest; Playwright (planned, M6) |
 | Delivery | Docker Compose locally, GitHub Actions, AWS CDK (the deploy role and release record today; the hosted demo after M6) |
 
 ### Versions
 
-Current at M3. `api/pom.xml`, the lockfiles, `Dockerfile` and `compose.yaml` are authoritative; Dependabot proposes updates weekly.
+Current at M4. `api/pom.xml`, the lockfiles, `Dockerfile` and `compose.yaml` are authoritative; Dependabot proposes updates weekly.
 
 <details><summary>Every pinned version</summary>
 
@@ -141,7 +140,8 @@ Current at M3. `api/pom.xml`, the lockfiles, `Dockerfile` and `compose.yaml` are
 | springdoc-openapi | 3.2.0 | `api/pom.xml` |
 | Maven | 3.10.0, checksum-verified by the wrapper | `api/.mvn/wrapper/maven-wrapper.properties` |
 | Node.js | 24; 24.22.1 in the build image | `.nvmrc`, `Dockerfile` |
-| React | 19.3.1 | `web/package-lock.json` |
+| React, React Router | 19.3.1, 8.4.0 | `web/package-lock.json` |
+| TanStack Query, react-hook-form, zod | 5.104.2, 7.90.0, 4.6.6 | `web/package-lock.json` |
 | TypeScript | 6.0.3 | `web/` and `infra/` lockfiles |
 | Vite, Vitest | 8.3.5, 5.0.5 | `web/package-lock.json` |
 | openapi-typescript, openapi-fetch | 7.13.0, 0.17.0 | `web/package-lock.json` |
