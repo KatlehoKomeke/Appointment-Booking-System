@@ -5,10 +5,12 @@ The React app customers use to book and look up branch appointments, and to canc
 its own: the Dockerfile builds it and places the output inside the Spring Boot jar, which serves the app and the API
 from one origin ([docs/architecture.md, section 2](../docs/architecture.md#2-system-context-and-containers)).
 
-**Status (M4):** built to the [UI design](#ui-design): the five booking steps, the confirmation page with the SMS's
+**Status (M6):** built to the [UI design](#ui-design): the five booking steps, the confirmation page with the SMS's
 live delivery status, `/manage` and the simulated inbox, with the landing page, the privacy notice, a not-found page
 and an error page. Each page but the landing page loads when it is first opened, and the confirmation page offers to
-book the same service again. Playwright tests the flow end to end in a real browser ([e2e/](../e2e/README.md)).
+book the same service again. From Tier 2, the appointment page cancels an appointment until it starts, and the inbox
+retries a message the dispatcher gave up on; neither is drawn yet (see the end of the [UI design](#ui-design)).
+Playwright tests the flow end to end in a real browser ([e2e/](../e2e/README.md)).
 
 ## Stack
 
@@ -375,7 +377,13 @@ Drawing the screens changed these.
 | A banner naming the real bank the app is not affiliated with | A banner that names no real bank | The app never names a real bank; the root [README](../README.md) states the non-affiliation |
 | The wordmark "Fynbos Bank" | "BranchBook by Fynbos Bank", with a leaf mark and a Demo tag | The product's name comes first, as in the app shell today |
 
-Not designed yet: cancelling and retrying a message (both Tier 2) and, from Tier 1, asking for the last four digits when
+Not designed yet, though built from the designed parts: cancelling (Tier 2), a secondary "Cancel appointment" in
+`accent` under the appointment that opens an inline step naming it and saying the time is released and the step cannot
+be undone, with "Yes, cancel it" and "Keep my appointment" (Escape keeps it too), then a calm cancelled state: a
+"Cancelled" badge, when it was cancelled, the cancellation SMS's delivery status, and a confirmation it stopped shown
+as "Not sent" rather than failed; retrying a message (Tier 2), a compact Retry on a failed message in the inbox,
+named for that message, whose answer is said in a status region in its card; a reference the inbox redacts, shown as
+plain text rather than a link; and, from Tier 1, asking for the last four digits when
 the confirmation page is opened in a new tab; the `/manage` lock after five wrong tries, whose `429` can also carry
 `Retry-After: 1` while another lookup of the same reference is still being checked
 ([docs/errors.md](../docs/errors.md)); the duplicate and overlap alerts; the messages for a time too soon to book, a

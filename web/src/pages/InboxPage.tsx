@@ -4,20 +4,25 @@
  * number ending 0000.
  *
  * It is a demo operator view. The API switches it off in production, answering a plain 404, and the page then says
- * calmly that the inbox is not available here. Recipients are always redacted (`082 *** ****`). Retrying and
- * cancelling a message are Tier 2 and not designed, so there are no buttons for them.
+ * calmly that the inbox is not available here. Recipients are always redacted (`082 *** ****`), and the server
+ * may redact references too (`APT-****-****`), which are then plain text rather than links. A message the
+ * dispatcher gave up on, and that may still be sent, has a Retry button (Tier 2); the outcome is said in a polite
+ * status region in its card.
  *
  * @packageDocumentation
  */
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
-import { type InboxMessage, useInbox } from '../api/inbox';
+import { type InboxMessage, isLinkableReference, useInbox, useRetryMessage } from '../api/inbox';
+import { problemMessage } from '../api/problemCopy';
 import { plural } from '../lib/text';
 import { formatTime } from '../lib/time';
 import { Alert } from '../ui/Alert';
 import { Badge } from '../ui/Badge';
-import { ButtonLink } from '../ui/Button';
+import { Button, ButtonLink } from '../ui/Button';
 import { Card } from '../ui/Card';
+import { cx } from '../ui/cx';
 import { CheckIcon, CrossIcon, MessageIcon, PendingIcon } from '../ui/icons';
 import { PageHeading } from '../ui/PageHeading';
 import { ProblemAlert } from '../ui/ProblemAlert';
@@ -171,24 +176,94 @@ function metaLine(message: InboxMessage): string {
   return parts.join(' · ');
 }
 
+// The reference as a link to its appointment, or as plain text when the server has redacted it.
+function Reference({ reference }: { reference: string }) {
+  return isLinkableReference(reference) ? (
+    <Link to={`/appointments/${reference}`} className={styles.reference}>
+      {reference}
+    </Link>
+  ) : (
+    <span className={styles.reference}>{reference}</span>
+  );
+}
+
+// The Retry button's full name, which names the message, since every card has one: "Retry the confirmation SMS to
+// 082 *** ****, APT-H4WQ-8RZD". A redacted reference does not tell messages apart, so the time it was made is added.
+function retryName(message: InboxMessage): string {
+  const what = `${KIND[message.kind].toLowerCase()} ${CHANNEL[message.channel]}`;
+  const which = isLinkableReference(message.reference)
+    ? message.reference
+    : `${message.reference}, created ${formatTime(message.createdAt)} SAST`;
+  return `Retry the ${what} to ${message.recipientMasked}, ${which}`;
+}
+
+type RetryOutcome = { tone: 'done' | 'refused'; text: string } | undefined;
+
+// What a retry's answer means, in words. The API answers 200 either way, so the message itself says what happened.
+function retryOutcome(message: InboxMessage): RetryOutcome {
+  switch (message.status) {
+    case 'PENDING':
+      return { tone: 'done', text: 'Queued to send again. Its status updates here.' };
+    case 'SENT':
+      return { tone: 'done', text: 'This message has already been sent.' };
+    case 'FAILED':
+      return {
+        tone: 'refused',
+        text: message.retryable
+          ? 'This message was not queued again. Try again in a moment.'
+          : 'This message can no longer be retried: its appointment was cancelled or has already started.',
+      };
+  }
+}
+
 function MessageCard({ message }: { message: InboxMessage }) {
   const reason = failureReasonText(message);
   const title = `${KIND[message.kind]} ${CHANNEL[message.channel]}`;
+  const retry = useRetryMessage();
+  const [outcome, setOutcome] = useState<RetryOutcome>(undefined);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const pending = retry.isPending;
+  const offered = message.retryable;
+  // The region is on the page, empty, from when the button is, and stays while a retry is out or has answered, even
+  // once the answer has taken the button away, so what it says is announced.
+  const hasRegion = offered || !retry.isIdle || outcome !== undefined;
+
+  // When an answer takes the button away, its focus goes to the card's heading rather than being lost.
+  const wasOffered = useRef(offered);
+  useEffect(() => {
+    if (wasOffered.current && !offered && document.activeElement === document.body) {
+      heading.current?.focus();
+    }
+    wasOffered.current = offered;
+  }, [offered]);
+
+  const onRetry = () => {
+    if (pending) {
+      return;
+    }
+    setOutcome(undefined);
+    retry.mutate(message.id, {
+      onSuccess: (answer) => {
+        setOutcome(retryOutcome(answer));
+      },
+      onError: (error) => {
+        const failure = problemMessage(error);
+        setOutcome({ tone: 'refused', text: `${failure.title} ${failure.body ?? ''}`.trim() });
+      },
+    });
+  };
 
   return (
     <Card as="li" shadow className={styles.card}>
       <div className={styles.cardHead}>
-        <h2 className={styles.cardHeading}>
+        <h2 ref={heading} tabIndex={-1} className={styles.cardHeading}>
           <MessageIcon />
           {title}
         </h2>
         <StatusBadge status={message.status} />
       </div>
       <p className={styles.to}>
-        To {message.recipientMasked} ·{' '}
-        <Link to={`/appointments/${message.reference}`} className={styles.reference}>
-          {message.reference}
-        </Link>
+        To {message.recipientMasked} · <Reference reference={message.reference} />
       </p>
       {message.subject !== null && <p className={styles.subject}>{message.subject}</p>}
       <SmsBubble body={message.body} />
@@ -209,6 +284,31 @@ function MessageCard({ message }: { message: InboxMessage }) {
         </dl>
       )}
       <p className={styles.meta}>{metaLine(message)}</p>
+      {offered && (
+        <div className={styles.retry}>
+          <Button
+            variant="secondary"
+            size="compact"
+            aria-label={retryName(message)}
+            aria-disabled={pending || undefined}
+            onClick={onRetry}
+          >
+            Retry
+          </Button>
+        </div>
+      )}
+      {hasRegion && (
+        <p
+          role="status"
+          className={cx(
+            outcome === undefined && 'visually-hidden',
+            outcome?.tone === 'done' && styles.retryDone,
+            outcome?.tone === 'refused' && styles.retryRefused,
+          )}
+        >
+          {outcome?.text}
+        </p>
+      )}
     </Card>
   );
 }

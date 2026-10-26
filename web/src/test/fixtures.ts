@@ -22,7 +22,7 @@ import type {
 } from '../api/queries';
 import type { Problem } from '../api/client';
 import type { components } from '../api/schema';
-import { addDays, datesBetween, weekdayNumber } from '../lib/time';
+import { addDays, datesBetween, formatDateShort, formatTime, weekdayNumber } from '../lib/time';
 
 type OperatingHours = components['schemas']['OperatingHours'];
 type ClosedDate = components['schemas']['ClosedDate'];
@@ -436,6 +436,26 @@ export function confirmationSms(
   return `Appt confirmed: ${serviceName}, ${branchName}, ${when} SAST. Ref ${reference}. Bring ID + docs. Manage: http://localhost:8080/manage`;
 }
 
+/**
+ * The cancellation SMS's text, in the same shape as the confirmation. The API's template is not in this repository's
+ * web tests; the screens show whatever body the API sends, so only its shape matters here.
+ *
+ * @param service - the service code
+ * @param branch - the branch code
+ * @param when - the start, as "Tue 27 Oct 09:30"
+ * @param reference - the appointment's reference
+ */
+export function cancellationSms(
+  service: string,
+  branch: string,
+  when: string,
+  reference: string,
+): string {
+  const serviceName = SERVICE_SMS_NAME[service as ServiceCode];
+  const branchName = seedBranch(branch).smsName;
+  return `Appt cancelled: ${serviceName}, ${branchName}, ${when} SAST. Ref ${reference}. Book again: http://localhost:8080/book`;
+}
+
 /** The demo appointment's reference. */
 export const DEMO_REFERENCE = 'APT-7K3M-9Q2X';
 
@@ -503,6 +523,47 @@ export function appointment(overrides: Partial<Appointment> = {}): Appointment {
     service: { code, name, durationMinutes, documentsNeeded },
     customer: { firstName: 'Nomvula', lastName: 'Dlamini', mobileMasked: '082 *** 0101' },
     notifications: [notification()],
+    ...overrides,
+  };
+}
+
+/** When the fake API cancels an appointment: {@link NOW}. */
+export const CANCELLED_AT = NOW;
+
+/**
+ * An appointment as the API answers once it is cancelled: CANCELLED, no longer cancellable, its confirmation marked
+ * FAILED with SUPERSEDED_BY_CANCELLATION unless it was already sent (BR-24), and a cancellation SMS queued, PENDING.
+ *
+ * @param base - the appointment before it was cancelled; by default the demo booking with its SMS still PENDING
+ * @param overrides - fields to replace
+ */
+export function cancelledAppointment(
+  base: Appointment = appointment(),
+  overrides: Partial<Appointment> = {},
+): Appointment {
+  const when = `${formatDateShort(base.startsAt)} ${formatTime(base.startsAt)}`;
+  return {
+    ...base,
+    status: 'CANCELLED',
+    canCancel: false,
+    cancelledAt: CANCELLED_AT,
+    notifications: [
+      ...base.notifications.map((n) =>
+        n.kind === 'CONFIRMATION' && n.status !== 'SENT'
+          ? {
+              ...n,
+              status: 'FAILED' as const,
+              failureReason: 'SUPERSEDED_BY_CANCELLATION' as const,
+            }
+          : n,
+      ),
+      notification({
+        id: '31000000-0000-4000-8000-000000000001',
+        kind: 'CANCELLATION',
+        recipientMasked: base.customer.mobileMasked,
+        body: cancellationSms(base.service.code, base.branch.code, when, base.reference),
+      }),
+    ],
     ...overrides,
   };
 }

@@ -51,6 +51,25 @@
   width: 100%;
 }
 
+/*
+ * Destructive: accent, kept for destructive actions only. White on accent is 5.3:1, and accent's edge on white the
+ * same. Before the disabled rule, so a disabled destructive button looks like any other disabled button.
+ */
+.primary.destructive {
+  background: var(--colour-accent);
+}
+
+.primary.destructive:hover:not(:disabled, [aria-disabled='true']) {
+  background: var(--colour-accent-strong);
+}
+
+.secondary.destructive {
+  --button-colour: var(--colour-accent);
+  --button-fill: var(--colour-card);
+  --button-hover-fill: var(--colour-accent-tint);
+  --button-hover-colour: var(--colour-accent-strong);
+}
+
 .button:disabled,
 .button[aria-disabled='true'] {
   background: var(--colour-disabled);

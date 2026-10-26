@@ -238,7 +238,7 @@ describe('ReviewStep', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("We couldn't finish that just now");
     expect(alert).toHaveTextContent(
-      'Nothing was booked twice. Please try again in a moment. If it keeps happening, quote reference test-try_again.',
+      'Please try again in a moment. Trying again is safe: nothing happens twice. If it keeps happening, quote reference test-try_again.',
     );
     await user.click(screen.getByRole('button', { name: 'Confirm appointment' }));
     await waitFor(() => {

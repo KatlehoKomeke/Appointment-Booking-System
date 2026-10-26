@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { api, unwrap } from '../api/client';
-import { branchDetail, branches, ELECTION_DAY, TODAY } from './fixtures';
+import { branchDetail, branches, DEMO_REFERENCE, ELECTION_DAY, TODAY } from './fixtures';
 
 // The fake API is what every screen's tests stand on, so these check it against the seed data and the API's rules.
 describe('the fake API', () => {
@@ -108,5 +108,51 @@ describe('the fake API', () => {
       }),
     );
     expect(opened.reference).toBe(booked.reference);
+  });
+
+  it('cancels with the right digits, answers a repeat the same, and keeps the appointment cancelled', async () => {
+    const cancel = (reference: string, digits: string) =>
+      unwrap(
+        api.POST('/api/v1/appointments/{reference}/cancel', {
+          params: { path: { reference }, header: { 'X-Mobile-Last4': digits } },
+        }),
+      );
+
+    await expect(cancel(DEMO_REFERENCE, '12')).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    await expect(cancel(DEMO_REFERENCE, '9999')).rejects.toMatchObject({
+      code: 'APPOINTMENT_NOT_FOUND',
+    });
+    const cancelled = await cancel('apt7k3m9q2x', '0101');
+    expect(cancelled).toMatchObject({ status: 'CANCELLED', canCancel: false });
+    expect(await cancel(DEMO_REFERENCE, '0101')).toEqual(cancelled);
+    const opened = await unwrap(
+      api.GET('/api/v1/appointments/{reference}', {
+        params: { path: { reference: DEMO_REFERENCE }, header: { 'X-Mobile-Last4': '0101' } },
+      }),
+    );
+    expect(opened).toEqual(cancelled);
+  });
+
+  it('retries only a retryable message, and lists it as PENDING from then on', async () => {
+    const retry = (id: string) =>
+      unwrap(api.POST('/api/v1/messages/{id}/retry', { params: { path: { id } } }));
+
+    await expect(retry('not-a-uuid')).rejects.toMatchObject({ code: 'VALIDATION_FAILED' });
+    await expect(retry('40000000-0000-4000-8000-0000000000ff')).rejects.toMatchObject({
+      code: 'MESSAGE_NOT_FOUND',
+    });
+    expect(await retry('40000000-0000-4000-8000-000000000002')).toMatchObject({
+      status: 'SENT',
+      retryable: false,
+    });
+    expect(await retry('40000000-0000-4000-8000-000000000001')).toMatchObject({
+      status: 'PENDING',
+      attempts: 0,
+      retryable: false,
+    });
+    const { messages } = await unwrap(api.GET('/api/v1/messages'));
+    expect(messages.find((m) => m.id === '40000000-0000-4000-8000-000000000001')?.status).toBe(
+      'PENDING',
+    );
   });
 });

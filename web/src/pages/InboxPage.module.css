@@ -106,3 +106,22 @@
   color: var(--colour-text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+.retry {
+  display: flex;
+}
+
+.retryDone,
+.retryRefused {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  font-weight: var(--weight-semibold);
+}
+
+.retryDone {
+  color: var(--colour-primary-strong);
+}
+
+.retryRefused {
+  color: var(--colour-accent-strong);
+}
