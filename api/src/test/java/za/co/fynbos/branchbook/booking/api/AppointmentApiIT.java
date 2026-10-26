@@ -124,6 +124,22 @@ class AppointmentApiIT {
         .contains("for example 082 555 0101");
   }
 
+  /**
+   * ADR-0006: {@code branchbook.booking.demo-numbers-only} is off by default, so a number outside
+   * the published demo block books like any other. DemoNumbersOnlyIT shows it switched on.
+   */
+  @Test
+  void postWithANumberOutsideTheDemoBlockBooksWhileDemoNumbersOnlyIsOff() {
+    MvcTestResult result = book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0200"));
+
+    assertThat(result).hasStatus(HttpStatus.CREATED);
+    assertThat(result)
+        .bodyJson()
+        .extractingPath("$.customer.mobileMasked")
+        .isEqualTo("082 *** 0200");
+    assertThat(count("appointments")).isOne();
+  }
+
   /** BR-2: the end is the server's to compute, so a client cannot send it. */
   @Test
   void postWithUnknownJsonFieldReturns400ValidationFailed() throws Exception {

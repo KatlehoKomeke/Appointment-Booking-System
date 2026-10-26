@@ -10,6 +10,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.Locale;
 import org.jspecify.annotations.Nullable;
 import za.co.fynbos.branchbook.booking.application.BookAppointmentCommand;
+import za.co.fynbos.branchbook.booking.application.DemoNumberRequiredException;
 import za.co.fynbos.branchbook.booking.application.MobileNumberRequiredException;
 import za.co.fynbos.branchbook.booking.domain.CustomerName;
 import za.co.fynbos.branchbook.booking.domain.IdempotencyKey;
@@ -42,16 +43,24 @@ public record BookAppointmentRequest(
     @NotNull(message = "is required") @Valid CustomerRequest customer) {
 
   /**
-   * Turns the request into the booking's command.
+   * Turns the request into the booking's command. The number is checked here, before the booking
+   * transaction, so a refused number writes nothing: no appointment, no message and no idempotency
+   * key.
    *
    * @param key the parsed {@code Idempotency-Key}
+   * @param demoNumbersOnly whether this deployment takes only the published demo numbers
    * @return the command, every value in its normalised form
    * @throws MobileNumberRequiredException if the mobile number is missing or is not a South African
    *     mobile
+   * @throws DemoNumberRequiredException if only demo numbers are taken and this South African
+   *     mobile is not one
    */
-  BookAppointmentCommand toCommand(IdempotencyKey key) {
+  BookAppointmentCommand toCommand(IdempotencyKey key, boolean demoNumbersOnly) {
     MobileNumber mobile =
         MobileNumber.parse(customer.mobile()).orElseThrow(MobileNumberRequiredException::new);
+    if (demoNumbersOnly && !mobile.isPublishedDemoNumber()) {
+      throw new DemoNumberRequiredException();
+    }
     return new BookAppointmentCommand(
         key,
         branchCode.toUpperCase(Locale.ROOT),
@@ -74,7 +83,8 @@ public record BookAppointmentRequest(
    * @param firstName the first name
    * @param lastName the last name
    * @param mobile a South African mobile number in any of the usual formats; anything else is
-   *     {@code 422 MOBILE_NUMBER_REQUIRED}
+   *     {@code 422 MOBILE_NUMBER_REQUIRED}, and where only demo numbers are taken, one outside them
+   *     is {@code 422 DEMO_NUMBER_REQUIRED}
    */
   @Schema(name = "BookingCustomer")
   public record CustomerRequest(

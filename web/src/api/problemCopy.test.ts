@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest';
 
 import { problem } from '../test/fixtures';
 import { ApiProblem, type Problem } from './client';
-import { fieldErrors, messageForCode, type ProblemCode, problemMessage } from './problemCopy';
+import {
+  DEMO_NUMBER_COPY,
+  DEMO_NUMBER_FIELD_COPY,
+  fieldErrors,
+  messageForCode,
+  type ProblemCode,
+  problemMessage,
+} from './problemCopy';
 
 function thrown(body: Problem, headers: Record<string, string> = {}) {
   return new ApiProblem(new Response(null, { status: body.status, headers }), body);
@@ -15,6 +22,7 @@ const DOCUMENTED: Partial<Record<ProblemCode, string>> = {
   SERVICE_NOT_OFFERED_AT_BRANCH: "This branch doesn't offer that service.",
   SLOT_WITHIN_LEAD_TIME: 'That time is too soon. Please choose a later slot.',
   MOBILE_NUMBER_REQUIRED: 'We need a cellphone number to SMS your confirmation.',
+  DEMO_NUMBER_REQUIRED: 'Use a demo number',
   DUPLICATE_APPOINTMENT: 'You already have an upcoming appointment for this service.',
   CUSTOMER_OVERLAP: 'You already have an appointment at that time.',
   SLOT_FULL: 'That time was just taken',
@@ -35,6 +43,7 @@ const EVERY_CODE: ProblemCode[] = [
   'SLOT_OFF_GRID',
   'SLOT_WITHIN_LEAD_TIME',
   'MOBILE_NUMBER_REQUIRED',
+  'DEMO_NUMBER_REQUIRED',
   'IDEMPOTENCY_KEY_REUSED',
   'DUPLICATE_APPOINTMENT',
   'CUSTOMER_OVERLAP',
@@ -69,6 +78,13 @@ describe('problemMessage', () => {
       expect(message.title).toBe('Something went wrong on our side');
       expect(message.body).toContain('quote reference abc-123');
     }
+  });
+
+  it('names the demo numbers when a demo that takes only those is given another', () => {
+    expect(problemMessage(thrown(problem('DEMO_NUMBER_REQUIRED')))).toEqual({
+      title: 'Use a demo number',
+      body: 'This demo accepts only the numbers 082 555 0000 to 082 555 0199. Try 082 555 0101.',
+    });
   });
 
   it('treats a 5xx without a problem body as our failure, quoting the id from the header', () => {
@@ -124,6 +140,30 @@ describe('fieldErrors', () => {
       lastName: 'Enter your last name.',
       mobile: 'We need a cellphone number to SMS your confirmation.',
     });
+  });
+
+  it('words a number outside the demo numbers on the cellphone field, naming the demo numbers', () => {
+    expect(
+      fieldErrors(
+        thrown(
+          problem('DEMO_NUMBER_REQUIRED', {
+            errors: [
+              {
+                field: 'customer.mobile',
+                code: 'DEMO_NUMBER_REQUIRED',
+                message: 'not a demo number',
+              },
+            ],
+          }),
+        ),
+      ),
+    ).toEqual({ mobile: DEMO_NUMBER_FIELD_COPY });
+    expect(DEMO_NUMBER_COPY).toBe(
+      'This demo accepts only the numbers 082 555 0000 to 082 555 0199. Try 082 555 0101.',
+    );
+    expect(DEMO_NUMBER_FIELD_COPY).toBe(
+      'This demo accepts only 082 555 0000 to 082 555 0199, for example 082 555 0101.',
+    );
   });
 
   it('names the time and the lookup digits too, and nothing for an error without fields', () => {

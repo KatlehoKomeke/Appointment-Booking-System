@@ -12,6 +12,10 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Pattern;
 import java.net.URI;
 import org.jspecify.annotations.Nullable;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,6 +30,7 @@ import za.co.fynbos.branchbook.booking.application.BookingResult;
 import za.co.fynbos.branchbook.booking.application.IdempotencyKeyRequiredException;
 import za.co.fynbos.branchbook.booking.application.LookupAppointmentHandler;
 import za.co.fynbos.branchbook.booking.domain.IdempotencyKey;
+import za.co.fynbos.branchbook.shared.config.BookingProperties;
 import za.co.fynbos.branchbook.shared.web.OpenApiConfig;
 
 /** The appointment endpoints: booking one, and opening it again with its reference. */
@@ -40,12 +45,40 @@ class AppointmentController {
   private static final String UUID_PATTERN =
       "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
 
+  private static final Logger log = LoggerFactory.getLogger(AppointmentController.class);
+
   private final BookAppointmentHandler booking;
   private final LookupAppointmentHandler lookups;
 
-  AppointmentController(BookAppointmentHandler booking, LookupAppointmentHandler lookups) {
+  /** Whether this deployment takes only the published demo numbers (ADR-0006). */
+  private final boolean demoNumbersOnly;
+
+  AppointmentController(
+      BookAppointmentHandler booking,
+      LookupAppointmentHandler lookups,
+      BookingProperties bookingProperties) {
     this.booking = booking;
     this.lookups = lookups;
+    this.demoNumbersOnly = bookingProperties.demoNumbersOnly();
+  }
+
+  /**
+   * Says, once the application is ready, which numbers bookings take, so a deployment's start-up
+   * log shows whether {@code branchbook.booking.demo-numbers-only} is on. A hosted demo whose log
+   * says any mobile was started without {@code BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY}, and would
+   * store a real person's number (ADR-0006). The line names the setting, never a number.
+   */
+  @EventListener(ApplicationReadyEvent.class)
+  void reportWhichNumbersBookingsTake() {
+    if (demoNumbersOnly) {
+      log.info(
+          "Bookings take only the published demo numbers (branchbook.booking.demo-numbers-only is"
+              + " on).");
+    } else {
+      log.info(
+          "Bookings take any South African mobile number (branchbook.booking.demo-numbers-only is"
+              + " off).");
+    }
   }
 
   /**
@@ -108,8 +141,9 @@ class AppointmentController {
       description =
           "SERVICE_NOT_OFFERED_AT_BRANCH; DATE_OUTSIDE_BOOKING_WINDOW, SLOT_ON_CLOSED_DAY,"
               + " SLOT_OUTSIDE_HOURS, SLOT_OFF_GRID, SLOT_WITHIN_LEAD_TIME: the start is not a"
-              + " slot; MOBILE_NUMBER_REQUIRED: not a South African mobile; IDEMPOTENCY_KEY_REUSED:"
-              + " the key booked different details",
+              + " slot; MOBILE_NUMBER_REQUIRED: not a South African mobile; DEMO_NUMBER_REQUIRED:"
+              + " a demo that takes only its published demo numbers was sent another;"
+              + " IDEMPOTENCY_KEY_REUSED: the key booked different details",
       content =
           @Content(
               mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
@@ -128,7 +162,7 @@ class AppointmentController {
       @Valid @RequestBody BookAppointmentRequest request) {
     IdempotencyKey key =
         IdempotencyKey.parse(idempotencyKey).orElseThrow(IdempotencyKeyRequiredException::new);
-    BookingResult result = booking.handle(request.toCommand(key));
+    BookingResult result = booking.handle(request.toCommand(key, demoNumbersOnly));
     AppointmentResponse body = AppointmentResponse.from(result.appointment());
     ResponseEntity.BodyBuilder response =
         ResponseEntity.created(URI.create("/api/v1/appointments/" + body.reference()));

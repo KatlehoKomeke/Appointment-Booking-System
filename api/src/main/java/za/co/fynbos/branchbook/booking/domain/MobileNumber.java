@@ -35,6 +35,18 @@ public final class MobileNumber {
   private static final Pattern E164 = Pattern.compile(E164_PATTERN);
 
   /**
+   * The first number of the published demo block, 082 555 0000, which the simulated gateway always
+   * refuses so that a failed delivery can be shown.
+   */
+  private static final String FIRST_DEMO_NUMBER = "+27825550000";
+
+  /**
+   * The last number of the published demo block, 082 555 0199. The block's 0100 to 0199 are the
+   * numbers the demo's personas and scripts book with.
+   */
+  private static final String LAST_DEMO_NUMBER = "+27825550199";
+
+  /**
    * What a typed number may contain before libphonenumber reads it: digits and the punctuation
    * people use, up to 32 characters. This refuses letters, so a vanity number, a {@code tel:} link
    * or an {@code ext} never reaches the parser.
@@ -134,6 +146,20 @@ public final class MobileNumber {
    */
   public String last4() {
     return e164.substring(e164.length() - 4);
+  }
+
+  /**
+   * Tells whether this is one of the published demo numbers, 082 555 0000 to 082 555 0199. A public
+   * demo that takes only these can never be given a real person's number, so it never stores one
+   * and never sends one an SMS (ADR-0006).
+   *
+   * <p>Every stored number has the same twelve characters, so comparing the E.164 text compares the
+   * numbers.
+   *
+   * @return {@code true} if the number is in the published demo block
+   */
+  public boolean isPublishedDemoNumber() {
+    return e164.compareTo(FIRST_DEMO_NUMBER) >= 0 && e164.compareTo(LAST_DEMO_NUMBER) <= 0;
   }
 
   /** The national form: 0 and the nine digits after the country code. */

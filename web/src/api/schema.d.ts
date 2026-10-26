@@ -382,12 +382,12 @@ export interface components {
              * @description The stable error code, one of those in docs/errors.md. Absent only on HTTP-level failures the API never returns on purpose: 404 for a path it does not serve, 405, 406 and 415
              * @enum {string}
              */
-            code?: "VALIDATION_FAILED" | "IDEMPOTENCY_KEY_REQUIRED" | "BRANCH_NOT_FOUND" | "APPOINTMENT_NOT_FOUND" | "MESSAGE_NOT_FOUND" | "SERVICE_NOT_OFFERED_AT_BRANCH" | "DATE_OUTSIDE_BOOKING_WINDOW" | "SLOT_ON_CLOSED_DAY" | "SLOT_OUTSIDE_HOURS" | "SLOT_OFF_GRID" | "SLOT_WITHIN_LEAD_TIME" | "MOBILE_NUMBER_REQUIRED" | "IDEMPOTENCY_KEY_REUSED" | "DUPLICATE_APPOINTMENT" | "CUSTOMER_OVERLAP" | "SLOT_FULL" | "TOO_LATE_TO_CANCEL" | "LOOKUP_RATE_LIMITED" | "INTERNAL_ERROR" | "TRY_AGAIN";
+            code?: "VALIDATION_FAILED" | "IDEMPOTENCY_KEY_REQUIRED" | "BRANCH_NOT_FOUND" | "APPOINTMENT_NOT_FOUND" | "MESSAGE_NOT_FOUND" | "SERVICE_NOT_OFFERED_AT_BRANCH" | "DATE_OUTSIDE_BOOKING_WINDOW" | "SLOT_ON_CLOSED_DAY" | "SLOT_OUTSIDE_HOURS" | "SLOT_OFF_GRID" | "SLOT_WITHIN_LEAD_TIME" | "MOBILE_NUMBER_REQUIRED" | "DEMO_NUMBER_REQUIRED" | "IDEMPOTENCY_KEY_REUSED" | "DUPLICATE_APPOINTMENT" | "CUSTOMER_OVERLAP" | "SLOT_FULL" | "TOO_LATE_TO_CANCEL" | "LOOKUP_RATE_LIMITED" | "INTERNAL_ERROR" | "TRY_AGAIN";
             /** @description Matches the X-Correlation-Id header and the server logs */
             correlationId: string;
             /** @description A plain-language explanation; never quotes the request */
             detail?: string;
-            /** @description For VALIDATION_FAILED, MOBILE_NUMBER_REQUIRED and the slot codes: what is wrong with each field */
+            /** @description For VALIDATION_FAILED, MOBILE_NUMBER_REQUIRED, DEMO_NUMBER_REQUIRED and the slot codes: what is wrong with each field */
             errors?: {
                 /** @description The rule it broke, for example PATTERN */
                 code: string;
@@ -491,7 +491,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description SERVICE_NOT_OFFERED_AT_BRANCH; DATE_OUTSIDE_BOOKING_WINDOW, SLOT_ON_CLOSED_DAY, SLOT_OUTSIDE_HOURS, SLOT_OFF_GRID, SLOT_WITHIN_LEAD_TIME: the start is not a slot; MOBILE_NUMBER_REQUIRED: not a South African mobile; IDEMPOTENCY_KEY_REUSED: the key booked different details */
+            /** @description SERVICE_NOT_OFFERED_AT_BRANCH; DATE_OUTSIDE_BOOKING_WINDOW, SLOT_ON_CLOSED_DAY, SLOT_OUTSIDE_HOURS, SLOT_OFF_GRID, SLOT_WITHIN_LEAD_TIME: the start is not a slot; MOBILE_NUMBER_REQUIRED: not a South African mobile; DEMO_NUMBER_REQUIRED: a demo that takes only its published demo numbers was sent another; IDEMPOTENCY_KEY_REUSED: the key booked different details */
             422: {
                 headers: {
                     [name: string]: unknown;

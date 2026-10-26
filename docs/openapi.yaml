@@ -95,7 +95,9 @@ paths:
           description: "SERVICE_NOT_OFFERED_AT_BRANCH; DATE_OUTSIDE_BOOKING_WINDOW,\
             \ SLOT_ON_CLOSED_DAY, SLOT_OUTSIDE_HOURS, SLOT_OFF_GRID, SLOT_WITHIN_LEAD_TIME:\
             \ the start is not a slot; MOBILE_NUMBER_REQUIRED: not a South African\
-            \ mobile; IDEMPOTENCY_KEY_REUSED: the key booked different details"
+            \ mobile; DEMO_NUMBER_REQUIRED: a demo that takes only its published demo\
+            \ numbers was sent another; IDEMPOTENCY_KEY_REUSED: the key booked different\
+            \ details"
       summary: Book an appointment
       tags:
       - Appointments
@@ -867,6 +869,7 @@ components:
           - SLOT_OFF_GRID
           - SLOT_WITHIN_LEAD_TIME
           - MOBILE_NUMBER_REQUIRED
+          - DEMO_NUMBER_REQUIRED
           - IDEMPOTENCY_KEY_REUSED
           - DUPLICATE_APPOINTMENT
           - CUSTOMER_OVERLAP
@@ -883,8 +886,8 @@ components:
           description: A plain-language explanation; never quotes the request
         errors:
           type: array
-          description: "For VALIDATION_FAILED, MOBILE_NUMBER_REQUIRED and the slot\
-            \ codes: what is wrong with each field"
+          description: "For VALIDATION_FAILED, MOBILE_NUMBER_REQUIRED, DEMO_NUMBER_REQUIRED\
+            \ and the slot codes: what is wrong with each field"
           items:
             type: object
             properties:

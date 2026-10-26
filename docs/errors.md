@@ -58,7 +58,9 @@ One request yields exactly one code:
      field rule. Field-rule problems are listed in `errors[]` together. A body that cannot be read, or has an
      unknown field, stops before the rules are checked, so it reports only that one problem.
   2. `400 IDEMPOTENCY_KEY_REQUIRED`: the `Idempotency-Key` header is missing or not a UUID.
-  3. `422 MOBILE_NUMBER_REQUIRED`: the number is missing or not a South African mobile number.
+  3. `422 MOBILE_NUMBER_REQUIRED`: the number is missing or not a South African mobile number. Then, only where the
+     deployment takes only the published demo numbers, `422 DEMO_NUMBER_REQUIRED`: the number is a South African
+     mobile outside them.
   4. `422 IDEMPOTENCY_KEY_REUSED`, or a replay of the key's booking. Nothing after this step runs for a replay.
   5. `404 BRANCH_NOT_FOUND`, then `422 SERVICE_NOT_OFFERED_AT_BRANCH`.
   6. The one slot code, by the precedence above.
@@ -92,6 +94,7 @@ name such as `X-Mobile-Last4`, or the name of a path or query parameter such as 
 | `TYPE_MISMATCH` | a query parameter | It cannot be read as its type, such as a date. |
 | `MIN`, `MAX` | `limit` in a query | Below or above its range: 1 to 200 for the inbox. |
 | `MOBILE_NUMBER_REQUIRED` | `customer.mobile` | The same as the problem's code. |
+| `DEMO_NUMBER_REQUIRED` | `customer.mobile` | The same as the problem's code. |
 | a slot code | `startsAt` | The same as the problem's code: `SLOT_OFF_GRID`, for example. |
 
 A field problem's `message` is a short English hint, such as "must be 4 digits"; it never quotes the value sent.
@@ -121,6 +124,7 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 | `SLOT_OFF_GRID` | 422 | The start time is not on the service's slot grid. | The slot is not offered. |
 | `SLOT_WITHIN_LEAD_TIME` | 422 | The slot starts less than two hours from now; usually a page left open too long. | "That time is too soon. Please choose a later slot." |
 | `MOBILE_NUMBER_REQUIRED` | 422 | The number is missing or not a South African mobile number (for example a landline or a VoIP number). `errors[]` names `customer.mobile`. | "We need a cellphone number to SMS your confirmation." |
+| `DEMO_NUMBER_REQUIRED` | 422 | Only where the deployment takes only the published demo numbers (`branchbook.booking.demo-numbers-only`, which the hosted demo switches on): the number is a South African mobile outside 082 555 0000 to 0199. Decided with `MOBILE_NUMBER_REQUIRED`, before anything is written, so a real person's number is never stored or sent an SMS ([ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md)). `errors[]` names `customer.mobile`; the body never repeats the number. | "Use a demo number. This demo accepts only the numbers 082 555 0000 to 082 555 0199. Try 082 555 0101." On the cellphone field: "This demo accepts only 082 555 0000 to 082 555 0199, for example 082 555 0101." |
 | `IDEMPOTENCY_KEY_REUSED` | 422 | The same `Idempotency-Key` was sent with a different request body. | Nothing; the web app mints a new key when the details change. |
 | `DUPLICATE_APPOINTMENT` | 409 | This mobile already has an upcoming appointment for this service. The body names no reference, branch or time. | "You already have an upcoming appointment for this service." |
 | `CUSTOMER_OVERLAP` | 409 | This mobile already has an appointment at an overlapping time, at any branch. | "You already have an appointment at that time." |

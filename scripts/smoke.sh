@@ -12,6 +12,10 @@
 #
 # `make smoke` runs it after `make up`, and CI runs it against the stack that docker compose starts. It needs only
 # bash, curl and grep. It prints one line per check and exits non-zero if any check fails.
+#
+# EXPECT_DEMO_NUMBERS_ONLY=1 adds a check that the instance takes only the published demo numbers, as the hosted demo
+# must (ADR-0006, BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true), so a deployment that left the setting off fails its smoke
+# test instead of taking real numbers unnoticed.
 
 set -euo pipefail
 
@@ -86,11 +90,12 @@ availability_is_served() {
 }
 
 # Succeeds if a booking of Sandton's FICA update, sent with the given mobile number and Idempotency-Key (empty to leave
-# the header out), is refused with the given code. Both refusals come before the booking transaction, so nothing is
-# written. The number is from the published demo range.
+# the header out), is refused with the given code. It starts at the given start, or at 09:00 on Sandton's last bookable
+# date. Each refusal it is asked for comes before the booking transaction, so nothing is written.
 booking_refused_with() {
-  local mobile="$1" key="$2" code="$3" body
-  body="{\"branchCode\":\"SAN\",\"serviceCode\":\"FICA\",\"startsAt\":\"$(bookable_to SAN)T09:00:00+02:00\","
+  local mobile="$1" key="$2" code="$3" starts_at="${4:-}" body
+  [[ -n "$starts_at" ]] || starts_at="$(bookable_to SAN)T09:00:00+02:00"
+  body="{\"branchCode\":\"SAN\",\"serviceCode\":\"FICA\",\"startsAt\":\"$starts_at\","
   body+="\"customer\":{\"firstName\":\"Smoke\",\"lastName\":\"Test\",\"mobile\":\"$mobile\"}}"
   curl --silent --request POST --header 'Content-Type: application/json' ${key:+--header "Idempotency-Key: $key"} \
     --data "$body" "$base_url/api/v1/appointments" | grep --quiet --fixed-strings -- "\"code\":\"$code\""
@@ -126,6 +131,14 @@ check 'a booking without an Idempotency-Key is refused' \
   booking_refused_with '082 555 0199' '' IDEMPOTENCY_KEY_REQUIRED
 check 'a booking with a landline is refused' \
   booking_refused_with '021 555 0199' 2f1c7a4e-3b5d-4c6e-8f9a-0b1c2d3e4f5a MOBILE_NUMBER_REQUIRED
+# 082 555 0200 is the first number past the published demo numbers. The start is long past, so an instance with the
+# setting off refuses the booking too, for its date, inside a transaction that is rolled back: nothing is written either
+# way, and the check fails because the code is DATE_OUTSIDE_BOOKING_WINDOW.
+if [[ "${EXPECT_DEMO_NUMBERS_ONLY:-}" == 1 ]]; then
+  check 'a booking with a mobile outside the demo numbers is refused' \
+    booking_refused_with '082 555 0200' 6b0e3d2a-9c4f-4a7e-8d1b-2e5f7a9c0d3e DEMO_NUMBER_REQUIRED \
+    2000-01-03T09:00:00+02:00
+fi
 check 'a lookup without the last four digits is refused' \
   lookup_answers /api/v1/appointments/APT-7K3M-9Q2X '' VALIDATION_FAILED
 check 'a lookup of a reference that cannot exist is a 404' \

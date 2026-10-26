@@ -16,6 +16,9 @@ import org.springframework.validation.annotation.Validated;
  * @param lookupMaxFailures how many wrong lookups of one reference are answered before it is
  *     blocked (BR-13)
  * @param lookupWindow how long a reference stays blocked, counted from its first wrong lookup
+ * @param demoNumbersOnly whether a booking must use one of the published demo numbers, so a public
+ *     demo can never be given a real person's number (ADR-0006); off unless a deployment switches
+ *     it on
  */
 @Validated
 @ConfigurationProperties("branchbook.booking")
@@ -23,4 +26,5 @@ public record BookingProperties(
     @NotNull Duration leadTime,
     @NotNull Period horizon,
     @Positive int lookupMaxFailures,
-    @NotNull Duration lookupWindow) {}
+    @NotNull Duration lookupWindow,
+    boolean demoNumbersOnly) {}

@@ -316,6 +316,75 @@ describe('ReviewStep', () => {
 
   it.each([
     [
+      'MOBILE_NUMBER_REQUIRED',
+      'We need a cellphone number to SMS your confirmation.',
+      'We need a cellphone number to SMS your confirmation.',
+    ],
+    [
+      'DEMO_NUMBER_REQUIRED',
+      'Use a demo number',
+      'This demo accepts only 082 555 0000 to 082 555 0199, for example 082 555 0101.',
+    ],
+  ] as const)(
+    'sends %s back to the cellphone field on the details step',
+    async (code, title, fieldError) => {
+      const user = userEvent.setup();
+      server.use(
+        http.post(
+          BOOKINGS,
+          () =>
+            problemResponse(code, {
+              errors: [{ field: 'customer.mobile', code, message: 'a hint for developers' }],
+            }),
+          { once: true },
+        ),
+      );
+      const { router } = renderReview();
+
+      await user.click(await confirmButton());
+
+      expect(
+        await screen.findByRole('heading', { level: 1, name: 'Your details' }),
+      ).toBeInTheDocument();
+      expect(router.state.location.search).toContain('step=details');
+      expect(screen.getByRole('alert')).toHaveTextContent(title);
+      const mobile = screen.getByRole('textbox', { name: 'Cellphone number' });
+      expect(mobile).toHaveAttribute('aria-invalid', 'true');
+      expect(mobile).toHaveAccessibleDescription(
+        `We SMS your confirmation to this number, for example 082 555 0101. ${fieldError}`,
+      );
+      expect(screen.queryByText('a hint for developers')).not.toBeInTheDocument();
+    },
+  );
+
+  // A refusal of the number belongs on its field even when the body names no field, so the customer is never left on
+  // Review with "Something went wrong".
+  it.each([
+    ['MOBILE_NUMBER_REQUIRED', 'We need a cellphone number to SMS your confirmation.'],
+    [
+      'DEMO_NUMBER_REQUIRED',
+      'This demo accepts only 082 555 0000 to 082 555 0199, for example 082 555 0101.',
+    ],
+  ] as const)('sends %s without errors[] back to the cellphone field', async (code, fieldError) => {
+    const user = userEvent.setup();
+    server.use(http.post(BOOKINGS, () => problemResponse(code), { once: true }));
+    const { router } = renderReview();
+
+    await user.click(await confirmButton());
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Your details' }),
+    ).toBeInTheDocument();
+    expect(router.state.location.search).toContain('step=details');
+    const mobile = screen.getByRole('textbox', { name: 'Cellphone number' });
+    expect(mobile).toHaveAttribute('aria-invalid', 'true');
+    expect(mobile).toHaveAccessibleDescription(
+      `We SMS your confirmation to this number, for example 082 555 0101. ${fieldError}`,
+    );
+  });
+
+  it.each([
+    [
       'DUPLICATE_APPOINTMENT',
       'You already have an upcoming appointment for this service.',
       'Find your appointment',

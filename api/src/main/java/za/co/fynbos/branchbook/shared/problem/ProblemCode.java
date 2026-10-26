@@ -35,6 +35,11 @@ public enum ProblemCode {
   SLOT_WITHIN_LEAD_TIME(422, "That time is too soon"),
   /** The number is not a South African mobile number. */
   MOBILE_NUMBER_REQUIRED(422, "We need a cellphone number"),
+  /**
+   * The deployment takes only the published demo numbers, and the number is a South African mobile
+   * outside them.
+   */
+  DEMO_NUMBER_REQUIRED(422, "Use a demo number"),
   /** The same {@code Idempotency-Key} was sent with a different request body. */
   IDEMPOTENCY_KEY_REUSED(422, "Idempotency-Key reused with different details"),
   /** The mobile number already has an upcoming appointment for this service. */

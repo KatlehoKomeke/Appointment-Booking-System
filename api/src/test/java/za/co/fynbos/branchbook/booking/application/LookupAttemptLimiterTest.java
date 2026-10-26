@@ -28,7 +28,8 @@ class LookupAttemptLimiterTest {
 
   private final LookupAttemptLimiter limiter =
       new LookupAttemptLimiter(
-          new BookingProperties(Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1)));
+          new BookingProperties(
+              Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false));
 
   @Test
   void fifthFailureBlocksTheReferenceUntilAnHourAfterTheFirst() {
