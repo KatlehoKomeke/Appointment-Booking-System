@@ -99,7 +99,7 @@ The decision stands.
   redirects plain HTTP to HTTPS. The two stacks are in the CDK app when `BRANCHBOOK_HOSTED_DEMO=true`, which replaces
   `BRANCHBOOK_DEMO_GATE_PASSWORD`. With no gate, the application keeps real data out: only the published demo
   numbers, 082 555 0000 to 082 555 0199, may book, every booking is deleted after 48 hours, and the simulated gateway
-  sends nothing; the first two arrive with the next backend change, not merged yet. The simulated inbox is off
+  sends nothing; the first two are live since 058e6fd. The simulated inbox is off
   (`BRANCHBOOK_INBOX_ENABLED=false`), because with no sign-in it would list every booking's reference, and a demo
   number's last four digits are public ([infra/README.md](../../infra/README.md#the-hosted-demo)).
 
