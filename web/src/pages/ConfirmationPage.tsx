@@ -337,8 +337,8 @@ function SmsCard({ notification }: { notification: Notification }) {
               body={notification.body}
               meta={
                 notification.sentAt === null
-                  ? 'BRANCHBOOK · simulated'
-                  : `BRANCHBOOK · ${formatTime(notification.sentAt)} · simulated`
+                  ? 'BRANCHBOOK'
+                  : `BRANCHBOOK · ${formatTime(notification.sentAt)} SAST`
               }
             />
           </div>

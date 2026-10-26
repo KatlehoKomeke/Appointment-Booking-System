@@ -105,8 +105,9 @@ export function ManagePage() {
       </form>
 
       <p className={styles.note}>
-        Can&apos;t find your SMS? This demo sends no real messages: yours is in the{' '}
-        <Link to="/messages">simulated inbox</Link>.
+        Can&apos;t find your SMS? The demo numbers 082 555 0000 to 082 555 0199 are never texted, so
+        open your appointment here to read it, or see the{' '}
+        <Link to="/messages">simulated inbox</Link> on a local run.
       </p>
       <p className={styles.note}>
         After 5 wrong tries within an hour, lookups for that reference pause for up to an hour, even

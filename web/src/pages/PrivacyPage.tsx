@@ -19,12 +19,17 @@ const SECTIONS = [
   {
     id: 'privacy-collect',
     heading: 'What we collect',
-    body: 'Your first name, last name and cellphone number. All three are needed to book, so none is optional. We never ask for your ID number. On the hosted demo, book with a demo number, 082 555 0000 to 082 555 0199, and a made-up name; other visitors cannot see your booking.',
+    body: 'Your first name, last name and cellphone number. All three are needed to book, so none is optional. We never ask for your ID number. Use only your own cellphone number: the hosted demo texts it. The demo numbers 082 555 0000 to 082 555 0199 are never texted, and other visitors cannot see your booking.',
   },
   {
     id: 'privacy-why',
     heading: 'Why',
-    body: 'To schedule, confirm and manage this appointment, and for nothing else. We never use your details for marketing.',
+    body: 'To schedule, confirm and manage this appointment, and for nothing else: we text your confirmation, and a cancellation if you cancel. We never use your details for marketing.',
+  },
+  {
+    id: 'privacy-operator',
+    heading: 'Who sends the SMS',
+    body: 'On the hosted demo, AWS End User Messaging, in Cape Town, sends each SMS for us as our operator. It receives only your number and the message, and keeps its own record of each message under its service terms. At most five messages a day go to one number.',
   },
   {
     id: 'privacy-retention',
