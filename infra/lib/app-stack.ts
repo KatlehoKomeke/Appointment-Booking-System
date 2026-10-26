@@ -7,18 +7,30 @@ import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as targets from 'aws-cdk-lib/aws-route53-targets';
+import * as smsvoice from 'aws-cdk-lib/aws-smsvoice';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
 import { DATABASE_NAME } from './data-stack';
+import { MMS_COUNTRIES, SMS_COUNTRIES, VOICE_COUNTRIES } from './sms-countries';
 
-/** Bookings one address may make in {@link BOOKING_RATE_WINDOW_SECONDS} before WAF refuses more (ADR-0006). */
-export const BOOKING_RATE_LIMIT = 30;
+/**
+ * Bookings and cancellations one address may make in {@link BOOKING_RATE_WINDOW_SECONDS} before WAF refuses more
+ * (ADR-0006). Each sends a real SMS on the hosted demo, so the limit is WAF's lowest.
+ */
+export const BOOKING_RATE_LIMIT = 10;
+
+/** The most SMS the app sends to one number in a day, whatever the bookings (SECURITY.md, known risks). */
+export const SMS_RECIPIENT_DAILY_CAP = 5;
+
+/** The only country the hosted demo texts: the app accepts South African mobile numbers alone (BR-19). */
+export const SMS_COUNTRY = 'ZA';
 
 /** The window of the booking rate limit: five minutes. */
 export const BOOKING_RATE_WINDOW_SECONDS = 300;
@@ -44,6 +56,12 @@ export interface AppStackProps extends StackProps {
 
   /** Where the three alarms are e-mailed, if anywhere. Personal data, so supplied at deploy time only. */
   readonly alertEmail?: string;
+
+  /**
+   * When true, the app asks AWS to check every send without sending it (SendTextMessage's DryRun), which proves the
+   * task's permission on a real deployment before anyone is texted. Off by default.
+   */
+  readonly smsDryRun?: boolean;
 }
 
 /**
@@ -51,13 +69,14 @@ export interface AppStackProps extends StackProps {
  * (ADR-0006). A reviewer's request takes this path:
  *
  * 1. Route 53 answers the domain with the load balancer's address.
- * 2. AWS WAF, attached to the load balancer, blocks `/actuator` (403), allows 30 bookings per address in five
- *    minutes, and applies AWS's managed rules for known bad inputs and addresses. There is no sign-in: anyone with
- *    the address can try the demo, which accepts only the published demo numbers and deletes every booking after
- *    48 hours.
+ * 2. AWS WAF, attached to the load balancer, blocks `/actuator` (403), allows 10 bookings or cancellations per
+ *    address in five minutes, and applies AWS's managed rules for known bad inputs and addresses. There is no
+ *    sign-in: anyone with the address can try the demo. It texts the confirmation for real, to South African numbers
+ *    only, at most five a day to one number, and deletes every booking after 48 hours.
  * 3. The load balancer ends HTTPS with an ACM certificate, redirects plain HTTP to it, and health-checks `/readyz`.
  * 4. One ARM64 Fargate task (0.5 vCPU, 1 GB) serves the request on port 8080. It accepts traffic only from the load
- *    balancer, and runs in a public subnet so it reaches ECR and Secrets Manager without a NAT gateway.
+ *    balancer, and runs in a public subnet so it reaches ECR, Secrets Manager and AWS End User Messaging without a
+ *    NAT gateway. It may send SMS through the stack's protect configuration and nothing else.
  * 5. The task reaches RDS on port 5432 over TLS, directly, with no RDS Proxy; the database accepts only the task.
  *
  * The image is built from the repository's Dockerfile for ARM64 when the stack is deployed. Application logs are
@@ -105,6 +124,29 @@ export class AppStack extends Stack {
       throw new Error('the database must have generated credentials');
     }
     const endpoint = props.database.dbInstanceEndpointAddress;
+
+    // Real SMS go through AWS End User Messaging. A protect configuration allows every country by default, so it
+    // blocks each one AWS lists except South Africa, and every voice and MMS destination; the app names it on every
+    // send, so it holds whatever the account's default is.
+    const smsProtection = new smsvoice.CfnProtectConfiguration(this, 'SmsProtection', {
+      countryRuleSet: {
+        sms: SMS_COUNTRIES.map((countryCode) => ({
+          countryCode,
+          protectStatus: countryCode === SMS_COUNTRY ? 'ALLOW' : 'BLOCK',
+        })),
+        voice: VOICE_COUNTRIES.map((countryCode) => ({ countryCode, protectStatus: 'BLOCK' })),
+        mms: MMS_COUNTRIES.map((countryCode) => ({ countryCode, protectStatus: 'BLOCK' })),
+      },
+    });
+    // SendTextMessage is authorised against the resources a send names; with no origination identity (AWS's shared
+    // route) that is the protect configuration alone, so the task may send through this one and nothing else.
+    task.addToTaskRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['sms-voice:SendTextMessage'],
+        resources: [smsProtection.attrArn],
+      }),
+    );
+
     task.addContainer('App', {
       image: ecs.ContainerImage.fromAsset(path.join(__dirname, '..', '..'), {
         file: 'Dockerfile',
@@ -124,9 +166,16 @@ export class AppStack extends Stack {
         // Every booking, with its name and number, is deleted 48 hours after it was made, as the privacy notice
         // says of the hosted demo.
         BRANCHBOOK_RETENTION_ENABLED: 'true',
-        // Only the published demo numbers, 082 555 0000 to 082 555 0199, may book, so the public demo never holds a
-        // real person's number.
-        BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY: 'true',
+        // Real SMS through AWS End User Messaging, in Cape Town, to South African numbers only (the protect
+        // configuration above). The published demo numbers, 082 555 0000 to 082 555 0199, stay on the simulated
+        // gateway, so a reader trying the README's examples never texts a stranger.
+        BRANCHBOOK_SMS_GATEWAY: 'aws',
+        BRANCHBOOK_SMS_AWS_REGION: this.region,
+        BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID: smsProtection.attrProtectConfigurationId,
+        BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP: String(SMS_RECIPIENT_DAILY_CAP),
+        BRANCHBOOK_SMS_AWS_DRY_RUN: String(props.smsDryRun === true),
+        // Only health and info are served, so the metrics stay private even if a request slipped past WAF's block.
+        MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: 'health,info',
         // The load balancer ends HTTPS; trusting its X-Forwarded-* headers makes the app see the request as secure,
         // so links and HSTS are right. Tomcat trusts them only from private addresses, which the load balancer has.
         SERVER_FORWARD_HEADERS_STRATEGY: 'native',
@@ -223,12 +272,17 @@ export class AppStack extends Stack {
       metricName,
       sampledRequestsEnabled: true,
     });
+    // The path is decoded and lowercased before it is compared, so /%61ctuator or /ACTUATOR cannot slip past a rule
+    // on its way to an application that decodes it.
     const startsWith = (search: string): wafv2.CfnWebACL.StatementProperty => ({
       byteMatchStatement: {
         fieldToMatch: { uriPath: {} },
         positionalConstraint: 'STARTS_WITH',
         searchString: search,
-        textTransformations: [{ priority: 0, type: 'NONE' }],
+        textTransformations: [
+          { priority: 0, type: 'URL_DECODE' },
+          { priority: 1, type: 'LOWERCASE' },
+        ],
       },
     });
     const managed = (name: string, priority: number): wafv2.CfnWebACL.RuleProperty => ({
