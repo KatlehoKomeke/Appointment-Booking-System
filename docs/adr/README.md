@@ -3,8 +3,10 @@
 Each significant decision is recorded in its own file, numbered in the order it was made. A record states the
 context, the decision, the alternatives that were rejected and why, and the consequences we accept.
 
-Records are never edited to change a decision. A new record supersedes the old one, and the old one's status is
-updated to point at it.
+A record's decision is never edited. A fact that changes later, such as a name, a count or what is built so far, is
+recorded as a dated entry in a `## Notes` section at the end of the record, so the decision still reads as it was
+accepted. A changed decision gets a new record that supersedes the old one, and the old one's status is updated to
+point at it.
 
 | ADR | Decision | Status |
 |---|---|---|

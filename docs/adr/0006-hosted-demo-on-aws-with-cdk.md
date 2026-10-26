@@ -43,3 +43,17 @@ the public internet must not collect real personal information.
 - The hosted demo ships only after the core plan is green and never blocks the submission.
 - Two things are verified on the first deploy: the PostgreSQL 17 minor version that Cape Town offers, and the
   browser's sign-in prompt behind the load balancer. An in-app basic-auth filter is the fallback.
+
+## Notes
+
+**2026-10-26.** Facts that have changed since the record was accepted.
+
+- **Five stacks, not four.** [ADR-0007](0007-continuous-deployment-from-main.md) added `BranchbookRelease`, which
+  records the deployed commit. `BranchbookAccount` and `BranchbookRelease` are built and deployed;
+  `BranchbookDns`, `BranchbookData` and `BranchbookApp` come after M6
+  ([infra/bin/branchbook.ts](../../infra/bin/branchbook.ts)).
+- **Not every stack is in Cape Town.** `BranchbookAccount` is in `us-east-1`: IAM is global, AWS Budgets lives
+  there, and the stack holds no customer data, so the data-residency decision is unaffected
+  ([infra/README.md](../../infra/README.md#what-exists-today)).
+- **The budget alarm already exists,** in `BranchbookAccount`. The teardown date will be recorded in
+  [infra/README.md](../../infra/README.md) when the app stacks are first deployed.

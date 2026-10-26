@@ -1,0 +1,182 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 768" width="960" height="768" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
+  <title id="title">One push to main, measured</title>
+  <desc id="desc">Gantt chart of one push to main, measured on the push of c5feafe on 25 October 2026 from the GitHub Actions API. Time runs left to right, in seconds after GitHub created the runs at 12:40:13Z; jobs run top to bottom, grouped by workflow. Workflow ci (ci.yml, on push to main). Job web runs from 2 to 27 s (25 s): check:api, lint, typecheck, format:check, test in UTC and in New York, build. Job stack runs from 2 to 62 s (60 s): docker compose up --build --wait, scripts/smoke.sh, then a check that the logs hold no credentials. Job api runs from 3 to 100 s (97 s): ./mvnw verify with the unit tests, the ArchUnit rules, the integration tests on PostgreSQL 17 and the contract check, then the unit and API tests again in New York, then scripts/check-test-refs.sh. Workflow deploy (deploy.yml, on push to main) has no link to ci and does not wait for it. Its job test runs from 2 to 27 s (25 s): lint, tsc and jest on the CDK app. The main path, needs: test, runs from the end of test to the start of job deploy, which runs from 30 to 87 s (57 s). deploy is the only job in this push with AWS access, in af-south-1: environment aws-demo, an OIDC sign-in with no stored keys, cdk deploy BranchbookRelease, then it verifies /branchbook/release. Workflow secret-scan (secret-scan.yml, on every push). Job gitleaks runs from 3 to 11 s (8 s) and scans the full history. Workflow infra (infra.yml, only when infra/** or infra.yml changes). Job test-and-synth did not run: this push changed nothing under infra/. All six jobs that ran passed. deploy was done at 12:41:40Z and ci at 12:41:53Z. Gap: deploy finished 13 s before ci. It waits for its own test job, never for ci.</desc>
+  <!--
+    Diagram id: push-timeline
+    Shown in: docs/delivery.md (One push, measured)
+    Sources: .github/workflows/ci.yml, .github/workflows/deploy.yml, .github/workflows/secret-scan.yml,
+      .github/workflows/infra.yml, .github/workflows/aws-connection-check.yml (run by hand, so not in a push),
+      web/package.json, infra/package.json, api/pom.xml,
+      api/src/test/java/za/co/fynbos/branchbook/ArchitectureTest.java,
+      api/src/test/java/za/co/fynbos/branchbook/shared/web/OpenApiContractIT.java,
+      api/src/test/java/za/co/fynbos/branchbook/support/TestcontainersConfiguration.java;
+      GitHub Actions API, runs 40194135208 (ci), 40194135199 (deploy) and 40194135188 (secret-scan):
+        gh api "repos/KatlehoKomeke/Appointment-Booking-System/actions/runs?head_sha=$(git rev-parse c5feafe)"
+          -q '.workflow_runs[] | {name, id, created_at, updated_at, conclusion}'
+        gh api repos/KatlehoKomeke/Appointment-Booking-System/actions/runs/RUN/jobs
+          -q '.jobs[] | {name, started_at, completed_at, conclusion}'
+      (-q is the short form of gh's jq option, spelled out here because an XML comment cannot hold a double
+      hyphen: each call prints only the fields named, never an account ID.)
+      Offsets are seconds after the runs' created_at, 12:40:13Z. Every job concluded success. No infra run:
+      git diff ef8a729 c5feafe touches nothing under infra/ or .github/workflows/infra.yml.
+    Measured on the push of c5feafe, 25 October 2026: a dated measurement; re-measure rather than edit
+    Verified at 85cd726 (2026-10-26)
+    Conventions: docs/assets/diagrams/README.md
+    Planned elements carry class="planned" data-milestone (this diagram has none)
+  -->
+  <style>
+:root{--bg:#F2F5F2;--surface:#FFFFFF;--surface-2:#E8EEE9;--ink:#15201A;--ink-2:#46534C;--ink-3:#69766E;--line:#D3DCD5;--line-strong:#AEBDB3;--accent:#1E6B52;--accent-strong:#164F3D;--accent-soft:#DCEDE4;--bad:#A63650;--bad-soft:#F6E0E6;--warn:#775C10;--warn-soft:#F5ECCD}
+@media (prefers-color-scheme:dark){:root{--bg:#0D1310;--surface:#141C18;--surface-2:#1A2520;--ink:#E2EAE5;--ink-2:#A9B6AE;--ink-3:#85938B;--line:#28352F;--line-strong:#3E4F46;--accent:#62C29A;--accent-strong:#8AD8B5;--accent-soft:#16332A;--bad:#EC8CA3;--bad-soft:#3A1C25;--warn:#E3C266;--warn-soft:#342B12}}
+.card{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.box{fill:var(--surface);stroke:var(--line-strong);stroke-width:1.2}
+.box-ok{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+.box-soft{fill:var(--surface-2);stroke:var(--line-strong);stroke-width:1}
+.box-dash{fill:none;stroke:var(--ink-3);stroke-width:1.2;stroke-dasharray:5 4}
+.box-warn{fill:var(--warn-soft);stroke:var(--warn);stroke-width:1.5}
+.box-bad{fill:var(--bad-soft);stroke:var(--bad);stroke-width:1.5}
+.edge{stroke:var(--ink-2);stroke-width:1.4;fill:none}
+.edge-acc{stroke:var(--accent);stroke-width:2.2;fill:none}
+.edge-dash{stroke:var(--ink-3);stroke-width:1.3;stroke-dasharray:5 4;fill:none}
+.edge-bad{stroke:var(--bad);stroke-width:1.6;fill:none}
+.probe{stroke:var(--ink-3);stroke-width:1.2;stroke-dasharray:1.5 3;fill:none}
+.grid{stroke:var(--line);stroke-width:1}
+.ah{fill:var(--ink-2)}.ah-acc{fill:var(--accent)}.ah-dash{fill:var(--ink-3)}.ah-bad{fill:var(--bad)}
+text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+.t{fill:var(--ink);font-size:14px;font-weight:600}
+.s{fill:var(--ink-2);font-size:13px}
+.l{fill:var(--ink-2);font-size:12.5px}
+.g{fill:var(--ink-2);font-size:12px;font-weight:600;letter-spacing:.04em}
+.tp{fill:var(--ink-2)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+.t.mono{font-size:13px}.s.mono,.l.mono{font-size:12px}
+.halo{paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+.halo-2{paint-order:stroke;stroke:var(--surface-2);stroke-width:4px;stroke-linejoin:round}
+.pill-built{fill:var(--accent-soft)}.pill-built-t{fill:var(--accent-strong);font-size:12px;font-weight:600}
+.pill-plan{fill:var(--surface);stroke:var(--ink-3);stroke-width:1;stroke-dasharray:3 2}.pill-plan-t{fill:var(--ink-2);font-size:12px;font-weight:600}
+.pill-warn{fill:var(--warn-soft)}.pill-warn-t{fill:var(--warn);font-size:12px;font-weight:600}
+.pill-bad{fill:var(--bad-soft)}.pill-bad-t{fill:var(--bad);font-size:12px;font-weight:600}
+.badge{fill:var(--accent)}.badge-t{fill:var(--surface);font-size:12px;font-weight:700}
+.aws-compute{fill:#ED7100}.aws-db{fill:#C925D1}.aws-net{fill:#8C4FFF}.aws-sec{fill:#DD344C}.aws-mgmt{fill:#E7157B}.aws-store{fill:#7AA116}
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah" d="M0,0 L8,4 L0,8 z"/></marker>
+    <marker id="ah-acc" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-acc" d="M0,0 L8,4 L0,8 z"/></marker>
+    <marker id="ah-dash" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-dash" d="M0,0 L8,4 L0,8 z"/></marker>
+    <marker id="ah-bad" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-bad" d="M0,0 L8,4 L0,8 z"/></marker>
+  </defs>
+  <rect class="card" x="0.5" y="0.5" width="959" height="767" rx="16"/>
+  <g id="header">
+    <text class="t" x="24" y="36">Measured on the push of <tspan class="t mono">c5feafe</tspan>, 25 October 2026</text>
+    <text class="s" x="24" y="56">Each bar runs from a job's start to its end, in seconds after GitHub created the runs at 12:40:13Z. All six jobs passed.</text>
+  </g>
+  <g id="lanes">
+    <rect class="box-soft" x="24.5" y="100.5" width="911" height="194" rx="12"/>
+    <rect class="box-soft" x="24.5" y="310.5" width="911" height="146" rx="12"/>
+    <rect class="box-soft" x="24.5" y="472.5" width="911" height="80" rx="12"/>
+    <rect class="box-soft" x="24.5" y="568.5" width="911" height="62" rx="12"/>
+  </g>
+  <g id="axis-seconds">
+    <text class="g" x="40" y="88">workflow / job</text>
+    <line class="grid" x1="236.5" y1="96" x2="236.5" y2="630"/>
+    <line class="grid" x1="296.5" y1="96" x2="296.5" y2="630"/>
+    <line class="grid" x1="356.5" y1="96" x2="356.5" y2="630"/>
+    <line class="grid" x1="416.5" y1="96" x2="416.5" y2="630"/>
+    <line class="grid" x1="476.5" y1="96" x2="476.5" y2="630"/>
+    <line class="grid" x1="536.5" y1="96" x2="536.5" y2="630"/>
+    <line class="grid" x1="596.5" y1="96" x2="596.5" y2="630"/>
+    <line class="grid" x1="656.5" y1="96" x2="656.5" y2="630"/>
+    <line class="grid" x1="716.5" y1="96" x2="716.5" y2="630"/>
+    <line class="grid" x1="776.5" y1="96" x2="776.5" y2="630"/>
+    <line class="grid" x1="836.5" y1="96" x2="836.5" y2="630"/>
+    <text class="l" x="236.5" y="88" text-anchor="middle">0</text>
+    <text class="l" x="296.5" y="88" text-anchor="middle">10</text>
+    <text class="l" x="356.5" y="88" text-anchor="middle">20</text>
+    <text class="l" x="416.5" y="88" text-anchor="middle">30</text>
+    <text class="l" x="476.5" y="88" text-anchor="middle">40</text>
+    <text class="l" x="536.5" y="88" text-anchor="middle">50</text>
+    <text class="l" x="596.5" y="88" text-anchor="middle">60</text>
+    <text class="l" x="656.5" y="88" text-anchor="middle">70</text>
+    <text class="l" x="716.5" y="88" text-anchor="middle">80</text>
+    <text class="l" x="776.5" y="88" text-anchor="middle">90</text>
+    <text class="l" x="836.5" y="88" text-anchor="middle">100 s</text>
+  </g>
+  <g id="workflow-ci">
+    <text class="g halo-2" x="40" y="122"><tspan class="mono">ci.yml</tspan> · on push to main</text>
+    <text class="t mono" x="40" y="148">ci / web</text>
+    <rect class="box" x="248.5" y="134.5" width="150" height="18" rx="4"/>
+    <text class="t halo-2" x="406" y="148">25 s</text>
+    <text class="s halo-2" x="248" y="168"><tspan class="s mono">check:api</tspan> · <tspan class="s mono">lint</tspan> · <tspan class="s mono">typecheck</tspan> · <tspan class="s mono">format:check</tspan> · <tspan class="s mono">test</tspan> in UTC and New York · <tspan class="s mono">build</tspan></text>
+    <text class="t mono" x="40" y="196">ci / stack</text>
+    <rect class="box" x="248.5" y="182.5" width="360" height="18" rx="4"/>
+    <text class="t halo-2" x="616" y="196">60 s</text>
+    <text class="s halo-2" x="248" y="216"><tspan class="s mono">docker compose up --build --wait</tspan> · <tspan class="s mono">scripts/smoke.sh</tspan> · no credentials in the logs</text>
+    <text class="t mono" x="40" y="244">ci / api</text>
+    <rect class="box" x="254.5" y="230.5" width="582" height="18" rx="4"/>
+    <text class="t halo-2" x="844" y="244">97 s</text>
+    <text class="s halo-2" x="248" y="264"><tspan class="s mono">./mvnw verify</tspan>: unit tests, ArchUnit, ITs on PostgreSQL 17, contract</text>
+    <text class="s halo-2" x="248" y="282">unit and API tests again in New York · <tspan class="s mono">scripts/check-test-refs.sh</tspan></text>
+  </g>
+  <g id="workflow-deploy">
+    <text class="g halo-2" x="40" y="332"><tspan class="mono">deploy.yml</tspan> · on push to main</text>
+    <rect class="pill-warn" x="296" y="318" width="208" height="20" rx="10"/>
+    <text class="pill-warn-t" x="400" y="332" text-anchor="middle">no link: does not wait for ci</text>
+    <text class="t mono" x="40" y="358">deploy / test</text>
+    <rect class="box" x="248.5" y="344.5" width="150" height="18" rx="4"/>
+    <text class="t halo-2" x="406" y="358">25 s</text>
+    <text class="s halo-2" x="248" y="378"><tspan class="s mono">lint</tspan> · <tspan class="s mono">tsc</tspan> · <tspan class="s mono">jest</tspan></text>
+    <text class="t mono" x="40" y="406">deploy / deploy</text>
+    <rect class="box" x="40.5" y="416.5" width="152" height="24" rx="6"/>
+    <rect class="aws-mgmt" x="44.5" y="420.5" width="4" height="16"/>
+    <text class="s" x="58" y="433">AWS · <tspan class="s mono">af-south-1</tspan></text>
+    <rect class="box-ok" x="416.5" y="392.5" width="342" height="18" rx="4"/>
+    <text class="t halo-2" x="766" y="406">57 s</text>
+    <text class="s halo-2" x="248" y="426">environment <tspan class="s mono">aws-demo</tspan> · OIDC sign-in, no stored keys</text>
+    <text class="s halo-2" x="248" y="444"><tspan class="s mono">cdk deploy BranchbookRelease</tspan> · verify <tspan class="s mono">/branchbook/release</tspan></text>
+  </g>
+  <g id="edge-needs-test">
+    <path class="edge-acc" d="M392,362.5 V395.5 Q392,401.5 398,401.5 H416" marker-end="url(#ah-acc)"/>
+    <text class="l mono halo-2" x="384" y="406" text-anchor="end">needs: test</text>
+  </g>
+  <g id="workflow-secret-scan">
+    <text class="g halo-2" x="40" y="494"><tspan class="mono">secret-scan.yml</tspan> · on every push</text>
+    <text class="t mono" x="40" y="520">secret-scan / gitleaks</text>
+    <rect class="box" x="254.5" y="506.5" width="48" height="18" rx="4"/>
+    <text class="t halo-2" x="310" y="520">8 s</text>
+    <text class="s halo-2" x="248" y="540"><tspan class="s mono">gitleaks</tspan> scans the full history (<tspan class="s mono">fetch-depth: 0</tspan>)</text>
+  </g>
+  <g id="workflow-infra">
+    <text class="g halo-2" x="40" y="590"><tspan class="mono">infra.yml</tspan> · only when <tspan class="mono">infra/**</tspan> or <tspan class="mono">infra.yml</tspan> changes</text>
+    <text class="t mono" x="40" y="616">infra / test-and-synth</text>
+    <text class="s halo-2" x="248" y="616">did not run: this push changed nothing under <tspan class="s mono">infra/</tspan></text>
+  </g>
+  <g id="marker-deploy-done">
+    <line class="edge-acc" x1="758.5" y1="411" x2="758.5" y2="674"/>
+    <text class="s" x="750" y="652" text-anchor="end"><tspan class="s mono">deploy</tspan> done</text>
+    <text class="t" x="750" y="670" text-anchor="end">12:41:40Z</text>
+  </g>
+  <g id="marker-ci-done">
+    <line class="edge" x1="836.5" y1="249" x2="836.5" y2="674"/>
+    <text class="s" x="845" y="652"><tspan class="s mono">ci</tspan> done</text>
+    <text class="t" x="845" y="670">12:41:53Z</text>
+  </g>
+  <g id="gap-13-s">
+    <path class="edge" d="M760,660.5 H835" marker-start="url(#ah)" marker-end="url(#ah)"/>
+    <text class="l" x="797.5" y="652" text-anchor="middle">13 s</text>
+  </g>
+  <g id="note-deploy-does-not-wait">
+    <line class="probe" x1="758.5" y1="676" x2="758.5" y2="690"/>
+    <line class="probe" x1="836.5" y1="676" x2="836.5" y2="690"/>
+    <path class="box-warn" d="M608.5,690.5 H925.5 L935.5,700.5 V736.5 A8,8 0 0 1 927.5,744.5 H608.5 A8,8 0 0 1 600.5,736.5 V698.5 A8,8 0 0 1 608.5,690.5 Z"/>
+    <path class="box-warn" d="M925.5,690.5 V700.5 H935.5 Z"/>
+    <text class="t" x="616" y="713">Gap: <tspan class="t mono">deploy</tspan> finished 13 s before <tspan class="t mono">ci</tspan>.</text>
+    <text class="s" x="616" y="731">It waits for its own <tspan class="s mono">test</tspan> job, never for <tspan class="s mono">ci</tspan>.</text>
+  </g>
+  <g id="legend">
+    <rect class="box" x="24.5" y="733.5" width="23" height="13" rx="3"/>
+    <text class="tp" x="56" y="744" font-size="12">Built</text>
+    <path class="edge-acc" d="M107,739.5 H131"/>
+    <text class="tp" x="139" y="744" font-size="12">Main path</text>
+    <rect class="box-warn" x="220.5" y="733.5" width="23" height="13" rx="3"/>
+    <text class="tp" x="252" y="744" font-size="12">Gap or caveat</text>
+  </g>
+</svg>

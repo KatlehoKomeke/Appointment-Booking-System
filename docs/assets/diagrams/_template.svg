@@ -1,0 +1,307 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
+  <title id="title">Diagram key</title>
+  <desc id="desc">The key to every diagram in this repository, read top to bottom. Nodes and status: a solid box is built; a box with a green fill and outline is the one highlighted built node a diagram may have; a solid box with the warn pill 'partly built' is partly built, and its missing part is a dashed chip that names its milestone, here 'planned · M4'; a dashed box with a dashed pill such as 'planned · M5' is planned and names its milestone. A red box is an outcome that a guard refuses. A plain note with a folded corner is a note, joined to its subject by a dotted leader; a yellow folded note is a gap or caveat, and its text starts 'Gap:' or 'Caveat:'. A green numbered circle is a step that matches the numbered list beside the image, and the letter A marks the administrator path. Groups, frames and shapes: a grey rounded panel is a group, lane or Region, and also a compose project or a workflow card; a box with a green header band is an AWS CloudFormation stack, the band holding the stack name in monospace, here BranchbookRelease; a dashed frame with no band and the pill 'planned · after M6' is a planned stack, here BranchbookApp; a box with a thin accent band along its top and a badge is the long form of a gate, the badge naming what enforces it, here 'GitHub setting'. A fully rounded pill is a person or a browser, a cylinder is a database, a box with a folded corner is a workflow or file, and a small diamond on an edge is a gate, with its label beside it. Edges: a thin grey arrow is a flow, its label set on a halo; a heavier green arrow is the main path, one per diagram; a dashed arrow is a planned flow, and its label names its milestone; a red arrow crossed at its midpoint is refused or not allowed, and its label starts 'not allowed:' or 'refused:'; a dotted line is a health check or a note leader; where two lines cross, the lower one breaks. Pills: 'built · M2', 'partly built', 'planned · M5', 'planned · after M6', the warn pill 'reports; blocks nothing' and the red pill 'refused'. AWS service tiles carry a 4 px stripe whose colour names the category: orange for compute and containers, magenta for database, violet for networking, red for security, pink for management and integration, and green for storage and cost. The legend row at the foot of each diagram lists only the entries that diagram uses, always in this order: Built, Partly built, Planned with milestone, Main path, Planned flow, Refused or not allowed, Health check, Gap or caveat; the access diagram adds the enforcement badges IAM, GitHub setting, and Code and workflow; AWS diagrams end with AWS category and the stripes they use, each named.</desc>
+  <!--
+    Diagram id: diagram-key
+    Shown in: docs/assets/diagrams/README.md (Key)
+    Sources: docs/assets/diagrams/README.md (the visual language this key draws)
+    Verified at 85cd726 (2026-10-26)
+    Conventions: docs/assets/diagrams/README.md
+    Planned elements carry class="planned" and data-milestone="M3|M4|M5|M6|M7|tier2|after-M6".
+
+    This file is the master copy of the shared style and defs blocks. To start a diagram, copy this file,
+    keep both blocks byte-identical, replace everything between the card and the legend, and keep only the
+    legend entries the new diagram uses, in their fixed order. The samples here carry class="planned" and
+    data-milestone only to show the pattern, so milestone searches exclude this file.
+  -->
+  <style>
+:root{--bg:#F2F5F2;--surface:#FFFFFF;--surface-2:#E8EEE9;--ink:#15201A;--ink-2:#46534C;--ink-3:#69766E;--line:#D3DCD5;--line-strong:#AEBDB3;--accent:#1E6B52;--accent-strong:#164F3D;--accent-soft:#DCEDE4;--bad:#A63650;--bad-soft:#F6E0E6;--warn:#775C10;--warn-soft:#F5ECCD}
+@media (prefers-color-scheme:dark){:root{--bg:#0D1310;--surface:#141C18;--surface-2:#1A2520;--ink:#E2EAE5;--ink-2:#A9B6AE;--ink-3:#85938B;--line:#28352F;--line-strong:#3E4F46;--accent:#62C29A;--accent-strong:#8AD8B5;--accent-soft:#16332A;--bad:#EC8CA3;--bad-soft:#3A1C25;--warn:#E3C266;--warn-soft:#342B12}}
+.card{fill:var(--bg);stroke:var(--line);stroke-width:1}
+.box{fill:var(--surface);stroke:var(--line-strong);stroke-width:1.2}
+.box-ok{fill:var(--accent-soft);stroke:var(--accent);stroke-width:1.5}
+.box-soft{fill:var(--surface-2);stroke:var(--line-strong);stroke-width:1}
+.box-dash{fill:none;stroke:var(--ink-3);stroke-width:1.2;stroke-dasharray:5 4}
+.box-warn{fill:var(--warn-soft);stroke:var(--warn);stroke-width:1.5}
+.box-bad{fill:var(--bad-soft);stroke:var(--bad);stroke-width:1.5}
+.edge{stroke:var(--ink-2);stroke-width:1.4;fill:none}
+.edge-acc{stroke:var(--accent);stroke-width:2.2;fill:none}
+.edge-dash{stroke:var(--ink-3);stroke-width:1.3;stroke-dasharray:5 4;fill:none}
+.edge-bad{stroke:var(--bad);stroke-width:1.6;fill:none}
+.probe{stroke:var(--ink-3);stroke-width:1.2;stroke-dasharray:1.5 3;fill:none}
+.grid{stroke:var(--line);stroke-width:1}
+.ah{fill:var(--ink-2)}.ah-acc{fill:var(--accent)}.ah-dash{fill:var(--ink-3)}.ah-bad{fill:var(--bad)}
+text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
+.t{fill:var(--ink);font-size:14px;font-weight:600}
+.s{fill:var(--ink-2);font-size:13px}
+.l{fill:var(--ink-2);font-size:12.5px}
+.g{fill:var(--ink-2);font-size:12px;font-weight:600;letter-spacing:.04em}
+.tp{fill:var(--ink-2)}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace}
+.t.mono{font-size:13px}.s.mono,.l.mono{font-size:12px}
+.halo{paint-order:stroke;stroke:var(--bg);stroke-width:4px;stroke-linejoin:round}
+.halo-2{paint-order:stroke;stroke:var(--surface-2);stroke-width:4px;stroke-linejoin:round}
+.pill-built{fill:var(--accent-soft)}.pill-built-t{fill:var(--accent-strong);font-size:12px;font-weight:600}
+.pill-plan{fill:var(--surface);stroke:var(--ink-3);stroke-width:1;stroke-dasharray:3 2}.pill-plan-t{fill:var(--ink-2);font-size:12px;font-weight:600}
+.pill-warn{fill:var(--warn-soft)}.pill-warn-t{fill:var(--warn);font-size:12px;font-weight:600}
+.pill-bad{fill:var(--bad-soft)}.pill-bad-t{fill:var(--bad);font-size:12px;font-weight:600}
+.badge{fill:var(--accent)}.badge-t{fill:var(--surface);font-size:12px;font-weight:700}
+.aws-compute{fill:#ED7100}.aws-db{fill:#C925D1}.aws-net{fill:#8C4FFF}.aws-sec{fill:#DD344C}.aws-mgmt{fill:#E7157B}.aws-store{fill:#7AA116}
+  </style>
+  <defs>
+    <marker id="ah" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah" d="M0,0 L8,4 L0,8 z"/></marker>
+    <marker id="ah-acc" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-acc" d="M0,0 L8,4 L0,8 z"/></marker>
+    <marker id="ah-dash" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-dash" d="M0,0 L8,4 L0,8 z"/></marker>
+    <marker id="ah-bad" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-bad" d="M0,0 L8,4 L0,8 z"/></marker>
+  </defs>
+  <rect class="card" x="0.5" y="0.5" width="959" height="799" rx="16"/>
+  <g id="nodes-and-status">
+    <text class="g" x="24" y="40">Nodes and status</text>
+    <g id="sample-built">
+      <rect class="box" x="24.5" y="52.5" width="215" height="63" rx="8"/>
+      <text class="t" x="36" y="76">Built</text>
+      <text class="s" x="36" y="95">solid outline</text>
+    </g>
+    <g id="sample-built-highlighted">
+      <rect class="box-ok" x="256.5" y="52.5" width="215" height="63" rx="8"/>
+      <text class="t" x="268" y="76">Built, highlighted</text>
+      <text class="s" x="268" y="95">one per diagram</text>
+    </g>
+    <g id="sample-partly-built">
+      <rect class="box" x="488.5" y="52.5" width="215" height="63" rx="8"/>
+      <text class="t" x="500" y="76">Partly built</text>
+      <rect class="pill-warn" x="608" y="62" width="84" height="20" rx="10"/>
+      <text class="pill-warn-t" x="650" y="76" text-anchor="middle">partly built</text>
+      <g id="sample-missing-part" class="planned" data-milestone="M4">
+        <rect class="pill-plan" x="500.5" y="86.5" width="95" height="19" rx="9.5"/>
+        <text class="pill-plan-t" x="548" y="100" text-anchor="middle">planned · M4</text>
+      </g>
+    </g>
+    <g id="sample-planned" class="planned" data-milestone="M5">
+      <rect class="box-dash" x="720.5" y="52.5" width="215" height="63" rx="8"/>
+      <text class="t tp" x="732" y="76">Planned</text>
+      <rect class="pill-plan" x="732.5" y="86.5" width="95" height="19" rx="9.5"/>
+      <text class="pill-plan-t" x="780" y="100" text-anchor="middle">planned · M5</text>
+    </g>
+    <g id="sample-refused-outcome">
+      <rect class="box-bad" x="24.5" y="132.5" width="215" height="63" rx="8"/>
+      <text class="t" x="36" y="156">Refused outcome</text>
+      <text class="s" x="36" y="175">what a guard rejects</text>
+    </g>
+    <g id="sample-note">
+      <path class="box" d="M264.5,132.5 H461.5 L471.5,142.5 V187.5 A8,8 0 0 1 463.5,195.5 H264.5 A8,8 0 0 1 256.5,187.5 V140.5 A8,8 0 0 1 264.5,132.5 Z"/>
+      <path class="box" d="M461.5,132.5 V142.5 H471.5 Z"/>
+      <text class="t" x="268" y="156">Note</text>
+      <text class="s" x="268" y="175">joined by a dotted leader</text>
+    </g>
+    <g id="sample-gap-note">
+      <path class="box-warn" d="M496.5,132.5 H693.5 L703.5,142.5 V187.5 A8,8 0 0 1 695.5,195.5 H496.5 A8,8 0 0 1 488.5,187.5 V140.5 A8,8 0 0 1 496.5,132.5 Z"/>
+      <path class="box-warn" d="M693.5,132.5 V142.5 H703.5 Z"/>
+      <text class="t" x="500" y="156">Gap or caveat</text>
+      <text class="s" x="500" y="175">starts ‘Gap:’ or ‘Caveat:’</text>
+    </g>
+    <g id="sample-step-badges">
+      <circle class="badge" cx="730" cy="152" r="10"/>
+      <text class="badge-t" x="730" y="156" text-anchor="middle">1</text>
+      <text class="tp" x="748" y="156" font-size="12">Step in the numbered list</text>
+      <circle class="badge" cx="730" cy="176" r="10"/>
+      <text class="badge-t" x="730" y="180" text-anchor="middle">A</text>
+      <text class="tp" x="748" y="180" font-size="12">The administrator path</text>
+    </g>
+  </g>
+  <g id="groups-frames-and-shapes">
+    <text class="g" x="24" y="228">Groups, frames and shapes</text>
+    <g id="sample-group">
+      <rect class="box-soft" x="24.5" y="240.5" width="215" height="87" rx="12"/>
+      <text class="g" x="40" y="262">Group, lane or Region</text>
+      <text class="s" x="40" y="292">also a compose project</text>
+      <text class="s" x="40" y="310">or a workflow card</text>
+    </g>
+    <g id="sample-stack-frame">
+      <rect class="box" x="256.5" y="240.5" width="215" height="87" rx="8"/>
+      <path class="pill-built" d="M257.1,268.5 V248.5 A7.4,7.4 0 0 1 264.5,241.1 H463.5 A7.4,7.4 0 0 1 470.9,248.5 V268.5 Z"/>
+      <text class="t mono" x="268" y="259">BranchbookRelease</text>
+      <text class="s" x="268" y="292">CloudFormation stack</text>
+      <text class="s" x="268" y="310">the band holds its name</text>
+    </g>
+    <g id="sample-planned-frame" class="planned" data-milestone="after-M6">
+      <rect class="box-dash" x="488.5" y="240.5" width="215" height="87" rx="8"/>
+      <text class="t mono tp" x="500" y="262">BranchbookApp</text>
+      <rect class="pill-plan" x="500.5" y="272.5" width="131" height="19" rx="9.5"/>
+      <text class="pill-plan-t" x="566" y="286" text-anchor="middle">planned · after M6</text>
+      <text class="s" x="500" y="310">planned frame: no band</text>
+    </g>
+    <g id="sample-gate-long-form">
+      <rect class="box" x="720.5" y="240.5" width="215" height="87" rx="8"/>
+      <path class="badge" d="M721.5,243.5 A8.6,8.6 0 0 1 728.5,239.9 H927.5 A8.6,8.6 0 0 1 934.5,243.5 Z"/>
+      <text class="t" x="732" y="262">Gate, long form</text>
+      <rect class="box-soft" x="732.5" y="272.5" width="107" height="19" rx="9.5"/>
+      <text class="pill-plan-t" x="786" y="286" text-anchor="middle">GitHub setting</text>
+      <text class="s" x="732" y="310">badge: who enforces it</text>
+    </g>
+    <g id="sample-actor">
+      <rect class="box" x="24.5" y="344.5" width="191" height="39" rx="19.5"/>
+      <text class="t" x="120" y="369" text-anchor="middle">Person or browser</text>
+    </g>
+    <g id="sample-database">
+      <path class="box" d="M256.5,350.5 V377.5 A71.5,6 0 0 0 399.5,377.5 V350.5"/>
+      <ellipse class="box" cx="328" cy="350.5" rx="71.5" ry="6"/>
+      <text class="t" x="328" y="374" text-anchor="middle">Database</text>
+    </g>
+    <g id="sample-file">
+      <path class="box" d="M496.5,344.5 H662.5 L672.5,354.5 V375.5 A8,8 0 0 1 664.5,383.5 H496.5 A8,8 0 0 1 488.5,375.5 V352.5 A8,8 0 0 1 496.5,344.5 Z"/>
+      <path class="box" d="M662.5,344.5 V354.5 H672.5 Z"/>
+      <text class="t" x="500" y="369">Workflow or file</text>
+    </g>
+    <g id="sample-gate">
+      <path class="edge" d="M720,364.5 H821"/>
+      <path class="edge" d="M821,364.5 L828,357.5 L835,364.5 L828,371.5 Z"/>
+      <path class="edge" d="M835,364.5 H936" marker-end="url(#ah)"/>
+      <text class="l halo" x="828" y="350" text-anchor="middle">Gate</text>
+    </g>
+  </g>
+  <g id="edges">
+    <text class="g" x="24" y="416">Edges</text>
+    <g id="sample-flow">
+      <path class="edge" d="M24,448.5 H136" marker-end="url(#ah)"/>
+      <text class="l halo" x="80" y="440" text-anchor="middle">label</text>
+      <text class="tp" x="152" y="446" font-size="12">Flow</text>
+      <text class="tp" x="152" y="462" font-size="12">label on a halo</text>
+    </g>
+    <g id="sample-main-path">
+      <path class="edge-acc" d="M336,448.5 H448" marker-end="url(#ah-acc)"/>
+      <text class="tp" x="464" y="446" font-size="12">Main path</text>
+      <text class="tp" x="464" y="462" font-size="12">one per diagram</text>
+    </g>
+    <g id="sample-planned-flow" class="planned" data-milestone="M5">
+      <path class="edge-dash" d="M648,448.5 H760" marker-end="url(#ah-dash)"/>
+      <text class="l halo" x="704" y="440" text-anchor="middle">label · M5</text>
+      <text class="tp" x="776" y="446" font-size="12">Planned flow</text>
+      <text class="tp" x="776" y="462" font-size="12">label names its milestone</text>
+    </g>
+    <g id="sample-refused-edge">
+      <path class="edge-bad" d="M24,496.5 H136" marker-end="url(#ah-bad)"/>
+      <path class="ah-bad" d="M74.3,492.2 L75.7,490.8 L85.7,500.8 L84.3,502.2 Z"/>
+      <path class="ah-bad" d="M74.3,500.8 L75.7,502.2 L85.7,492.2 L84.3,490.8 Z"/>
+      <text class="l halo" x="80" y="486" text-anchor="middle">not allowed: …</text>
+      <text class="tp" x="152" y="494" font-size="12">Refused or not allowed</text>
+      <text class="tp" x="152" y="510" font-size="12">crossed at the midpoint</text>
+    </g>
+    <g id="sample-health-check">
+      <path class="probe" d="M336,496.5 H448"/>
+      <text class="tp" x="464" y="494" font-size="12">Health check</text>
+      <text class="tp" x="464" y="510" font-size="12">also a note leader</text>
+    </g>
+    <g id="sample-crossing">
+      <path class="edge" d="M704.5,476 V492"/>
+      <path class="edge" d="M704.5,501 V517"/>
+      <path class="edge" d="M648,496.5 H760" marker-end="url(#ah)"/>
+      <text class="tp" x="776" y="494" font-size="12">Crossing</text>
+      <text class="tp" x="776" y="510" font-size="12">the lower line breaks</text>
+    </g>
+  </g>
+  <g id="pills">
+    <text class="g" x="24" y="544">Pills: status and outcome</text>
+    <g id="sample-pill-built">
+      <rect class="pill-built" x="24" y="556" width="74" height="20" rx="10"/>
+      <text class="pill-built-t" x="61" y="570" text-anchor="middle">built · M2</text>
+    </g>
+    <g id="sample-pill-partly-built">
+      <rect class="pill-warn" x="114" y="556" width="84" height="20" rx="10"/>
+      <text class="pill-warn-t" x="156" y="570" text-anchor="middle">partly built</text>
+    </g>
+    <g id="sample-pill-planned-m5" class="planned" data-milestone="M5">
+      <rect class="pill-plan" x="214.5" y="556.5" width="95" height="19" rx="9.5"/>
+      <text class="pill-plan-t" x="262" y="570" text-anchor="middle">planned · M5</text>
+    </g>
+    <g id="sample-pill-planned-after-m6" class="planned" data-milestone="after-M6">
+      <rect class="pill-plan" x="326.5" y="556.5" width="131" height="19" rx="9.5"/>
+      <text class="pill-plan-t" x="392" y="570" text-anchor="middle">planned · after M6</text>
+    </g>
+    <g id="sample-pill-reports">
+      <rect class="pill-warn" x="474" y="556" width="166" height="20" rx="10"/>
+      <text class="pill-warn-t" x="557" y="570" text-anchor="middle">reports; blocks nothing</text>
+    </g>
+    <g id="sample-pill-refused">
+      <rect class="pill-bad" x="656" y="556" width="62" height="20" rx="10"/>
+      <text class="pill-bad-t" x="687" y="570" text-anchor="middle">refused</text>
+    </g>
+  </g>
+  <g id="aws-tiles">
+    <text class="g" x="24" y="608">AWS service tiles: the stripe names the category</text>
+    <g id="tile-compute">
+      <rect class="box" x="24.5" y="620.5" width="141" height="51" rx="6"/>
+      <rect class="aws-compute" x="28" y="624" width="4" height="44"/>
+      <text class="s" x="44" y="640">Compute and</text>
+      <text class="s" x="44" y="658">containers</text>
+    </g>
+    <g id="tile-database">
+      <rect class="box" x="178.5" y="620.5" width="141" height="51" rx="6"/>
+      <rect class="aws-db" x="182" y="624" width="4" height="44"/>
+      <text class="s" x="198" y="651">Database</text>
+    </g>
+    <g id="tile-networking">
+      <rect class="box" x="332.5" y="620.5" width="141" height="51" rx="6"/>
+      <rect class="aws-net" x="336" y="624" width="4" height="44"/>
+      <text class="s" x="352" y="651">Networking</text>
+    </g>
+    <g id="tile-security">
+      <rect class="box" x="486.5" y="620.5" width="141" height="51" rx="6"/>
+      <rect class="aws-sec" x="490" y="624" width="4" height="44"/>
+      <text class="s" x="506" y="651">Security</text>
+    </g>
+    <g id="tile-management">
+      <rect class="box" x="640.5" y="620.5" width="141" height="51" rx="6"/>
+      <rect class="aws-mgmt" x="644" y="624" width="4" height="44"/>
+      <text class="s" x="660" y="640">Management</text>
+      <text class="s" x="660" y="658">and integration</text>
+    </g>
+    <g id="tile-storage">
+      <rect class="box" x="794.5" y="620.5" width="141" height="51" rx="6"/>
+      <rect class="aws-store" x="798" y="624" width="4" height="44"/>
+      <text class="s" x="814" y="640">Storage</text>
+      <text class="s" x="814" y="658">and cost</text>
+    </g>
+  </g>
+  <g id="legend">
+    <text class="g" x="24" y="704">Legend: each diagram shows only the entries it uses, in this order</text>
+    <rect class="box" x="24.5" y="717.5" width="23" height="13" rx="3"/>
+    <text class="tp" x="56" y="728" font-size="12">Built</text>
+    <rect class="pill-warn" x="96" y="717" width="24" height="14" rx="7"/>
+    <text class="tp" x="128" y="728" font-size="12">Partly built</text>
+    <rect class="box-dash" x="205.5" y="717.5" width="23" height="13" rx="3"/>
+    <text class="tp" x="237" y="728" font-size="12">Planned, with milestone</text>
+    <path class="edge-acc" d="M394,723.5 H418"/>
+    <text class="tp" x="426" y="728" font-size="12">Main path</text>
+    <path class="edge-dash" d="M498,723.5 H522"/>
+    <text class="tp" x="530" y="728" font-size="12">Planned flow</text>
+    <path class="edge-bad" d="M619,723.5 H643"/>
+    <path class="ah-bad" d="M625.3,719.2 L626.7,717.8 L636.7,727.8 L635.3,729.2 Z"/>
+    <path class="ah-bad" d="M625.3,727.8 L626.7,729.2 L636.7,719.2 L635.3,717.8 Z"/>
+    <text class="tp" x="651" y="728" font-size="12">Refused or not allowed</text>
+    <path class="probe" d="M24,747.5 H48"/>
+    <text class="tp" x="56" y="752" font-size="12">Health check</text>
+    <rect class="box-warn" x="146.5" y="741.5" width="23" height="13" rx="3"/>
+    <text class="tp" x="178" y="752" font-size="12">Gap or caveat</text>
+    <text class="tp" x="291" y="752" font-size="12">Enforced by:</text>
+    <rect class="pill-built" x="376" y="738" width="40" height="20" rx="10"/>
+    <text class="pill-built-t" x="396" y="752" text-anchor="middle">IAM</text>
+    <rect class="box-soft" x="424.5" y="738.5" width="107" height="19" rx="9.5"/>
+    <text class="pill-plan-t" x="478" y="752" text-anchor="middle">GitHub setting</text>
+    <rect class="pill-warn" x="540" y="738" width="140" height="20" rx="10"/>
+    <text class="pill-warn-t" x="610" y="752" text-anchor="middle">Code and workflow</text>
+    <text class="tp" x="24" y="776" font-size="12">AWS category:</text>
+    <rect class="aws-compute" x="125" y="765" width="4" height="14"/>
+    <text class="tp" x="135" y="776" font-size="12">compute and containers</text>
+    <rect class="aws-db" x="293" y="765" width="4" height="14"/>
+    <text class="tp" x="303" y="776" font-size="12">database</text>
+    <rect class="aws-net" x="370" y="765" width="4" height="14"/>
+    <text class="tp" x="380" y="776" font-size="12">networking</text>
+    <rect class="aws-sec" x="460" y="765" width="4" height="14"/>
+    <text class="tp" x="470" y="776" font-size="12">security</text>
+    <rect class="aws-mgmt" x="530" y="765" width="4" height="14"/>
+    <text class="tp" x="540" y="776" font-size="12">management and integration</text>
+    <rect class="aws-store" x="728" y="765" width="4" height="14"/>
+    <text class="tp" x="738" y="776" font-size="12">storage and cost</text>
+  </g>
+</svg>
