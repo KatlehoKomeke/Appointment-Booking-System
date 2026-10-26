@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -41,6 +42,13 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
           + COLUMNS
           + " FROM notification_messages WHERE appointment_id = :appointmentId"
           + " ORDER BY created_at, id";
+
+  private static final String CLAIM_NEXT_DUE =
+      "SELECT "
+          + COLUMNS
+          + " FROM notification_messages"
+          + " WHERE status = 'PENDING' AND next_attempt_at <= :now"
+          + " ORDER BY next_attempt_at, id LIMIT 1 FOR UPDATE SKIP LOCKED";
 
   private static final String NEWEST =
       "SELECT "
@@ -85,6 +93,70 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
   @Override
   public List<NotificationMessage> newest(int limit) {
     return jdbc.sql(NEWEST).param("limit", limit).query((rs, row) -> message(rs)).list();
+  }
+
+  @Override
+  public Optional<NotificationMessage> claimNextDue(Instant now) {
+    return jdbc.sql(CLAIM_NEXT_DUE)
+        .param("now", utc(now))
+        .query((rs, row) -> message(rs))
+        .optional();
+  }
+
+  @Override
+  public void markSent(UUID id, int attempts, String providerMessageId, Instant sentAt) {
+    jdbc.sql(
+            """
+            UPDATE notification_messages
+            SET status = 'SENT', attempts = :attempts, sent_at = :sentAt,
+                provider_message_id = :providerMessageId, last_error = NULL
+            WHERE id = :id""")
+        .param("attempts", attempts)
+        .param("sentAt", utc(sentAt))
+        .param("providerMessageId", providerMessageId)
+        .param("id", id)
+        .update();
+  }
+
+  @Override
+  public void markRetry(UUID id, int attempts, Instant nextAttemptAt, String lastError) {
+    jdbc.sql(
+            """
+            UPDATE notification_messages
+            SET attempts = :attempts, next_attempt_at = :nextAttemptAt, last_error = :lastError
+            WHERE id = :id""")
+        .param("attempts", attempts)
+        .param("nextAttemptAt", utc(nextAttemptAt))
+        .param("lastError", lastError)
+        .param("id", id)
+        .update();
+  }
+
+  @Override
+  public void markFailed(UUID id, int attempts, String failureReason, String lastError) {
+    jdbc.sql(
+            """
+            UPDATE notification_messages
+            SET status = 'FAILED', attempts = :attempts, failure_reason = :failureReason,
+                last_error = :lastError
+            WHERE id = :id""")
+        .param("attempts", attempts)
+        .param("failureReason", failureReason)
+        .param("lastError", lastError)
+        .param("id", id)
+        .update();
+  }
+
+  @Override
+  public void markDispatchError(UUID id, String lastError) {
+    jdbc.sql(
+            """
+            UPDATE notification_messages
+            SET status = 'FAILED', failure_reason = 'DISPATCH_ERROR', last_error = :lastError
+            WHERE id = :id AND status = 'PENDING'""")
+        .param("lastError", lastError)
+        .param("id", id)
+        .update();
   }
 
   private static NotificationMessage message(ResultSet rs) throws SQLException {

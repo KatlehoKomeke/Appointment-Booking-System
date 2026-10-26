@@ -10,7 +10,8 @@
  *
  * <p>Built: the message templates, the check that the confirmation fits one SMS, the outbox writer,
  * the read of an appointment's messages, and the simulated inbox ({@code api}), which names each
- * message's appointment through booking's {@code AppointmentDirectory}. The dispatcher that
- * delivers PENDING messages through a simulated gateway arrives in milestone M5.
+ * message's appointment through booking's {@code AppointmentDirectory}; and, from M5, the
+ * dispatcher that delivers PENDING messages through the simulated SMS gateway, with retries and a
+ * final FAILED (BR-17).
  */
 package za.co.fynbos.branchbook.notification;

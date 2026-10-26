@@ -8,6 +8,9 @@
  *   <li>{@link za.co.fynbos.branchbook.notification.application.MessageQueries} reads an
  *       appointment's messages back with the recipient masked, implementing booking's {@code
  *       AppointmentNotifications} port.
+ *   <li>{@link za.co.fynbos.branchbook.notification.application.NotificationDispatcher} delivers
+ *       due PENDING messages through the {@code MessageGateway} port, one transaction each, with
+ *       backoff and a final FAILED.
  *   <li>{@link za.co.fynbos.branchbook.notification.application.InboxQueries} reads the simulated
  *       inbox: the newest messages of every appointment, recipients redacted.
  *   <li>{@link za.co.fynbos.branchbook.notification.application.NotificationProperties} refuses at

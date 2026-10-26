@@ -18,14 +18,21 @@ import org.springframework.context.annotation.Import;
  * one database container serves the whole run. Before every test the clock is back at {@link
  * TestClockConfiguration#DEFAULT_INSTANT}, so no test depends on the order tests run in.
  *
- * <p>The simulated inbox is switched on, as it is in docker compose. References come from a {@link
+ * <p>The simulated inbox is switched on, as it is in docker compose, and the dispatcher's own loop
+ * is off with no gateway latency: tests that deliver call {@code NotificationDispatcher.runOnce}
+ * with the clock's instant, so no test sleeps. References come from a {@link
  * ScriptedReferenceGenerator}, which hands out random ones unless a test scripts them. Classes that
  * book through the API add {@link DatabaseReset}.
  */
 @Target(ElementType.TYPE)
 @Retention(RetentionPolicy.RUNTIME)
 @Documented
-@SpringBootTest(properties = "branchbook.inbox.enabled=true")
+@SpringBootTest(
+    properties = {
+      "branchbook.inbox.enabled=true",
+      "branchbook.dispatcher.enabled=false",
+      "branchbook.dispatcher.simulated-latency=PT0S"
+    })
 @ExtendWith(ResetClockExtension.class)
 @AutoConfigureMockMvc
 @Import({

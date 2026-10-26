@@ -79,6 +79,13 @@ branchbook:
     # characters with no trailing slash, so the longest confirmation fits one SMS; a longer value stops start-up
     # (BR-18). docker compose sets it to the published port.
     public-base-url: ${PUBLIC_BASE_URL:http://localhost:8080}
+  dispatcher:
+    # The dispatcher delivers PENDING confirmations through the simulated gateway (BR-17): every 2 seconds, on its
+    # own thread, up to 20 messages a tick. The tests switch it off and drive it themselves.
+    enabled: true
+    interval: PT2S
+    # How long the simulated gateway takes to accept a message, so the confirmation page shows "Sending" first.
+    simulated-latency: PT0.15S
   inbox:
     # The simulated inbox, GET /api/v1/messages, lists every booking's messages with the reference and the
     # recipient redacted (FR-17). It is an operator view for the demo, so it is off unless a deployment asks for it:
