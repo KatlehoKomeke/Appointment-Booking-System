@@ -33,7 +33,7 @@ export interface paths {
         };
         /**
          * Open an appointment
-         * @description Needs the reference and the last four digits of the mobile number used to book. Any mismatch is 404, never 403, so the answer never confirms that a reference exists. Five wrong tries in an hour block the reference, even for the right digits, until an hour after the first.
+         * @description Needs the reference and the last four digits of the mobile number used to book. Any mismatch is 404, never 403, so the answer never confirms that a reference exists. Five wrong tries in an hour block the reference, even for the right digits, until an hour after the first. Each lookup counts as a try while it is being checked, so lookups of one reference that arrive together can also be refused briefly.
          */
         get: operations["getAppointment"];
         put?: never;
@@ -495,10 +495,10 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description LOOKUP_RATE_LIMITED: too many wrong tries for this reference */
+            /** @description LOOKUP_RATE_LIMITED: five wrong tries for this reference, or too many of its lookups at once */
             429: {
                 headers: {
-                    /** @description Seconds until the reference can be looked up again */
+                    /** @description Seconds until the reference can be looked up again: what is left of the hour after five wrong tries, or 1 when other lookups of it are being checked */
                     "Retry-After"?: number;
                     [name: string]: unknown;
                 };

@@ -72,9 +72,10 @@ class JdbcIdempotencyKeyStore implements IdempotencyKeyStore {
                                 rs.getString("request_hash"),
                                 rs.getObject("appointment_id", UUID.class)))
                     .optional());
-    // The key is in force here: an expired one was taken over above. A row vanishes only if it
-    // expired and the purge removed it between the two statements, and an uncompleted row is never
-    // committed; both are a race the re-run resolves.
+    // The key is in force here: an expired one was taken over above. ON CONFLICT DO UPDATE locks
+    // the conflicting row even when its WHERE is false, so the purge cannot remove it before this
+    // read, and only a completed row is ever committed. The check below is a guard for what should
+    // never happen; the re-run would resolve it.
     if (used.isEmpty() || used.get().appointmentId() == null) {
       throw new TransactionConflictException("40001");
     }

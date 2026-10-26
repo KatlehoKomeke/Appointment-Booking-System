@@ -7,8 +7,9 @@ import za.co.fynbos.branchbook.shared.problem.ProblemCode;
 import za.co.fynbos.branchbook.shared.problem.ProblemException;
 
 /**
- * Too many wrong lookups of one reference: {@code 429 LOOKUP_RATE_LIMITED}, with {@code
- * Retry-After} until the reference's window closes (BR-13).
+ * Too many lookups of one reference: {@code 429 LOOKUP_RATE_LIMITED} (BR-13). {@code Retry-After}
+ * runs until the reference's window closes when it has had five wrong lookups, or is one second
+ * when the wrong lookups and the lookups still being checked together reach five.
  */
 public class LookupRateLimitedException extends ProblemException {
 

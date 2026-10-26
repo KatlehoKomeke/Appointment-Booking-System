@@ -88,7 +88,7 @@ sequenceDiagram
     participant DB as PostgreSQL
     SPA->>API: POST /api/v1/appointments (Idempotency-Key)
     API->>H: BookAppointmentCommand
-    H->>DB: 1. INSERT idempotency_keys ... ON CONFLICT DO NOTHING
+    H->>DB: 1. INSERT idempotency_keys ... ON CONFLICT DO UPDATE WHERE expired
     H->>DB: 2. load branch and branch_services
     H->>H: 3. SlotCalendar.validate(startsAt)
     H->>DB: 4. pg_advisory_xact_lock(mobile)
@@ -107,7 +107,8 @@ sequenceDiagram
 - **Fixed lock order.** The locks are taken as idempotency key, then the customer's mobile, then the
   `branch_services` row. Every booking takes them in that order, so two bookings cannot deadlock each other.
 - **Retries are safe.** The idempotency row is the first statement, so a double-click or a network retry with the
-  same key returns the same booking ([BR-12](domain-rules.md#br-12)).
+  same key returns the same booking ([BR-12](domain-rules.md#br-12)). A key is honoured for exactly 24 hours: the
+  same statement takes over a key whose time has run out, whether or not the hourly purge has removed it yet.
 - **Failures roll back together.** If any step fails, everything rolls back, including the idempotency row, so a
   retry starts clean.
 - **One re-run, then an answer.** A reference collision, a deadlock (`40P01`) or a serialisation failure (`40001`)
@@ -129,8 +130,9 @@ get the same `404`, and the digits are compared in constant time. `LookupAttempt
 reference in a window that opens with the first wrong lookup and lasts an hour; the fifth blocks the reference, right digits
 included, until the window closes. A lookup is admitted and counted as in flight in one atomic step before the
 database is read, then released if its digits were right or kept as a failure if not. Lookups that arrive together
-therefore cannot all pass a check made before any of them was counted, and a customer who keeps their page open is
-never blocked by their own lookups. Blocking logs one warning that names no reference.
+therefore cannot all pass a check made before any of them was counted. A customer's own lookups have the right
+digits, so they never lead to the hour-long block, though a burst of them can be refused for a second while the
+others are checked. Blocking logs one warning that names no reference.
 
 The counts live in memory, in a Caffeine cache bounded to 100,000 references. That is a deliberate trade-off for
 one instance, with three consequences:

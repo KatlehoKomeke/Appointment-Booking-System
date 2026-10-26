@@ -152,8 +152,8 @@ with `APP_PORT=18080 make up`, or in a `.env` file copied from [.env.example](.e
 ### Try the API
 
 Swagger UI at http://localhost:8080/swagger-ui.html lists every operation and lets you call it. From a terminal,
-take the last bookable date from the server, so the examples work whatever day you run them, and list the slots
-for a home loan consultation at Rustenburg on that date:
+take the last bookable date from the server rather than typing one, and list the slots for a home loan
+consultation at Rustenburg on that date:
 
 ```bash
 date=$(curl -s http://localhost:8080/api/v1/branches/SAN | grep -o '"bookableTo":"[0-9-]*"' | cut -d'"' -f4)
@@ -187,8 +187,9 @@ curl -X POST http://localhost:8080/api/v1/appointments \
        "customer": {"firstName": "Nomvula", "lastName": "Dlamini", "mobile": "082 555 0101"}}'
 ```
 
-Run on 25 October 2026 for 27 October, the answer was `201 Created`, with
-`Location: /api/v1/appointments/APT-VY4A-WNB7` and, shortened:
+On a public holiday both answers say the branch is closed, and Rustenburg is also closed on Sundays; then pick
+another date from `bookableFrom` to `bookableTo` that `closedDates` does not list. An earlier run, which booked 27 October 2026,
+answered `201 Created`, with `Location: /api/v1/appointments/APT-VY4A-WNB7` and, shortened:
 
 ```json
 {

@@ -70,9 +70,9 @@ One request yields exactly one code:
 - **Lookup** (`GET /api/v1/appointments/{reference}`): a missing or malformed `X-Mobile-Last4` is
   `400 VALIDATION_FAILED` and is not counted; then a blocked reference is `429 LOOKUP_RATE_LIMITED`, even with the
   right digits; then any mismatch is `404 APPOINTMENT_NOT_FOUND` and is counted. A reference that cannot be a
-  reference at all is a `404` and is not counted, because it can never become a match. A lookup is counted before
-  the database is read and released if its digits were right, so while one lookup is being checked, a reference
-  with four failures already refuses the next with `429` and `Retry-After: 1`.
+  reference at all is a `404` and is not counted, because it can never become a match. A lookup counts as a try
+  while it is being checked and is released if its digits were right, so lookups of one reference that arrive
+  together are refused with `429` and `Retry-After: 1` once the wrong ones and those still being checked reach five.
 
 ## Field codes
 
@@ -100,7 +100,7 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 | Status | Seconds | When |
 |---|---|---|
 | `429 LOOKUP_RATE_LIMITED` | Up to 3600 | The seconds left until an hour after the reference's first wrong lookup, rounded up. |
-| `429 LOOKUP_RATE_LIMITED` | 1 | The reference has four failures and another lookup of it is still being checked. |
+| `429 LOOKUP_RATE_LIMITED` | 1 | Fewer than five wrong lookups, but the wrong lookups and the lookups of the reference still being checked together reach five. |
 | `503 TRY_AGAIN` | 2 | A lock not granted within 2 s, a statement over 5 s, or a deadlock or serialisation failure that happened again after the one automatic re-run. |
 | `503 TRY_AGAIN` | 5 | No database connection within 3 s, or any other temporary failure. |
 

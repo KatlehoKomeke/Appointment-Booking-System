@@ -27,9 +27,9 @@ import za.co.fynbos.branchbook.shared.config.BookingProperties;
  * #begin} counts it as in flight, and {@link #end} turns it into a failure if the digits were wrong
  * or releases it if they were right. A lookup is admitted only while the failures and the lookups
  * in flight together are fewer than the limit, so requests that arrive together cannot all pass a
- * check made before any of them was counted. Lookups with the right digits are never counted, so a
- * customer who keeps their appointment page open is not blocked. A lookup refused only because
- * others are still in flight is told to retry after a second.
+ * check made before any of them was counted. Lookups with the right digits are released when they
+ * end, so a customer who keeps their appointment page open is never blocked for the hour. A lookup
+ * refused only because others are still in flight is told to retry after a second.
  *
  * <p>The counts live in memory, in a cache bounded to {@value #MAX_REFERENCES} references, each
  * dropped once its window has passed. They are per instance and lost on restart: a deliberate

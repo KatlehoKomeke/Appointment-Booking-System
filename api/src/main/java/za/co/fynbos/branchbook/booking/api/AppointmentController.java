@@ -152,7 +152,9 @@ class AppointmentController {
           "Needs the reference and the last four digits of the mobile number used to book. Any"
               + " mismatch is 404, never 403, so the answer never confirms that a reference"
               + " exists. Five wrong tries in an hour block the reference, even for the right"
-              + " digits, until an hour after the first.")
+              + " digits, until an hour after the first. Each lookup counts as a try while it is"
+              + " being checked, so lookups of one reference that arrive together can also be"
+              + " refused briefly.")
   @ApiResponse(responseCode = "200", description = "The appointment")
   @ApiResponse(
       responseCode = "400",
@@ -170,11 +172,15 @@ class AppointmentController {
               schema = @Schema(ref = OpenApiConfig.PROBLEM)))
   @ApiResponse(
       responseCode = "429",
-      description = "LOOKUP_RATE_LIMITED: too many wrong tries for this reference",
+      description =
+          "LOOKUP_RATE_LIMITED: five wrong tries for this reference, or too many of its lookups"
+              + " at once",
       headers =
           @Header(
               name = "Retry-After",
-              description = "Seconds until the reference can be looked up again",
+              description =
+                  "Seconds until the reference can be looked up again: what is left of the hour"
+                      + " after five wrong tries, or 1 when other lookups of it are being checked",
               schema = @Schema(type = "integer")),
       content =
           @Content(
