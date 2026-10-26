@@ -12,10 +12,10 @@ GITLEAKS_IMAGE := ghcr.io/gitleaks/gitleaks:$(GITLEAKS_VERSION)
 GIT_SAFE_DIR := -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs psql smoke demo-409 dev-api dev-web test test-api test-web test-docs contract fmt hooks secrets-scan secrets-scan-history
+.PHONY: help up down logs psql smoke e2e demo-409dev-api dev-web test test-api test-web test-docs contract fmt hooks secrets-scan secrets-scan-history
 
 help: ## List the available targets
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-22s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-22s %s\n", $$1, $$2}'
 
 # --- Run -------------------------------------------------------------------------------------------------------------
 
@@ -34,6 +34,12 @@ psql: ## Open a SQL shell on the local database
 
 smoke: ## Check the running app over HTTP (after `make up`)
 	scripts/smoke.sh "http://$$(docker compose port app 8080)"
+
+# Books real appointments in the running app's database, so it is for a local or demo stack, never a shared one.
+# E2E_BASE_URL points it at another address, for example `make e2e E2E_BASE_URL=http://localhost:18080`.
+E2E_BASE_URL ?= http://localhost:8080
+e2e: ## Run the Playwright end-to-end tests in Chromium against the running app (after `make up`; Node 24)
+	cd e2e && npm ci && npx playwright install chromium && E2E_BASE_URL="$(E2E_BASE_URL)" npx playwright test
 
 demo-409: ## Race 20 bookings for Polokwane's last FICA seat on the running app (after `make up`); books one each run
 	scripts/demo-409.sh "http://$$(docker compose port app 8080)"

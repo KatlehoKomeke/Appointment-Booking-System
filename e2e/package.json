@@ -1,0 +1,25 @@
+{
+  "name": "branchbook-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "description": "BranchBook's end-to-end tests: Playwright drives a real browser against a running app. See README.md.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "install-browsers": "playwright install chromium",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
+    "@playwright/test": "1.64.0",
+    "@types/node": "24.19.2",
+    "typescript": "6.0.3"
+  },
+  "overrides": {
+    "playwright-core": "1.64.0"
+  }
+}
