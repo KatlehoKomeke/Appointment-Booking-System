@@ -121,7 +121,7 @@ Everything in this diagram is built. Solid arrows are calls; dashed arrows are t
 
 *Status: Built. Everything in this section exists today.*
 
-![Who can change what in AWS: by hand, the administrator sets BRANCHBOOK_ALERT_EMAIL and deploys BranchbookAccount. The pipeline passes the aws-demo branch policy and two IAM guards, then deploys only BranchbookRelease, because its CDK app never includes BranchbookAccount. That guard is code, not IAM, and main is unprotected.](../docs/assets/diagrams/access-boundary.svg)
+![Who can change what in AWS: by hand, the administrator sets BRANCHBOOK_ALERT_EMAIL and deploys BranchbookAccount. The pipeline passes the aws-demo branch policy and two IAM guards, then deploys only BranchbookRelease, because its CDK app never includes BranchbookAccount. That guard is code, not IAM, and main requires no review.](../docs/assets/diagrams/access-boundary.svg)
 
 **A.** By hand, the administrator `branchbook-admin`, an IAM user who signs in with `aws login`, runs the CDK app with
 `BRANCHBOOK_ALERT_EMAIL` set, so the app includes `BranchbookAccount`. `cdk deploy` then updates that stack in
@@ -160,8 +160,8 @@ so a change to the repository can remove it.
 - The cfn-exec role keeps CDK's default `AdministratorAccess`, because the bootstrap commands under
   [First-time setup](#first-time-setup) pass no `--cloudformation-execution-policies`. A stack the pipeline deploys
   can therefore create any resource, IAM included.
-- `main` has no branch protection ([docs/delivery.md](../docs/delivery.md#known-gaps)), so a workflow pushed to
-  `main` that set `BRANCHBOOK_ALERT_EMAIL` could deploy `BranchbookAccount`.
+- `main` requires no review or passing check ([docs/delivery.md](../docs/delivery.md#known-gaps)), so a workflow
+  pushed to `main` that set `BRANCHBOOK_ALERT_EMAIL` could deploy `BranchbookAccount`.
 
 What limits this today is the repository, not AWS: it has one collaborator, who is an administrator, and the
 `aws-demo` branch policy admits only `main` and `v*` tags.

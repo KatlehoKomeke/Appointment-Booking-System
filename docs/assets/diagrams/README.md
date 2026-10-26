@@ -57,7 +57,7 @@ files live in `.github/workflows/`.
 | appointment-lifecycle | `booking/domain/AppointmentStatus.java` | Tier 2 | `85cd726` |
 | data-model | `api/src/main/resources/db/migration/`; the writers in `booking/application/` and `notification/application/` | M5 (the notification status line); with a new migration | `85cd726` |
 | local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; the `Makefile` up and dev targets; `web/vite.config.ts`; `application.yml` (probes, connection pool); the controllers (the routes in the API box) | Tier 2 (the cancel route); after M6 | `85cd726` |
-| delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/bin/branchbook.ts`; branch protection and the `aws-demo` environment | when `deploy` waits for `ci`; after M6 | `85cd726` |
+| delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/bin/branchbook.ts`; the `main` ruleset and the `aws-demo` environment | when `deploy` waits for `ci`; after M6 | `85cd726` |
 | push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured only when the job structure changes | `85cd726` (measured at `c5feafe`) |
 | aws-footprint | `infra/bin/`; `infra/lib/`; `infra/cdk.json` | after M6 | `85cd726` |
 | keyless-deploy | `deploy.yml`; `infra/lib/account-stack.ts` | on hardening; after M6 | `85cd726` |

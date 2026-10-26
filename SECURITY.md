@@ -78,7 +78,9 @@ fictional data.
 ### If a secret is committed
 
 1. **Treat it as compromised.** Rotate or revoke it first, before anything else.
-2. **Remove it from the history** with `git filter-repo`, then force-push. Every clone must be re-cloned.
+2. **Remove it from the history** with `git filter-repo`, then force-push. The `Protect main` ruleset refuses
+   force-pushes, so switch it off for that one push (Settings, Rules) and on again straight after. Every clone must
+   be re-cloned.
 3. **Record what happened** and add a scanner rule if gitleaks did not catch it.
 
 Removing a secret from the history does not make it safe again. Rotation is the fix; the cleanup only reduces noise.

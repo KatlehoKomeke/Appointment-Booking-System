@@ -101,7 +101,7 @@ reaches a database adapter, or a transaction opened outside the application laye
 
 ## How it is tested and delivered
 
-![From a commit to Cape Town: an opt-in pre-commit hook refuses secret files and runs gitleaks, push protection checks the push, and the unprotected main starts ci, secret-scan, infra (on infra changes) and deploy side by side. deploy does not wait for ci. It passes the aws-demo gate, exchanges an OIDC token at STS, deploys BranchbookRelease through the bootstrap roles and verifies the commit; an administrator deploys BranchbookAccount.](docs/assets/diagrams/delivery-pipeline.svg)
+![From a commit to Cape Town: an opt-in pre-commit hook refuses secret files and runs gitleaks, push protection checks the push, and main, which requires no checks, starts ci, secret-scan, infra (on infra changes) and deploy side by side. deploy does not wait for ci. It passes the aws-demo gate, exchanges an OIDC token at STS, deploys BranchbookRelease through the bootstrap roles and verifies the commit; an administrator deploys BranchbookAccount.](docs/assets/diagrams/delivery-pipeline.svg)
 
 - **Before a commit:** an opt-in pre-commit hook (`make hooks`) refuses secret-bearing files and runs gitleaks.
 - **On every push to `main`:** `ci` (the API, the web app, and the stack under Docker Compose with a smoke test),
@@ -109,7 +109,7 @@ reaches a database adapter, or a transaction opened outside the application laye
   `secret-scan` and, for `infra/` changes, `infra`.
 - **Deploying:** `deploy` runs the CDK app's tests, signs in through OpenID Connect, deploys `BranchbookRelease` and
   reads the recorded commit back. No application is hosted yet.
-- **Not gated yet:** `deploy` does not wait for `ci`, and `main` has no branch protection ([known gaps](docs/delivery.md#known-gaps)). Each numbered step in the image is explained in [docs/delivery.md](docs/delivery.md#at-a-glance).
+- **Not gated yet:** `deploy` does not wait for `ci`, and `main` requires no passing checks (it refuses only force-pushes and deletion) ([known gaps](docs/delivery.md#known-gaps)). Each numbered step in the image is explained in [docs/delivery.md](docs/delivery.md#at-a-glance).
 
 ## Technology
 

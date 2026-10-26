@@ -1,7 +1,7 @@
 # Delivery: from a commit to Cape Town
 
-*Status: Built: two git hooks, five workflows, Dependabot, continuous deployment of the release record. Not built:
-branch protection and ci gating the deploy ([Known gaps](#known-gaps)). Planned (after M6): the application stacks.*
+*Status: Built: two git hooks, five workflows, Dependabot, the `Protect main` ruleset, continuous deployment of the release record. Not built:
+required checks on `main` and ci gating the deploy ([Known gaps](#known-gaps)). Planned (after M6): the application stacks.*
 
 This page is the one home for how code moves from a laptop to AWS: the hooks, how changes reach `main`, what each
 workflow proves, which workflow runs when, the deployment, Dependabot, the GitHub settings the pipeline relies on,
@@ -10,7 +10,7 @@ is in [SECURITY.md](../SECURITY.md#secrets).
 
 ## At a glance
 
-![From a commit to Cape Town: an opt-in pre-commit hook refuses secret files and runs gitleaks, push protection checks the push, and the unprotected main starts ci, secret-scan, infra (on infra changes) and deploy side by side. deploy does not wait for ci. It passes the aws-demo gate, exchanges an OIDC token at STS, deploys BranchbookRelease through the bootstrap roles and verifies the commit; an administrator deploys BranchbookAccount.](assets/diagrams/delivery-pipeline.svg)
+![From a commit to Cape Town: an opt-in pre-commit hook refuses secret files and runs gitleaks, push protection checks the push, and main, which requires no checks, starts ci, secret-scan, infra (on infra changes) and deploy side by side. deploy does not wait for ci. It passes the aws-demo gate, exchanges an OIDC token at STS, deploys BranchbookRelease through the bootstrap roles and verifies the commit; an administrator deploys BranchbookAccount.](assets/diagrams/delivery-pipeline.svg)
 
 The numbered steps in the image:
 
@@ -20,7 +20,7 @@ The numbered steps in the image:
 3. **post-commit hook**: a reminder after a major commit; it never blocks.
 4. `git push`.
 5. **push protection**: refuses known provider secrets, and the push is rejected.
-6. **`main`**: no branch protection, no required checks. On every push to `main` the workflows start together:
+6. **`main`**: force-pushes and deletion refused, no required checks. On every push to `main` the workflows start together:
    `ci.yml` (`api`, `web`, `stack`: application checks, no AWS access), `secret-scan.yml` (`gitleaks`: full
    history, after the push, blocks nothing), `infra.yml` (`test-and-synth`, only if `infra/**` or `infra.yml`
    changed) and `deploy.yml` (`test`, then `deploy`, joined by `needs: test`).
@@ -237,8 +237,8 @@ R=repos/KatlehoKomeke/Appointment-Booking-System
 | Setting | Today | Check with | Readable by |
 |---|---|---|---|
 | Default branch | `main` | `gh api $R --jq .default_branch` | anyone |
-| Branch protection on `main` | None | `gh api $R/branches/main --jq .protected` prints `false` | anyone |
-| Rulesets | None | `gh api $R/rulesets` prints `[]` | anyone |
+| Branch protection on `main` | No classic protection rule; the ruleset below applies | `gh api $R/branches/main --jq .protected` prints `true`, because of the ruleset | anyone |
+| Rulesets | `Protect main`, on the default branch: refuses force-pushes and deletion, with no bypass; requires no pull request, review or check | `gh api $R/rules/branches/main --jq '[.[].type]'` prints `["non_fast_forward","deletion"]` | anyone |
 | Environment `aws-demo` | Deployment branches `main` (branch) and `v*` (tag); no required reviewers or wait timer; administrators may bypass | `gh api $R/environments/aws-demo --jq '{rules: [.protection_rules[].type], can_admins_bypass}'` and `gh api $R/environments/aws-demo/deployment-branch-policies --jq '.branch_policies[] \| {name, type}'` | anyone |
 | `aws-demo` secrets and variables | One secret, `AWS_DEPLOY_ROLE_ARN`; no variables. Repository-level Actions secrets and variables: none | `gh api $R/environments/aws-demo/secrets --jq '.secrets[].name'` and `gh api $R/environments/aws-demo/variables --jq .total_count`; `gh api $R/actions/secrets --jq .total_count` | owner |
 | OIDC subject | GitHub's immutable subject, with numeric owner and repository IDs | `gh api $R/actions/oidc/customization/sub --jq .use_immutable_subject` prints `true` | anyone |
@@ -259,7 +259,7 @@ Each gap is stated here once, with what limits it today and what would close it.
 
 | Gap | Effect today | What would close it |
 |---|---|---|
-| `main` is unprotected | No branch protection, ruleset or required check, so a red check blocks nothing. On the push of [e8950df](https://github.com/KatlehoKomeke/Appointment-Booking-System/commit/e8950df), [ci failed](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/runs/40211944802) in *Build and run every check* and [deploy passed](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/runs/40211944830); [80e4c83](https://github.com/KatlehoKomeke/Appointment-Booking-System/commit/80e4c83) fixed it. Leaving `main` open is a deliberate choice while one person works on the repository. | Before the application is hosted (after M6): protect `main` with the settings under [With a team](#with-a-team), required checks first. |
+| `main` requires no checks | The `Protect main` ruleset refuses force-pushes and deletion, but no pull request, review or passing check is required, so a red check blocks nothing. On the push of [e8950df](https://github.com/KatlehoKomeke/Appointment-Booking-System/commit/e8950df), [ci failed](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/runs/40211944802) in *Build and run every check* and [deploy passed](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/runs/40211944830); [80e4c83](https://github.com/KatlehoKomeke/Appointment-Booking-System/commit/80e4c83) fixed it. Leaving `main` open is a deliberate choice while one person works on the repository. | Before the application is hosted (after M6): protect `main` with the settings under [With a team](#with-a-team), required checks first. |
 | `deploy` does not wait for `ci` | Harmless while only `BranchbookRelease` deploys: the release record can name a commit whose `ci` failed, as e8950df's did. | Before `BranchbookApp` joins the job: start `deploy` with `workflow_run` after a successful `ci`, call `ci` as a reusable workflow, or rely on required checks. Not yet decided in an ADR. |
 | Only the head of each push is built | A broken commit in the middle of a push goes unnoticed by `ci`. `secret-scan` still reads every commit. | Run `make test` before each push; with a team, one pull request per change. |
 | `secret-scan` reports after publication | In a public repository, a secret that reaches GitHub is already exposed when the scan finds it. | The pre-commit hook and push protection can stop a secret before it is published; a finding means rotating first ([SECURITY.md](../SECURITY.md#if-a-secret-is-committed)). |
