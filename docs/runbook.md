@@ -38,6 +38,9 @@ A message is in one of three states:
     is kept: if it is `MARK_FAILED`, the confirmation was handed to the gateway once before the cancel and may have
     been delivered.
 
+`retryable` is true exactly when a retry would send the message again: FAILED with `DELIVERY_FAILED` or
+`DISPATCH_ERROR`, and, for a confirmation, an appointment that is neither cancelled nor started.
+
 An appointment never depends on its messages: a FAILED confirmation leaves the booking CONFIRMED.
 
 The same facts in SQL:
@@ -51,9 +54,25 @@ LIMIT 20;
 
 ## Replay a failed message
 
-Until the retry endpoint ships (Tier 2), this guarded update is how a FAILED message is replayed. It resets only a
-message that could be cured, and never a confirmation of an appointment that has been cancelled or has already
-started. Put the message's id in place of the example:
+Where the simulated inbox is switched on (`branchbook.inbox.enabled`, as in `make up` and `make dev-api`), the retry
+endpoint is the replay path. It is what the inbox's Retry button calls. Put the message's id, from the inbox, in
+place of the example:
+
+```bash
+curl -s -X POST 'localhost:8080/api/v1/messages/00000000-0000-0000-0000-000000000000/retry'
+```
+
+It answers with the message as the inbox shows it. A message a retry could send comes back PENDING, with no
+attempts, due now; the dispatcher picks it up within 2 seconds. Any other message comes back unchanged with
+`retryable` false: one that is PENDING or SENT, a superseded or capped one, and the confirmation of an appointment
+that has been cancelled or has already started. An unknown id is `404 MESSAGE_NOT_FOUND`. If the dispatcher is
+sending that message at that moment, the retry waits up to 2 seconds for it to finish, then decides; a send that
+takes longer makes the retry `503 TRY_AGAIN`, with the message left as it was, and the retry can simply be sent
+again.
+
+Where the inbox is off, as it is by default, the endpoint does not exist and this guarded update is the replay
+path. It applies the same rule: it resets only a message that could be cured, and never a confirmation of an
+appointment that has been cancelled or has already started.
 
 ```sql
 UPDATE notification_messages m

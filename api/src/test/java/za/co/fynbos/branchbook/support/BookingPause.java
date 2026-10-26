@@ -12,7 +12,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * the test can look at the database from outside the transaction, or send a second request into it,
  * at a moment it chooses. No test sleeps for this. {@link #hold} holds a booking at step 10, after
  * it has written its appointment and its SMS; {@link #before} holds any write, such as a cancel's
- * UPDATE of the appointment or its INSERT of the cancellation SMS.
+ * UPDATE of the appointment or its INSERT of the cancellation SMS; {@link #beforeFirstStatement}
+ * holds one statement before it locks anything, such as a retry's reset of a message it locked
+ * earlier.
  *
  * <p>A temporary trigger makes the chosen statement wait for an advisory lock that this class holds
  * on a connection of its own. The trigger raises that transaction's {@code lock_timeout} to 10
@@ -20,13 +22,20 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * usual 2 seconds. The held statement is still bounded by the session's 5-second {@code
  * statement_timeout}, which a trigger cannot extend for the statement it runs in, so a test must
  * release the pause well within that; {@link #awaitWaiting} gives up after 3 seconds. A row trigger
- * fires once the row is locked, so a held UPDATE keeps its row locked while it waits. Closing the
- * pause releases the lock and drops the trigger.
+ * fires once the row is locked, so a held UPDATE keeps its row locked while it waits; a statement
+ * trigger fires before the statement locks any row, so the held transaction keeps only the locks it
+ * took before. Closing the pause releases the lock and drops the trigger.
  */
 public final class BookingPause implements AutoCloseable {
 
   /** The advisory lock the paused transaction waits for; any number no application code uses. */
   private static final long LOCK = 4_242_424L;
+
+  /**
+   * Counts the statements a statement pause has seen, so it holds only the first. A sequence, as it
+   * is not rolled back with the transaction that draws from it.
+   */
+  private static final String STATEMENTS = "test_pause_statements";
 
   /** What a test may name: a statement and a table, which are spliced into the trigger's DDL. */
   private static final Pattern OPERATION = Pattern.compile("INSERT|UPDATE");
@@ -85,6 +94,34 @@ public final class BookingPause implements AutoCloseable {
   }
 
   /**
+   * Installs the pause before the first INSERT or UPDATE statement of a table from now on, in any
+   * session, and holds it. The statement waits before it has locked a single row, so the
+   * transaction it belongs to holds only what it locked earlier: for example, a retry that has
+   * locked its message with {@code FOR UPDATE} is held at its reset with only that lock. Later
+   * statements of the table, such as another request's UPDATE, are not held.
+   *
+   * @param operation {@code INSERT} or {@code UPDATE}
+   * @param table the table, for example {@code notification_messages}
+   * @param dataSource where to open the connection that holds the lock
+   * @param jdbc where to create and drop the trigger
+   * @return the pause, held
+   * @throws SQLException if the lock cannot be taken
+   */
+  public static BookingPause beforeFirstStatement(
+      String operation, String table, DataSource dataSource, JdbcTemplate jdbc)
+      throws SQLException {
+    requireOperationAndTable(operation, table);
+    jdbc.execute("DROP SEQUENCE IF EXISTS " + STATEMENTS);
+    jdbc.execute("CREATE SEQUENCE " + STATEMENTS);
+    jdbc.execute(pauseFunction("nextval('" + STATEMENTS + "') = 1", "NULL"));
+    jdbc.execute("DROP TRIGGER IF EXISTS test_pause ON " + table);
+    jdbc.execute(
+        "CREATE TRIGGER test_pause BEFORE %s ON %s FOR EACH STATEMENT EXECUTE FUNCTION test_pause()"
+            .formatted(operation, table));
+    return held(dataSource, jdbc, table);
+  }
+
+  /**
    * Waits until other sessions are waiting: on this pause, and on row or transaction locks.
    *
    * @param onThePause how many transactions must be held at the pause
@@ -117,6 +154,7 @@ public final class BookingPause implements AutoCloseable {
       holder.close();
       jdbc.execute("DROP TRIGGER IF EXISTS test_pause ON " + table);
       jdbc.execute("DROP FUNCTION IF EXISTS test_pause()");
+      jdbc.execute("DROP SEQUENCE IF EXISTS " + STATEMENTS);
     }
   }
 

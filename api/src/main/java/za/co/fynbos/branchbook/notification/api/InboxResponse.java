@@ -8,7 +8,8 @@ import za.co.fynbos.branchbook.notification.application.InboxMessage;
 import za.co.fynbos.branchbook.shared.time.TimeFormat;
 
 /**
- * The simulated inbox: the newest messages of every appointment.
+ * The simulated inbox: the newest messages of every appointment. A retry answers with one of its
+ * {@link InboxMessageResponse} entries.
  *
  * @param messages the messages, newest first
  */
@@ -31,7 +32,7 @@ public record InboxResponse(List<InboxMessageResponse> messages) {
    * @param body the text of the message
    * @param status where it is in its delivery
    * @param failureReason why it failed, or {@code null}
-   * @param retryable whether a retry could send it
+   * @param retryable whether a retry could send it, by the rule the retry itself applies
    * @param attempts how many times delivery has been tried
    * @param nextAttemptAt when delivery is next tried, or {@code null} unless PENDING
    * @param lastError a short code for why the last attempt failed, or {@code null}
@@ -57,7 +58,10 @@ public record InboxResponse(List<InboxMessageResponse> messages) {
                 "DISPATCH_ERROR"
               })
           @Nullable String failureReason,
-      @Schema(description = "True only for FAILED with DELIVERY_FAILED or DISPATCH_ERROR")
+      @Schema(
+              description =
+                  "True only for FAILED with DELIVERY_FAILED or DISPATCH_ERROR, and never for the"
+                      + " confirmation of an appointment that is cancelled or has started")
           boolean retryable,
       @Schema(minimum = "0", maximum = "5") int attempts,
       @Schema(

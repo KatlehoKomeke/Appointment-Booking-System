@@ -107,7 +107,8 @@ BranchBook is designed around the Protection of Personal Information Act, even t
   ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)).
 - **No exposure.** *Built in M3.* Once an appointment exists, the API never returns its full mobile number: the
   caller who booked it, or who has just proved its last four digits, sees `082 *** 0101`. The simulated inbox,
-  built in M4, shows only `082 *** ****`, and is off unless a deployment switches it on (`branchbook.inbox.enabled`)
+  built in M4, shows only `082 *** ****`, and is off unless a deployment switches it on (`branchbook.inbox.enabled`);
+  its retry, built in M6, exists only with it and can do no more than make a failed message due again
   ([BR-19](docs/domain-rules.md#br-19); `AppointmentApiIT.responsesNeverContainUnmaskedMobile`,
   `InboxApiIT.listsTheNewestMessagesWithTheirReferencesAndRedactedRecipients`).
   Error bodies never contain personal data or another booking's details ([BR-23](docs/domain-rules.md#br-23)).
@@ -124,7 +125,8 @@ BranchBook is designed around the Protection of Personal Information Act, even t
   - `LogRedactionIT.bookingLogsContainNoCustomerNameOrMobile` takes one synthetic customer through every outcome
     of a booking and a lookup, then checks the application's log and PostgreSQL's for their name, their number in
     any form, masked or not, and the appointment's reference.
-    `LogRedactionIT.cancelLogsContainNoCustomerNameMobileOrReference` does the same for a cancellation.
+    `LogRedactionIT.cancelAndRetryLogsContainNoCustomerNameMobileOrReference` does the same for a cancellation and
+    the retry of its messages.
 - **Log lines name appointments by id.** *Built in M3.* A reference and the last four digits open an appointment, so log
   lines carry the appointment's id and never its reference.
 - **Synthetic test data only.** Tests and demos use made-up names and the published demo numbers: `082 555 01xx`,

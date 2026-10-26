@@ -14,6 +14,8 @@
  *       backoff and a final FAILED, and never sends the confirmation of a cancelled appointment.
  *   <li>{@link za.co.fynbos.branchbook.notification.application.InboxQueries} reads the simulated
  *       inbox: the newest messages of every appointment, recipients redacted.
+ *   <li>{@link za.co.fynbos.branchbook.notification.application.RetryMessageHandler} makes a failed
+ *       message due again, by the same rule that sets the inbox's {@code retryable} flag.
  *   <li>{@link za.co.fynbos.branchbook.notification.application.MessageEraser} deletes the messages
  *       of appointments booking's retention purge is deleting, in the same transaction,
  *       implementing booking's {@code NotificationEraser} port.

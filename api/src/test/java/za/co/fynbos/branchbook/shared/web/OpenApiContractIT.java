@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.assertj.core.api.InstanceOfAssertFactories;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -150,9 +151,9 @@ class OpenApiContractIT {
   /**
    * The document must describe what the API really sends, not only agree with itself. Each real
    * body below carries every property its schema requires and none the schema does not declare:
-   * successes (among them a cancel), problems with a code (among them a lookup's 400, 404 and 429,
-   * and a cancel's 409), and the HTTP-level problems that have none. On the default test clock,
-   * Monday 26 October 2026, 27 October is bookable.
+   * successes (among them a cancel and a retry), problems with a code (among them a lookup's 400,
+   * 404 and 429, a cancel's 409 and a retry's 400 and 404), and the HTTP-level problems that have
+   * none. On the default test clock, Monday 26 October 2026, 27 October is bookable.
    */
   @Test
   void realResponsesHaveExactlyThePropertiesTheirSchemasDeclare() {
@@ -200,6 +201,14 @@ class OpenApiContractIT {
     check(document, "Appointment", cancelled, "$", mismatches);
     check(document, "Notification", cancelled, "$.notifications[0]", mismatches);
     check(document, "Notification", cancelled, "$.notifications[1]", mismatches);
+    List<String> confirmations =
+        JsonPath.read(cancelled, "$.notifications[?(@.kind == 'CONFIRMATION')].id");
+    check(
+        document,
+        "InboxMessage",
+        body(Bookings.retry(mvc, confirmations.getFirst())),
+        "$",
+        mismatches);
     String started = booked(mvc, "UMH", "082 555 0199");
     clock.setInstant(Instant.parse("2026-10-27T08:00:00Z"));
     MvcTestResult tooLate = Bookings.cancel(mvc, started, "0199");
@@ -224,6 +233,8 @@ class OpenApiContractIT {
             lookup(mvc, reference, "95"),
             tooLate,
             mvc.get().uri("/api/v1/messages?limit=0").exchange(),
+            Bookings.retry(mvc, UUID.randomUUID().toString()),
+            Bookings.retry(mvc, "not-a-uuid"),
             wrongDigits.getFirst(),
             wrongDigits.getLast(),
             mvc.get().uri("/api/v1/no-such-path").exchange(),

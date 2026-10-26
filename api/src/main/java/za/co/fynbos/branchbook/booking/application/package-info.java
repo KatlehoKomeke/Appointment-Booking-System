@@ -15,8 +15,8 @@
  * them when the appointment itself is deleted. All three are implemented by the notification
  * module. The other way round, {@link
  * za.co.fynbos.branchbook.booking.application.AppointmentDirectory} names appointments for the
- * simulated inbox and tells the dispatcher whether an appointment is cancelled, so no other module
- * reads booking's tables.
+ * simulated inbox and tells the dispatcher and the retry of a message whether an appointment is
+ * cancelled or has started, so no other module reads booking's tables.
  *
  * <p>{@link za.co.fynbos.branchbook.booking.application.RetentionPurge} deletes appointments older
  * than {@link za.co.fynbos.branchbook.booking.application.RetentionProperties#maxAge()}, with their

@@ -8,6 +8,7 @@ import static za.co.fynbos.branchbook.support.Bookings.body;
 import static za.co.fynbos.branchbook.support.Bookings.book;
 import static za.co.fynbos.branchbook.support.Bookings.cancel;
 import static za.co.fynbos.branchbook.support.Bookings.lookup;
+import static za.co.fynbos.branchbook.support.Bookings.retry;
 
 import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
@@ -39,10 +40,10 @@ import za.co.fynbos.branchbook.support.MutableClock;
 
 /**
  * BR-17, FR-15, NFR-13: the dispatcher delivers PENDING messages through the gateway, one
- * transaction each. BR-24: it never delivers a confirmation after its appointment's cancellation.
- * Its own loop is off in the tests, so each test calls {@link NotificationDispatcher#runOnce} with
- * the instant it wants: no test sleeps. The numbers are synthetic; the simulated gateway refuses
- * those ending 0000.
+ * transaction each. BR-24, FR-18: it never delivers a confirmation after its appointment's
+ * cancellation, and a retry waits for a send in flight. Its own loop is off in the tests, so each
+ * test calls {@link NotificationDispatcher#runOnce} with the instant it wants: no test sleeps. The
+ * numbers are synthetic; the simulated gateway refuses those ending 0000.
  */
 @IntegrationTest
 @ExtendWith(DatabaseReset.class)
@@ -397,6 +398,55 @@ class NotificationDispatcherIT {
         .containsEntry("failure_reason", null);
     assertThat(dispatcher.runOnce(clock.instant())).isOne();
     assertThat(onlyMessage()).containsEntry("status", "SENT");
+  }
+
+  /**
+   * FR-18: a retry never races the dispatcher. While the fifth, failing attempt of a message is in
+   * the gateway, a retry of it waits for the message's lock; once the attempt marks it FAILED, the
+   * retry sees that and resets it, rather than answering from the PENDING row it would otherwise
+   * have read. The retry runs a second after the tick's instant, so the message it makes due is not
+   * yet due for that tick, however the two threads are scheduled once the lock is let go.
+   */
+  @Test
+  void retryWaitsForTheSendInFlightThenResetsTheFailedMessage() throws Exception {
+    book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0000"));
+    Instant start = clock.instant();
+    for (int second : new int[] {0, 2, 6, 14}) {
+      assertThat(dispatcher.runOnce(start.plusSeconds(second))).isOne();
+    }
+    CountDownLatch holding = new CountDownLatch(1);
+    CountDownLatch letGo = new CountDownLatch(1);
+    MessageGateway refusesSlowly =
+        message -> {
+          holding.countDown();
+          await(letGo);
+          return new MessageGateway.Refused("SIMULATED_FAILURE");
+        };
+    Instant fifth = start.plusSeconds(30);
+    String messageId = messageId("CONFIRMATION").toString();
+
+    CompletableFuture<Integer> tick =
+        CompletableFuture.supplyAsync(() -> dispatcherWith(refusesSlowly).runOnce(fifth));
+    CompletableFuture<MvcTestResult> retrying;
+    try {
+      assertThat(holding.await(5, TimeUnit.SECONDS)).isTrue();
+      clock.setInstant(fifth.plusSeconds(1));
+      retrying = CompletableFuture.supplyAsync(() -> retry(mvc, messageId));
+      LockWaits.await(jdbc, 0, 1);
+    } finally {
+      // Released even if the test fails, so no held transaction outlives it.
+      letGo.countDown();
+    }
+
+    assertThat(tick.get(5, TimeUnit.SECONDS)).isOne();
+    MvcTestResult retried = retrying.get(5, TimeUnit.SECONDS);
+    assertThat(retried).hasStatus(HttpStatus.OK);
+    assertThat(retried)
+        .bodyJson()
+        .isLenientlyEqualTo(
+            """
+            {"status": "PENDING", "attempts": 0, "failureReason": null, "lastError": null,
+             "retryable": false, "nextAttemptAt": "2026-10-26T08:00:31+02:00"}""");
   }
 
   /** A gateway that accepts every message and records the order it was handed them in. */

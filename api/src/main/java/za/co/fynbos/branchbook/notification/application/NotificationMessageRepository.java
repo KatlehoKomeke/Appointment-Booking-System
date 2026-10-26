@@ -34,6 +34,16 @@ public interface NotificationMessageRepository {
   List<NotificationMessage> newest(int limit);
 
   /**
+   * Locks one message for the caller's transaction, waiting for a transaction that holds it, such
+   * as the dispatcher while it sends that message. So a retry acts on the message as it is once the
+   * send in flight has been marked, never on what it was before.
+   *
+   * @param id the message's id
+   * @return the message, or empty if no message has that id
+   */
+  Optional<NotificationMessage> lockById(UUID id);
+
+  /**
    * Locks the next due PENDING message for the caller's transaction, skipping any another
    * transaction has locked.
    *
@@ -90,6 +100,16 @@ public interface NotificationMessageRepository {
    * @param id the message, locked by the caller
    */
   void markSuperseded(UUID id);
+
+  /**
+   * Makes a FAILED message due again: PENDING, no attempts, due at {@code now}, with no error or
+   * failure reason (FR-18). The caller has locked the message and decided that a retry may send it.
+   *
+   * @param id the message
+   * @param now the current instant, when the dispatcher may next try it
+   * @return the message as stored after the reset
+   */
+  NotificationMessage resetForRetry(UUID id, Instant now);
 
   /**
    * Marks a still-PENDING message FAILED with {@code DISPATCH_ERROR}, after marking its outcome

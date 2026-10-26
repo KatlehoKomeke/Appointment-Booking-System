@@ -10,9 +10,10 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Books, opens and cancels appointments through the API in tests. Bodies are written by Jackson, so
- * any value, even a malformed one, is sent exactly as given. The customer is the synthetic Nomvula
- * Dlamini unless a test says otherwise; numbers come from the demo range in SECURITY.md.
+ * Books, opens and cancels appointments, and retries their messages, through the API in tests.
+ * Bodies are written by Jackson, so any value, even a malformed one, is sent exactly as given. The
+ * customer is the synthetic Nomvula Dlamini unless a test says otherwise; numbers come from the
+ * demo range in SECURITY.md.
  */
 public final class Bookings {
 
@@ -123,5 +124,19 @@ public final class Bookings {
       request.header("X-Mobile-Last4", last4);
     }
     return request.exchange();
+  }
+
+  /**
+   * Retries a message, as the simulated inbox's Retry button does.
+   *
+   * @param mvc the application
+   * @param messageId the message's id, as sent
+   * @return the response
+   */
+  public static MvcTestResult retry(MockMvcTester mvc, String messageId) {
+    return mvc.post()
+        .uri("/api/v1/messages/{id}/retry", messageId)
+        .header("X-Correlation-Id", "test-retry")
+        .exchange();
   }
 }

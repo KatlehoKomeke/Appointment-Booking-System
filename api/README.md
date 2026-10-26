@@ -72,9 +72,10 @@ and `ScriptedReferenceGenerator`, which replaces the random generator in every i
 references a test scripts first, so a test can force a reference collision. The dispatcher's own loop is off in the
 tests: a test that delivers calls `NotificationDispatcher.runOnce` with the instant it wants, so no test sleeps.
 `BookingPause` holds a booking at step 10, after it has written its appointment and SMS and before it commits, or a
-cancel at the statement a test names, such as its UPDATE of the appointment, so a test can look from outside the
-transaction or send a second request into it at a moment it chooses. `LockWaits` waits until PostgreSQL shows the
-sessions a test expects waiting for a lock, so a race is forced, never hoped for, and no test sleeps.
+cancel at the statement a test names, such as its UPDATE of the appointment, or a retry at its reset before that
+statement locks anything, so a test can look from outside the transaction or send a second request into it at a moment
+it chooses. `LockWaits` waits until PostgreSQL shows the sessions a test expects waiting for a lock, so a race is
+forced, never hoped for, and no test sleeps.
 
 The schema is proven directly: `SchemaConstraintIT` runs raw SQL that bypasses the application and shows that each
 named constraint rejects what it should, and fails if a constraint is added without a case. It also shows that rows
@@ -92,7 +93,7 @@ environment supplies the rest:
 | `DB_USER`, `DB_PASSWORD` | Database credentials | `compose.yaml` locally; in the hosted demo, AWS Secrets Manager (`branchbook/database`), injected when the task starts |
 | `PORT` | HTTP port, 8080 by default | Optional |
 | `BRANCHBOOK_DISPATCHER_ENABLED` | Runs the dispatcher that delivers PENDING messages every 2 seconds on its own thread. `true` by default; its interval and the simulated gateway's latency are in application.yml. | Optional; the tests switch it off and drive it themselves |
-| `BRANCHBOOK_INBOX_ENABLED` | Switches on the simulated inbox, `GET /api/v1/messages`, an operator view of every booking's messages. `false` by default. | `compose.yaml` and `make dev-api` set it to `true`, and so do the tests |
+| `BRANCHBOOK_INBOX_ENABLED` | Switches on the simulated inbox, `GET /api/v1/messages`, an operator view of every booking's messages, and its retry, `POST /api/v1/messages/{id}/retry`. `false` by default. | `compose.yaml` and `make dev-api` set it to `true`, and so do the tests |
 | `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` | Takes bookings only from the published demo numbers, 082 555 0000 to 0199, so a public demo is never given a real person's number ([ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md)). Any other South African mobile is `422 DEMO_NUMBER_REQUIRED`. `false` by default. | The hosted demo's ECS task definition sets it to `true`, and `EXPECT_DEMO_NUMBERS_ONLY=1 scripts/smoke.sh <url>` fails if a deployment has it off. The start-up log says which numbers bookings take. `compose.yaml` and `make dev-api` leave it off, and the shared test configuration sets it to `false`; `DemoNumbersOnlyIT` switches it on |
 | `BRANCHBOOK_RETENTION_ENABLED` | `branchbook.retention.enabled`. Switches on the hourly retention job, which deletes every appointment older than the max-age below, with its messages and idempotency keys, keeping the hosted demo's 48-hour promise ([SECURITY.md](../SECURITY.md#personal-information-popia)). `false` by default. | The hosted demo's ECS task definition sets it to `true`, and nothing else does. `compose.yaml`, `make dev-api` and the tests leave it off; the tests call `RetentionPurge` themselves |
 | `BRANCHBOOK_RETENTION_MAX_AGE` | `branchbook.retention.max-age`. How long after its booking an appointment is deleted, as an ISO-8601 duration. `PT48H` by default; less than `PT24H`, the life of an `Idempotency-Key`, stops start-up. | Optional; the default is the hosted demo's promise |
@@ -116,6 +117,7 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 | `GET /api/v1/appointments/{reference}` | Open an appointment again, with `X-Mobile-Last4` |
 | `POST /api/v1/appointments/{reference}/cancel` | Cancel an appointment before it starts, with `X-Mobile-Last4`. `200` with the appointment as a lookup now shows it: `CANCELLED`, its PENDING or FAILED confirmation superseded and its cancellation SMS PENDING |
 | `GET /api/v1/messages?limit=` | The simulated inbox: the newest messages of every booking, recipients redacted to `082 *** ****`. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
+| `POST /api/v1/messages/{id}/retry` | Make a FAILED message due again, as the inbox's Retry button does; any other message is returned unchanged. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
 | `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml) |
 | `/swagger-ui.html` | Swagger UI, to read and try the API |
 | `/` and the app's routes (`/book`, `/manage`, `/messages`, `/privacy`, `/appointments/{reference}`) | The React app |
@@ -232,6 +234,13 @@ How a cancel is decided (BR-13, BR-14, BR-16, BR-24):
 }
 ```
 
+The retry of a message locks it with `FOR UPDATE` until it commits, and waits up to 2 seconds for a send of it in
+flight, so it never races the dispatcher or a cancel. It resets a FAILED message whose `failureReason` is
+`DELIVERY_FAILED` or `DISPATCH_ERROR` to PENDING, with no attempts and due now. Every other message, and the
+confirmation of an appointment that is cancelled or has started, comes back unchanged with `retryable` false, by the
+same rule that sets `retryable` in the inbox. Where the inbox is off, [docs/runbook.md](../docs/runbook.md) holds the
+guarded SQL that replays a message instead.
+
 Every error is an RFC 9457 problem with a stable `code` ([docs/errors.md](../docs/errors.md)). Its `instance` names
 the occurrence, never the request path, and an unexpected exception is logged with its type and stack frames but
 not its message, which could quote personal data:
@@ -287,8 +296,8 @@ api/
     │   │   ├── domain/                  plain Java: Appointment, MobileNumber, CustomerName, AppointmentReference
     │   │   └── infrastructure/          JPA and SQL adapters, the constraint translator, the key purge, the retention job
     │   ├── notification/                the confirmation and cancellation SMS, and the simulated inbox
-    │   │   ├── api/                     the inbox endpoint, which exists only while switched on
-    │   │   ├── application/             the outbox writer, the dispatcher, the message reads and the inbox query
+    │   │   ├── api/                     the inbox and retry endpoints, which exist only while switched on
+    │   │   ├── application/             the outbox writer, the dispatcher, the message reads, the inbox and the retry
     │   │   ├── domain/                  plain Java: NotificationTemplates, Gsm7
     │   │   └── infrastructure/          SQL for notification_messages
     │   └── shared/                      cross-cutting concerns

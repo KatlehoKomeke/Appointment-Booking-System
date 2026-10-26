@@ -144,6 +144,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/messages/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a failed simulated message
+         * @description Resets a FAILED message whose failureReason is DELIVERY_FAILED or DISPATCH_ERROR to PENDING with no attempts, due now. Any other message, and the confirmation of an appointment that is cancelled or has started, is returned unchanged with retryable false. Waits up to 2 seconds for a send of the message in flight to finish first, and keeps the message locked until it commits. Switched off unless branchbook.inbox.enabled is true; then the path is a 404.
+         */
+        post: operations["retryMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -345,7 +365,7 @@ export interface components {
             recipientMasked: string;
             /** @example APT-7K3M-9Q2X */
             reference: string;
-            /** @description True only for FAILED with DELIVERY_FAILED or DISPATCH_ERROR */
+            /** @description True only for FAILED with DELIVERY_FAILED or DISPATCH_ERROR, and never for the confirmation of an appointment that is cancelled or has started */
             retryable: boolean;
             /** Format: date-time */
             sentAt: string | null;
@@ -819,6 +839,61 @@ export interface operations {
             /** @description VALIDATION_FAILED: limit is not from 1 to 200 */
             400: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    retryMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description The message's id, from the inbox
+                 * @example dccc2431-28aa-4926-a555-ca6c80ddfd88
+                 */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The message: reset to PENDING, or unchanged when a retry could not send it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxMessage"];
+                };
+            };
+            /** @description VALIDATION_FAILED: id is not a UUID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description MESSAGE_NOT_FOUND: no message has that id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description TRY_AGAIN: the message stayed locked for 2 seconds, or the database is unavailable */
+            503: {
+                headers: {
+                    /** @description Seconds to wait before trying again */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

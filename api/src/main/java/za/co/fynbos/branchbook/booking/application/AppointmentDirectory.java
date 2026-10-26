@@ -14,9 +14,9 @@ import za.co.fynbos.branchbook.catalogue.application.CatalogueLookup;
 /**
  * Answers other modules' questions about appointments, so no other module reads booking's tables.
  * The simulated inbox shows each message with its appointment's reference and its branch's times;
- * the dispatcher asks whether a confirmation's appointment is cancelled (BR-24). Every answer is a
- * plain read that takes no lock, so a caller holding a message's row lock can never wait for a
- * cancel that holds the appointment's.
+ * the dispatcher and the retry of a message ask whether a confirmation's appointment is cancelled
+ * or has started (BR-24). Every answer is a plain read that takes no lock, so a caller holding a
+ * message's row lock can never wait for a cancel that holds the appointment's.
  */
 @Service
 public class AppointmentDirectory {
@@ -44,7 +44,13 @@ public class AppointmentDirectory {
       ZoneId zone =
           zones.computeIfAbsent(
               appointment.branchId(), branchId -> catalogue.branch(branchId).timezone());
-      labels.put(appointment.id(), new AppointmentLabel(appointment.reference(), zone));
+      labels.put(
+          appointment.id(),
+          new AppointmentLabel(
+              appointment.reference(),
+              zone,
+              appointment.startsAt(),
+              appointment.status() == AppointmentStatus.CANCELLED));
     }
     return labels;
   }

@@ -15,10 +15,11 @@ servers:
 tags:
 - description: "The branches customers can book at, and what each offers."
   name: Branches
-- description: "Every booking's simulated messages, recipients redacted."
-  name: Simulated inbox
 - description: The slots a service can be booked in at a branch.
   name: Availability
+- description: "Every booking's simulated messages, recipients redacted, and their\
+    \ retry."
+  name: Simulated inbox
 - description: "Book an appointment, open it again, and cancel it."
   name: Appointments
 paths:
@@ -394,6 +395,61 @@ paths:
                 $ref: "#/components/schemas/Problem"
           description: "VALIDATION_FAILED: limit is not from 1 to 200"
       summary: List the simulated messages
+      tags:
+      - Simulated inbox
+  /api/v1/messages/{id}/retry:
+    post:
+      description: "Resets a FAILED message whose failureReason is DELIVERY_FAILED\
+        \ or DISPATCH_ERROR to PENDING with no attempts, due now. Any other message,\
+        \ and the confirmation of an appointment that is cancelled or has started,\
+        \ is returned unchanged with retryable false. Waits up to 2 seconds for a\
+        \ send of the message in flight to finish first, and keeps the message locked\
+        \ until it commits. Switched off unless branchbook.inbox.enabled is true;\
+        \ then the path is a 404."
+      operationId: retryMessage
+      parameters:
+      - description: "The message's id, from the inbox"
+        example: dccc2431-28aa-4926-a555-ca6c80ddfd88
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxMessage"
+          description: "The message: reset to PENDING, or unchanged when a retry could\
+            \ not send it"
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "VALIDATION_FAILED: id is not a UUID"
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "MESSAGE_NOT_FOUND: no message has that id"
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "TRY_AGAIN: the message stayed locked for 2 seconds, or the\
+            \ database is unavailable"
+          headers:
+            Retry-After:
+              description: Seconds to wait before trying again
+              schema:
+                type: integer
+              style: simple
+      summary: Retry a failed simulated message
       tags:
       - Simulated inbox
 components:
@@ -804,7 +860,9 @@ components:
           example: APT-7K3M-9Q2X
         retryable:
           type: boolean
-          description: True only for FAILED with DELIVERY_FAILED or DISPATCH_ERROR
+          description: "True only for FAILED with DELIVERY_FAILED or DISPATCH_ERROR,\
+            \ and never for the confirmation of an appointment that is cancelled or\
+            \ has started"
         sentAt:
           type:
           - string

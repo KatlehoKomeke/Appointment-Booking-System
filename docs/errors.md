@@ -80,6 +80,9 @@ One request yields exactly one code:
   writes nothing, even after its start; then one that has started is `409 TOO_LATE_TO_CANCEL` and is left as it
   was. A second cancel of the same appointment at the same moment is not an error: its version check fails, it
   reads the appointment once more and returns the same `200`. A lock not granted within 2 s is `503 TRY_AGAIN`.
+- **Retry** (`POST /api/v1/messages/{id}/retry`, only while `branchbook.inbox.enabled` is true): an `id` that is not
+  a UUID is `400 VALIDATION_FAILED`; then an unknown id is `404 MESSAGE_NOT_FOUND`. Any message that exists is a
+  `200`: reset to PENDING if a retry could send it, otherwise returned unchanged with `retryable` false.
 
 ## Field codes
 
@@ -92,7 +95,7 @@ name such as `X-Mobile-Last4`, or the name of a path or query parameter such as 
 | `REQUIRED` | a header or query parameter | It is missing. |
 | `NOT_NULL` | a body field | It is missing or `null`. |
 | `NOT_BLANK` | `customer.firstName`, `customer.lastName` | It is missing or only spaces. |
-| `PATTERN` | `branchCode` and `serviceCode` in a body; `code` in a path; `service` in a query; `X-Mobile-Last4` | It has the wrong shape: 2 to 8 letters for a branch code, 2 to 12 letters for a service code, four digits for the header. |
+| `PATTERN` | `branchCode` and `serviceCode` in a body; `code` or `id` in a path; `service` in a query; `X-Mobile-Last4` | It has the wrong shape: 2 to 8 letters for a branch code, 2 to 12 letters for a service code, a UUID for a message id, four digits for the header. |
 | `NAME_INVALID` | `customer.firstName`, `customer.lastName` | Not a name: 1 to 60 characters that start with a letter and hold only letters, spaces, hyphens and apostrophes. |
 | `OFFSET_REQUIRED` | `startsAt` | Not an ISO-8601 date and time with an offset, such as `2026-10-27T09:30:00+02:00`. |
 | `UNKNOWN_FIELD` | the unknown field, or `(body)` | The request does not define it, such as `endsAt`, which the server computes. Only the first is reported. |
@@ -121,7 +124,7 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 | `IDEMPOTENCY_KEY_REQUIRED` | 400 | `POST /api/v1/appointments` arrived without an `Idempotency-Key` header holding a UUID. | Nothing; the web app always sends one. |
 | `BRANCH_NOT_FOUND` | 404 | The branch code is unknown or the branch is inactive. | "We couldn't find that branch." |
 | `APPOINTMENT_NOT_FOUND` | 404 | The reference is unknown or malformed, **or** the last four digits are wrong. Every case returns the same body, the digits are compared in constant time, and the answer is never `403`, so the API cannot be used to discover references. | "We couldn't find an appointment with those details." |
-| `MESSAGE_NOT_FOUND` | 404 | Retry of a simulated message id that does not exist (Tier 2 retry endpoint, local profiles only). | Not shown to customers. |
+| `MESSAGE_NOT_FOUND` | 404 | Retry of a simulated message id that does not exist. The retry, `POST /api/v1/messages/{id}/retry`, exists only while `branchbook.inbox.enabled` is true, as the inbox does; otherwise its path is a plain `404` with no code. | Not shown to customers. |
 | `SERVICE_NOT_OFFERED_AT_BRANCH` | 422 | The branch does not offer the requested service, or no active service has that code. | "This branch doesn't offer that service." |
 | `DATE_OUTSIDE_BOOKING_WINDOW` | 422 | The date is outside the 30 bookable days, `[today, today + 30 days)` in the branch's time zone. | The date is not selectable. |
 | `SLOT_ON_CLOSED_DAY` | 422 | The branch is closed that day, or it is a public holiday. | The day is shown as closed, with the reason. |
