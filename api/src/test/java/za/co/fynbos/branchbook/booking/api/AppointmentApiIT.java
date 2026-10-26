@@ -119,7 +119,9 @@ class AppointmentApiIT {
         .extractingPath("$.errors[*].field")
         .asArray()
         .containsExactly("customer.mobile");
-    assertThat(result.getResponse().getContentAsString()).doesNotContain("555");
+    assertThat(result.getResponse().getContentAsString())
+        .doesNotContain("0143")
+        .contains("for example 082 555 0101");
   }
 
   /** BR-2: the end is the server's to compute, so a client cannot send it. */

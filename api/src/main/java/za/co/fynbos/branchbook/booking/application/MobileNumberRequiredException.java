@@ -26,6 +26,6 @@ public class MobileNumberRequiredException extends ProblemException {
                 new FieldProblem(
                     "customer.mobile",
                     ProblemCode.MOBILE_NUMBER_REQUIRED.name(),
-                    "Enter a South African cellphone number, for example 082 123 4567"))));
+                    "Enter a South African cellphone number, for example 082 555 0101"))));
   }
 }
