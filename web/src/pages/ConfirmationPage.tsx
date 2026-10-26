@@ -109,6 +109,13 @@ function confirmationMessage(appointment: Appointment): Notification | undefined
   return appointment.notifications.findLast((n) => n.kind === 'CONFIRMATION');
 }
 
+// The booking flow with this branch and service already chosen, so it opens on the date-and-time step. A branch
+// that no longer offers the service is caught there, with the API's own words for it.
+function bookAgainHref({ branch, service }: Appointment): string {
+  const search = new URLSearchParams({ branch: branch.code, service: service.code });
+  return `/book?${search.toString()}`;
+}
+
 function AppointmentView({ appointment }: { appointment: Appointment }) {
   const sms = confirmationMessage(appointment);
 
@@ -117,6 +124,16 @@ function AppointmentView({ appointment }: { appointment: Appointment }) {
       <ReferenceCard reference={appointment.reference} />
       {sms !== undefined && <SmsCard notification={sms} />}
       <AppointmentCard appointment={appointment} />
+      <ButtonLink
+        to={bookAgainHref(appointment)}
+        variant="secondary"
+        fullWidth
+        // The visible words start the name, as they must; the rest says which service and where, for a screen
+        // reader's list of links, which reads each link without the card above it.
+        aria-label={`Book this service again: ${appointment.service.name} at ${appointment.branch.name}`}
+      >
+        Book this service again
+      </ButtonLink>
       <ButtonLink to="/book" variant="secondary" fullWidth>
         Book another appointment
       </ButtonLink>

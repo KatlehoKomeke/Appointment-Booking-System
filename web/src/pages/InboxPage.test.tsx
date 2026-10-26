@@ -11,7 +11,9 @@ describe('InboxPage', () => {
   it('lists every message newest first, with its status, attempts and failure in words', async () => {
     renderRoute('/messages');
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Simulated inbox' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Simulated inbox' }),
+    ).toBeInTheDocument();
     expect(screen.getByText('Simulated: no real messages are sent.')).toBeInTheDocument();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 

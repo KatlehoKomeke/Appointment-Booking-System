@@ -12,7 +12,7 @@ import { server } from '../test/server';
 async function findAppointment(reference: string, digits: string) {
   const user = userEvent.setup();
   const rendered = renderRoute('/manage');
-  await user.type(screen.getByRole('textbox', { name: 'Reference' }), reference);
+  await user.type(await screen.findByRole('textbox', { name: 'Reference' }), reference);
   await user.type(
     screen.getByRole('textbox', { name: 'Last four digits of your cellphone number' }),
     digits,
@@ -82,7 +82,7 @@ describe('ManagePage', () => {
     const user = userEvent.setup();
     renderRoute('/manage');
 
-    await user.click(screen.getByRole('button', { name: 'Find appointment' }));
+    await user.click(await screen.findByRole('button', { name: 'Find appointment' }));
 
     expect(screen.getByRole('textbox', { name: 'Reference' })).toHaveAccessibleDescription(
       'It starts with APT. Hyphens are optional. Enter the reference from your SMS.',

@@ -1,0 +1,14 @@
+/*
+ * Hidden for the first 300 ms and then shown at once, with no fade, so a fast load never flashes the line and a slow
+ * one is not left blank. Reduced motion changes nothing here: nothing moves.
+ */
+.loading {
+  color: var(--colour-text-muted);
+  animation: wait 0s 300ms backwards;
+}
+
+@keyframes wait {
+  from {
+    opacity: 0;
+  }
+}
