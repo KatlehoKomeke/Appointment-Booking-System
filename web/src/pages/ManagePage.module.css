@@ -1,0 +1,40 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The heading and its lead keep their own bottom margin in flow layout; here the gap takes its place. */
+.page > :has(> h1) {
+  margin-bottom: 0;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* The reference is read back character by character, so it is typed in monospace, as it is printed. */
+.reference input {
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+}
+
+/* Four digits need no more width than this; the spacing keeps each one apart. */
+.digits input {
+  max-width: 140px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.2em;
+}
+
+.note {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}
+
+/* The two notes sit closer to each other than to the form. */
+.note + .note {
+  margin-top: calc(var(--space-3) - var(--space-4));
+}

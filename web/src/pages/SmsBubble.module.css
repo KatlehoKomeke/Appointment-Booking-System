@@ -1,0 +1,34 @@
+/* The grey phone screen the confirmation page's bubble sits on, with the sender and time under it. */
+.frame {
+  padding: var(--space-3);
+  border-radius: var(--radius-bubble);
+  background: var(--colour-fill-muted);
+}
+
+/* An incoming message: every corner round except the bottom left, where the bubble points at its sender. */
+.bubble {
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--colour-border);
+  border-radius: var(--radius-bubble) var(--radius-bubble) var(--radius-bubble)
+    var(--radius-bubble-tail);
+  background: var(--colour-card);
+}
+
+/* On a white inbox card the bubble alone takes the page's grey, lighter than the confirmation page's frame. */
+.muted {
+  background: var(--colour-surface);
+}
+
+/* The SMS keeps its own line breaks, and its long URL and reference wrap rather than widen the page. */
+.body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  margin-top: var(--space-2);
+  font-size: var(--type-meta-size);
+  line-height: var(--type-meta-line);
+  color: var(--colour-text-muted);
+  text-align: right;
+}
