@@ -19,7 +19,7 @@ const SECTIONS = [
   {
     id: 'privacy-collect',
     heading: 'What we collect',
-    body: 'Your first name, last name and cellphone number. All three are needed to book, so none is optional. We never ask for your ID number.',
+    body: 'Your first name, last name and cellphone number. All three are needed to book, so none is optional. We never ask for your ID number. On the hosted demo, book with a demo number, 082 555 0000 to 082 555 0199, and a made-up name; other visitors cannot see your booking.',
   },
   {
     id: 'privacy-why',
@@ -29,7 +29,7 @@ const SECTIONS = [
   {
     id: 'privacy-retention',
     heading: 'How long we keep it',
-    body: 'The hosted demo deletes every booking, with your name and number, after 48 hours. A copy run locally keeps them on that machine until you delete them.',
+    body: "The hosted demo deletes every booking, with your name and number, from its database about 48 hours after it is made. The database's backups, which could still hold it, expire after 7 days. A copy run locally keeps them on that machine until you delete them.",
   },
   {
     id: 'privacy-rights',

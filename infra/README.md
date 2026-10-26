@@ -132,7 +132,7 @@ Everything in this diagram is built. Solid arrows are calls; dashed arrows are t
 **A.** By hand, the administrator `branchbook-admin`, an IAM user who signs in with `aws login`, runs the CDK app with
 `BRANCHBOOK_ALERT_EMAIL` set, so the app includes `BranchbookAccount`. `cdk deploy` then updates that stack in
 `us-east-1` through the `us-east-1` CDK bootstrap roles. Code and workflow enforce that switch. The hosted demo's
-two stacks have a switch of their own, `BRANCHBOOK_DEMO_GATE_PASSWORD`, which only the administrator sets
+two stacks have a switch of their own, `BRANCHBOOK_HOSTED_DEMO=true`, which the administrator sets to deploy them
 ([The hosted demo](#the-hosted-demo)).
 
 1. The job `deploy` in `deploy.yml` declares the GitHub environment `aws-demo`, which only the branch `main` and `v*`
@@ -142,7 +142,7 @@ two stacks have a switch of their own, `BRANCHBOOK_DEMO_GATE_PASSWORD`, which on
 3. The deploy role's sessions last at most 1 hour, and its policy has two statements: `AssumeCdkBootstrapRolesOnly`
    (`sts:AssumeRole` on `cdk-hnb659fds-*`) and `ReadReleaseRecordOnly` (`ssm:GetParameter` on
    `/branchbook/release`) (IAM).
-4. `deploy.yml` never sets `BRANCHBOOK_ALERT_EMAIL` or `BRANCHBOOK_DEMO_GATE_PASSWORD`, so the pipeline's CDK app
+4. `deploy.yml` never sets `BRANCHBOOK_ALERT_EMAIL` or `BRANCHBOOK_HOSTED_DEMO`, so the pipeline's CDK app
    holds only `BranchbookRelease`. Deploying `BranchbookAccount` or the hosted demo is not allowed because those
    stacks are not in the app
    ([bin/branchbook.ts](bin/branchbook.ts)). Code and workflow enforce this, not IAM.
@@ -171,7 +171,7 @@ so a change to the repository can remove it.
   can therefore create any resource, IAM included.
 - `main` requires no review or passing check ([docs/delivery.md](../docs/delivery.md#known-gaps)), so a workflow
   pushed to `main` that set `BRANCHBOOK_ALERT_EMAIL` could deploy `BranchbookAccount`, and one that set
-  `BRANCHBOOK_DEMO_GATE_PASSWORD` could deploy the hosted demo.
+  `BRANCHBOOK_HOSTED_DEMO=true` could deploy the hosted demo.
 
 What limits this today is the repository, not AWS: it has one collaborator, who is an administrator, and the
 `aws-demo` branch policy admits only `main` and `v*` tags.
@@ -211,13 +211,13 @@ A reviewer's request takes this path:
 
 1. The browser resolves `branchbook.click` through Route 53, whose alias names the load balancer. DNS answers the
    name; it is not in the data path.
-2. AWS WAF, attached to the load balancer, applies its rules in order: it blocks `/actuator` (403); asks for the demo
-   gate's basic-auth credentials, user `reviewer` (401 with `WWW-Authenticate` without them); allows 30 booking
+2. AWS WAF, attached to the load balancer, applies its rules in order: it blocks `/actuator` (403); allows 30 booking
    `POST`s to `/api/v1/appointments` per IP in 5 minutes; then applies AWS's managed rule groups
    `AWSManagedRulesAmazonIpReputationList`, `AWSManagedRulesKnownBadInputsRuleSet` and `AWSManagedRulesCommonRuleSet`.
+   It asks for no sign-in.
 3. The load balancer, in the public subnets, ends HTTPS on port 443 with ELB's recommended TLS 1.3 policy, drops
-   invalid header fields and health-checks `/readyz`. It serves no plain HTTP, not even a redirect: WAF judges a
-   request before the load balancer redirects it, so HTTP would meet the demo gate and send its password unencrypted.
+   invalid header fields and health-checks `/readyz`. Plain HTTP on port 80 is answered with a redirect to HTTPS, and
+   HSTS keeps browsers there.
 4. The Fargate task (ARM64, 0.5 vCPU, 1 GB), which admits traffic only from the load balancer, serves the request on
    port 8080. It runs in a public subnet with a public IP, so it reaches ECR and Secrets Manager without a NAT
    gateway.
@@ -230,9 +230,19 @@ The task is configured by environment variables; there are no `prod` or `demo` S
 | `DB_URL` | The RDS endpoint and the database `branchbook`, with `sslmode=require` |
 | `DB_USER`, `DB_PASSWORD` | From the Secrets Manager secret `branchbook/database`; never in the template |
 | `PUBLIC_BASE_URL` | `https://branchbook.click`, the confirmation SMS's `/manage` link |
-| `BRANCHBOOK_INBOX_ENABLED` | `true`: the simulated inbox is on, so reviewers can watch the outbox deliver |
-| `BRANCHBOOK_RETENTION_ENABLED` | `true`: an hourly job deletes every booking 48 hours after it was made, with its messages and idempotency keys |
+| `BRANCHBOOK_INBOX_ENABLED` | `false`: the simulated inbox is off, so `/api/v1/messages` answers 404 and the `/messages` page says it is switched off on this deployment. Each booker still sees their own SMS and its status on the confirmation page |
+| `BRANCHBOOK_RETENTION_ENABLED` | `true`: an hourly job deletes every booking 48 hours after it was made, with its messages and idempotency keys. Arrives with the next backend change |
+| `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` | `true`: only the published demo numbers, 082 555 0000 to 082 555 0199, may book. Arrives with the next backend change |
 | `SERVER_FORWARD_HEADERS_STRATEGY` | `native`: the app trusts the load balancer's `X-Forwarded-*` headers, so it sees each request as HTTPS |
+
+**No sign-in.** Anyone with the address can try the demo: a sign-in prompt in front of a demo is a poor experience
+for everyone who opens it, reviewers included
+([ADR-0006, Notes](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). What keeps real personal data out is
+the demo-number check and the 48-hour deletion above, and the simulated gateway, which sends nothing. Both switches
+are set in the task, but the backend change that reads them is not merged yet; until it is deployed, the app
+ignores them. The inbox is off because, with no sign-in, it would list every booking's reference to every visitor,
+and a demo number's last four digits are public, so anyone could open anyone's booking and see the name typed into
+it.
 
 A new version starts and passes its health check before the old one stops (minimum 100, maximum 200 percent), and
 the deployment circuit breaker rolls back a version that never becomes healthy. The three alarms publish to an SNS
@@ -250,28 +260,28 @@ longer; until then the budget's alerts at $45, $72 and $90 are the backstop.
 From this folder, signed in as `branchbook-admin`, with Docker running:
 
 ```bash
-BRANCHBOOK_DEMO_GATE_PASSWORD='<the gate password>' \
+AWS_PROFILE=branchbook-admin BRANCHBOOK_HOSTED_DEMO=true \
 BRANCHBOOK_DEMO_ALERT_EMAIL=<your address> \
-  npx cdk deploy BranchbookData BranchbookApp --profile branchbook-admin
+  npx cdk deploy BranchbookData BranchbookApp
 ```
 
-- **`BRANCHBOOK_DEMO_GATE_PASSWORD` is required.** The two stacks are in the CDK app only when it is set, and the
-  App stack refuses one shorter than 12 characters. It is never committed, but it sits in the WAF rule and so in the
-  deployed CloudFormation template ([SECURITY.md](../SECURITY.md#on-the-hosted-demo)).
+- **`BRANCHBOOK_HOSTED_DEMO=true` is required.** The two stacks are in the CDK app only when it is set. No password
+  or other secret is supplied at deploy time.
 - **`BRANCHBOOK_DEMO_ALERT_EMAIL` is optional.** Without it the alarms still exist, on a topic with no subscriber.
 - **The image is built here.** `cdk deploy` builds the repository's [Dockerfile](../Dockerfile) for `linux/arm64` on
   the administrator's machine and pushes it to the `af-south-1` bootstrap ECR repository.
-- **To update,** run the same command from the commit you want live, with the same password and address: a
-  different password changes the gate, and leaving out the address removes its subscription.
+- **To update,** run the same command from the commit you want live, with the same address: leaving it out removes
+  its subscription.
 
-The pipeline never deploys these stacks: `deploy.yml` never sets the password, so its CDK app does not contain them.
+The pipeline never deploys these stacks: `deploy.yml` never sets `BRANCHBOOK_HOSTED_DEMO`, so its CDK app does not
+contain them.
 `/branchbook/release` therefore records the commit the pipeline last deployed, not the hosted app's version.
 
 ### Tearing it down
 
 ```bash
-BRANCHBOOK_DEMO_GATE_PASSWORD='<any 12 characters>' \
-  npx cdk destroy BranchbookApp BranchbookData --profile branchbook-admin
+AWS_PROFILE=branchbook-admin BRANCHBOOK_HOSTED_DEMO=true \
+  npx cdk destroy BranchbookApp BranchbookData
 ```
 
 The variable must be set, because the stacks are in the app only when it is. Three things outlive the stacks:
@@ -287,9 +297,6 @@ The variable must be set, because the stacks are in the app only when it is. Thr
   [Dockerfile](../Dockerfile)'s runtime stage has `RUN` steps. Today it builds on the administrator's Apple-silicon
   machine.
 - The release record would have to be written after a smoke test, so that it records only a version that works.
-
-**Accepted:** the demo-gate credential sits in the synthesised WAF rule and the CloudFormation template, where anyone
-who can read the stack can read it.
 
 **Resolved on 2026-10-26:** the availability zones are pinned in [bin/branchbook.ts](bin/branchbook.ts), so
 synthesis needs no lookup; the App stack's alert address has its own input, `BRANCHBOOK_DEMO_ALERT_EMAIL`; and
@@ -312,16 +319,16 @@ npm run lint        # ESLint, including TSDoc on every export
 npm run build       # type-check
 npm test            # unit tests on the synthesised templates
 BRANCHBOOK_ALERT_EMAIL=alerts@example.com \
-BRANCHBOOK_DEMO_GATE_PASSWORD=synth-only-placeholder \
+BRANCHBOOK_HOSTED_DEMO=true \
   npx cdk synth     # render CloudFormation without touching AWS
 ```
 
 The lint rules are in [eslint.config.mjs](eslint.config.mjs). They use typescript-eslint, which needs the TypeScript
 compiler API that TypeScript 7 does not yet provide, so this package uses TypeScript 6.0, the same as `web/`.
 
-`BRANCHBOOK_ALERT_EMAIL` is where budget alerts go, and `BRANCHBOOK_DEMO_GATE_PASSWORD` is the hosted demo's gate
-password. Both are read from the environment so that no personal address or password is ever committed, and each
-brings its stacks into the app. Any placeholder works for `synth`; use the real values only when deploying.
+`BRANCHBOOK_ALERT_EMAIL` is where budget alerts go, read from the environment so that no personal address is ever
+committed, and `BRANCHBOOK_HOSTED_DEMO=true` asks for the hosted demo. Each brings its stacks into the app. Any
+placeholder address works for `synth`; use the real one only when deploying.
 
 ## First-time setup
 

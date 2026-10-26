@@ -35,11 +35,12 @@ export function InboxPage() {
       <div className={styles.page}>
         <PageHeading
           title={TITLE}
-          lead="The simulated inbox is switched off on this deployment. It is a demo operator view, so it is not offered here."
+          lead="The simulated inbox is switched off on this deployment, so other visitors cannot see your booking. It is a demo operator view of every booking's messages."
         />
         <p>
-          You can still <Link to="/manage">find your appointment</Link> with its reference and the
-          last four digits of your cellphone number.
+          Your own SMS and its delivery status are on your confirmation page. You can open it again
+          from <Link to="/manage">Find your appointment</Link> with its reference and the last four
+          digits of your cellphone number.
         </p>
       </div>
     );

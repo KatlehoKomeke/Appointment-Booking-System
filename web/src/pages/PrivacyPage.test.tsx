@@ -31,7 +31,14 @@ describe('PrivacyPage', () => {
       'To schedule, confirm and manage this appointment, and for nothing else.',
     );
     expect(screen.getByRole('region', { name: 'How long we keep it' })).toHaveTextContent(
-      'The hosted demo deletes every booking, with your name and number, after 48 hours.',
+      'deletes every booking, with your name and number, from its database about 48 hours after it is made',
+    );
+    // The backups outlive the deletion, so the notice says how long they last.
+    expect(screen.getByRole('region', { name: 'How long we keep it' })).toHaveTextContent(
+      'backups, which could still hold it, expire after 7 days',
+    );
+    expect(screen.getByRole('region', { name: 'What we collect' })).toHaveTextContent(
+      'book with a demo number, 082 555 0000 to 082 555 0199',
     );
     expect(screen.getByRole('region', { name: 'Your rights' })).toHaveTextContent(
       'you may complain to the Information Regulator',

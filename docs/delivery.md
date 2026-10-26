@@ -169,7 +169,7 @@ Every push to `main` runs [deploy.yml](../.github/workflows/deploy.yml)
 prove:** that an application is serving (the hosted demo is deployed by hand, not by this job), or that the
 application's tests passed (`ci` runs alongside and is not consulted). The pipeline never sets
 `BRANCHBOOK_ALERT_EMAIL`, so the CDK app it runs does not contain `BranchbookAccount`, the stack that defines its own
-role; nor `BRANCHBOOK_DEMO_GATE_PASSWORD`, so it does not contain the hosted demo's stacks. How the trust works, and who can
+role; nor `BRANCHBOOK_HOSTED_DEMO`, so it does not contain the hosted demo's stacks. How the trust works, and who can
 change what, is in [infra/README.md](../infra/README.md#how-github-reaches-aws-without-keys) and
 [Who can change what in AWS](../infra/README.md#who-can-change-what-in-aws).
 
@@ -281,7 +281,7 @@ Each gap is stated here once, with what limits it today and what would close it.
 | The test-reference check in `ci / api` | `make test-docs` | The same script. |
 | `ci / stack` | `make up && make smoke` | No credential check of the logs. |
 | `secret-scan / gitleaks` | `make secrets-scan-history` | The same command. `make secrets-scan` scans the working tree instead, untracked files included. |
-| `infra / test-and-synth` and `deploy / test` | `cd infra && npm ci && npm run lint && npm run build && npm test` | There is no make target. `infra` also runs `npx cdk synth --quiet` with `BRANCHBOOK_ALERT_EMAIL=alerts@example.com` and `BRANCHBOOK_DEMO_GATE_PASSWORD=synth-only-placeholder`. |
+| `infra / test-and-synth` and `deploy / test` | `cd infra && npm ci && npm run lint && npm run build && npm test` | There is no make target. `infra` also runs `npx cdk synth --quiet` with `BRANCHBOOK_ALERT_EMAIL=alerts@example.com` and `BRANCHBOOK_HOSTED_DEMO=true`. |
 
 `make test` runs `test-api`, `test-web` and `test-docs` in turn ([Makefile](../Makefile)).
 
