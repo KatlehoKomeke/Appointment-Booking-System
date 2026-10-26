@@ -5,12 +5,16 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static za.co.fynbos.branchbook.support.Bookings.body;
 import static za.co.fynbos.branchbook.support.Bookings.book;
 
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -53,6 +57,8 @@ class BookAppointmentIT {
   @Autowired private AppointmentRepository appointments;
 
   @Autowired private PlatformTransactionManager transactionManager;
+
+  @Autowired private DataSource dataSource;
 
   /**
    * BR-25: once a FICA appointment has ended, the same customer can book FICA again, and the past
@@ -180,6 +186,108 @@ class BookAppointmentIT {
 
     assertThat(both).hasStatus(HttpStatus.CONFLICT);
     assertThat(both).bodyJson().extractingPath("$.code").isEqualTo("CUSTOMER_OVERLAP");
+  }
+
+  /**
+   * NFR-8, BR-22: a booking that cannot get the seat lock within 2 seconds gives up with 503
+   * TRY_AGAIN and Retry-After: 2, and writes nothing. Another connection holds Sandton's FICA row.
+   */
+  @Test
+  void lockTimeoutReturns503TryAgainWithRetryAfter() throws Exception {
+    MvcTestResult waited;
+    try (Connection holder = dataSource.getConnection()) {
+      holder.setAutoCommit(false);
+      try (PreparedStatement lock =
+          holder.prepareStatement(
+              "SELECT capacity FROM branch_services WHERE branch_id = ? AND service_id = ? FOR UPDATE")) {
+        lock.setObject(1, SeedData.SANDTON);
+        lock.setObject(2, SeedData.FICA);
+        lock.executeQuery().close();
+      }
+      try {
+        waited = book(mvc, body("SAN", "FICA", "2026-10-27T10:00:00+02:00", "082 555 0198"));
+      } finally {
+        holder.rollback();
+      }
+    }
+
+    assertThat(waited).hasStatus(HttpStatus.SERVICE_UNAVAILABLE).hasHeader("Retry-After", "2");
+    assertThat(waited).bodyJson().extractingPath("$.code").isEqualTo("TRY_AGAIN");
+    assertThat(count("appointments") + count("idempotency_keys") + count("notification_messages"))
+        .isZero();
+  }
+
+  /**
+   * BR-22: a deadlock (40P01), as a path that bypassed the lock order could cause, runs the whole
+   * booking once more, which then succeeds. A test-only trigger raises it on the first insert only;
+   * a sequence counts the inserts, because a sequence is not rolled back with the transaction.
+   */
+  @Test
+  void deadlockOnceIsRerunAndBooks() {
+    Deadlocked booked =
+        withDeadlockOnInsert(
+            "nextval('test_deadlock_inserts') = 1",
+            () -> book(mvc, body("SAN", "FICA", "2026-10-27T11:00:00+02:00", "082 555 0153")));
+
+    assertThat(booked.result()).hasStatus(HttpStatus.CREATED);
+    assertThat(booked.inserts()).as("the first insert and the re-run's").isEqualTo(2);
+    assertThat(count("appointments")).isOne();
+    assertThat(count("notification_messages")).isOne();
+  }
+
+  /**
+   * BR-22: a second deadlock in the same booking gives up with 503 TRY_AGAIN and Retry-After: 2,
+   * and writes nothing.
+   */
+  @Test
+  void deadlockTwiceReturns503TryAgainAndLeavesNothing() {
+    Deadlocked refused =
+        withDeadlockOnInsert(
+            "nextval('test_deadlock_inserts') > 0",
+            () -> book(mvc, body("SAN", "FICA", "2026-10-27T11:00:00+02:00", "082 555 0154")));
+
+    assertThat(refused.result())
+        .hasStatus(HttpStatus.SERVICE_UNAVAILABLE)
+        .hasHeader("Retry-After", "2");
+    assertThat(refused.result()).bodyJson().extractingPath("$.code").isEqualTo("TRY_AGAIN");
+    assertThat(refused.inserts()).as("one re-run, never more").isEqualTo(2);
+    assertThat(count("appointments") + count("idempotency_keys") + count("notification_messages"))
+        .isZero();
+  }
+
+  /**
+   * What a request did while inserting an appointment raised 40P01: its result and the inserts
+   * tried.
+   */
+  private record Deadlocked(MvcTestResult result, long inserts) {}
+
+  /** Runs a request while inserting an appointment raises 40P01 whenever the condition holds. */
+  private Deadlocked withDeadlockOnInsert(String condition, Supplier<MvcTestResult> request) {
+    try {
+      jdbc.execute("CREATE SEQUENCE test_deadlock_inserts");
+      jdbc.execute(
+          """
+          CREATE FUNCTION test_deadlock_on_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN
+            IF %s THEN
+              RAISE EXCEPTION 'test: deadlock' USING ERRCODE = 'deadlock_detected';
+            END IF;
+            RETURN NEW;
+          END $$"""
+              .formatted(condition));
+      jdbc.execute(
+          """
+          CREATE TRIGGER test_deadlock_on_insert BEFORE INSERT ON appointments
+          FOR EACH ROW EXECUTE FUNCTION test_deadlock_on_insert()""");
+      MvcTestResult result = request.get();
+      Long inserts =
+          jdbc.queryForObject("SELECT last_value FROM test_deadlock_inserts", Long.class);
+      return new Deadlocked(result, inserts == null ? 0 : inserts);
+    } finally {
+      jdbc.execute("DROP TRIGGER IF EXISTS test_deadlock_on_insert ON appointments");
+      jdbc.execute("DROP FUNCTION IF EXISTS test_deadlock_on_insert()");
+      jdbc.execute("DROP SEQUENCE IF EXISTS test_deadlock_inserts");
+    }
   }
 
   /** BR-10: one upcoming appointment per service; the refusal says nothing about the first. */

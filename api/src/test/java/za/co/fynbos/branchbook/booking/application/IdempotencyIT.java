@@ -4,7 +4,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static za.co.fynbos.branchbook.support.Bookings.body;
 import static za.co.fynbos.branchbook.support.Bookings.book;
 
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,6 +16,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
+import za.co.fynbos.branchbook.support.BookingPause;
 import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
 
@@ -29,6 +34,41 @@ class IdempotencyIT {
   @Autowired private MockMvcTester mvc;
 
   @Autowired private JdbcTemplate jdbc;
+
+  @Autowired private DataSource dataSource;
+
+  /**
+   * BR-12: two requests with one key and the same details, the second sent while the first is still
+   * inside its transaction, book once and both receive the same reference. The first is held at
+   * step 10 until the second is seen waiting on the key's row, so the interleaving is forced, not
+   * hoped for.
+   */
+  @Test
+  void concurrentSameKey_bookOnceAndBothReceiveSameReference() throws Exception {
+    String key = UUID.randomUUID().toString();
+    Map<String, Object> details = body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0197");
+    MvcTestResult first;
+    MvcTestResult second;
+    try (BookingPause pause = BookingPause.hold(dataSource, jdbc)) {
+      CompletableFuture<MvcTestResult> firstRequest =
+          CompletableFuture.supplyAsync(() -> book(mvc, key, details));
+      pause.awaitWaiting(1, 0);
+      CompletableFuture<MvcTestResult> secondRequest =
+          CompletableFuture.supplyAsync(() -> book(mvc, key, details));
+      pause.awaitWaiting(1, 1);
+
+      pause.release();
+      first = firstRequest.get(10, TimeUnit.SECONDS);
+      second = secondRequest.get(10, TimeUnit.SECONDS);
+    }
+
+    assertThat(first).hasStatus(HttpStatus.CREATED).doesNotContainHeader("Idempotent-Replayed");
+    assertThat(second).hasStatus(HttpStatus.CREATED).hasHeader("Idempotent-Replayed", "true");
+    assertThat(reference(second)).isEqualTo(reference(first));
+    assertThat(count("appointments")).isOne();
+    assertThat(count("notification_messages")).isOne();
+    assertThat(count("idempotency_keys")).isOne();
+  }
 
   @Test
   void sameKeySamePayloadReplaysOriginal201() {
