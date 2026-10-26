@@ -11,7 +11,7 @@
 # cites it says "planned".
 #
 # A test is cited as `ClassName.methodName`, a test method (or ArchUnit rule) of a top-level class in
-# api/src/test/java, or as a web test file name ending in .test.ts, .test.tsx or .spec.ts. Only
+# api/src/test/java, or as a web or end-to-end test file name ending in .test.ts, .test.tsx or .spec.ts. Only
 # methods annotated as tests count, so citing a helper method fails.
 #
 # Usage, from anywhere in the repository:  scripts/check-test-refs.sh
@@ -53,7 +53,7 @@ existing_tests() {
     }
     { test = 0; disabled = 0 }
   '
-  find web -path web/node_modules -prune -o \( -name '*.test.ts' -o -name '*.test.tsx' -o -name '*.spec.ts' \) \
+  find web e2e -path '*/node_modules' -prune -o \( -name '*.test.ts' -o -name '*.test.tsx' -o -name '*.spec.ts' \) \
     -type f -exec basename {} \;
 }
 
