@@ -24,12 +24,14 @@ public record InboxResponse(List<InboxMessageResponse> messages) {
    * One message in the inbox. Its times carry the branch's offset.
    *
    * @param id the message's id
-   * @param reference the appointment's reference
+   * @param reference the appointment's reference, or {@code APT-****-****} where the deployment
+   *     hides references
    * @param kind what it tells the customer
    * @param channel how it reaches them
    * @param recipientMasked where it goes, redacted: no digit after the prefix
    * @param subject the e-mail subject; {@code null} for an SMS
-   * @param body the text of the message
+   * @param body the text of the message, with every reference hidden where the deployment hides
+   *     references
    * @param status where it is in its delivery
    * @param failureReason why it failed, or {@code null}
    * @param retryable whether a retry could send it, by the rule the retry itself applies
@@ -42,12 +44,21 @@ public record InboxResponse(List<InboxMessageResponse> messages) {
   @Schema(name = "InboxMessage")
   public record InboxMessageResponse(
       UUID id,
-      @Schema(example = "APT-7K3M-9Q2X") String reference,
+      @Schema(
+              example = "APT-7K3M-9Q2X",
+              description =
+                  "The appointment's reference, or APT-****-**** where the deployment hides"
+                      + " references (branchbook.inbox.redact-references)")
+          String reference,
       @Schema(allowableValues = {"CONFIRMATION", "CANCELLATION"}) String kind,
       @Schema(allowableValues = {"SMS", "EMAIL"}) String channel,
       @Schema(example = "082 *** ****") String recipientMasked,
       @Schema(types = {"string", "null"}) @Nullable String subject,
-      String body,
+      @Schema(
+              description =
+                  "The text of the message; where the deployment hides references, every one in"
+                      + " it shows as APT-****-****")
+          String body,
       @Schema(allowableValues = {"PENDING", "SENT", "FAILED"}) String status,
       @Schema(
               types = {"string", "null"},

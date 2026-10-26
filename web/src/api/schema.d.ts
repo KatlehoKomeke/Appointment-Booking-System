@@ -133,7 +133,7 @@ export interface paths {
         };
         /**
          * List the simulated messages
-         * @description The newest messages of every appointment, with recipients redacted to 082 *** ****. Switched off unless branchbook.inbox.enabled is true; then the path is a 404.
+         * @description The newest messages of every appointment, with recipients redacted to 082 *** ****. Where branchbook.inbox.redact-references is true, every appointment reference, in the reference field and in the text, shows as APT-****-****. Switched off unless branchbook.inbox.enabled is true; then the path is a 404.
          */
         get: operations["listMessages"];
         put?: never;
@@ -155,7 +155,7 @@ export interface paths {
         put?: never;
         /**
          * Retry a failed simulated message
-         * @description Resets a FAILED message whose failureReason is DELIVERY_FAILED or DISPATCH_ERROR to PENDING with no attempts, due now. Any other message, and the confirmation of an appointment that is cancelled or has started, is returned unchanged with retryable false. Waits up to 2 seconds for a send of the message in flight to finish first, and keeps the message locked until it commits. Switched off unless branchbook.inbox.enabled is true; then the path is a 404.
+         * @description Resets a FAILED message whose failureReason is DELIVERY_FAILED or DISPATCH_ERROR to PENDING with no attempts, due now. Any other message, and the confirmation of an appointment that is cancelled or has started, is returned unchanged with retryable false. Waits up to 2 seconds for a send of the message in flight to finish first, and keeps the message locked until it commits. Where branchbook.inbox.redact-references is true, every appointment reference, in the reference field and in the text, shows as APT-****-****. Switched off unless branchbook.inbox.enabled is true; then the path is a 404.
          */
         post: operations["retryMessage"];
         delete?: never;
@@ -344,6 +344,7 @@ export interface components {
         InboxMessage: {
             /** Format: int32 */
             attempts: number;
+            /** @description The text of the message; where the deployment hides references, every one in it shows as APT-****-**** */
             body: string;
             /** @enum {string} */
             channel: "SMS" | "EMAIL";
@@ -363,7 +364,10 @@ export interface components {
             nextAttemptAt: string | null;
             /** @example 082 *** **** */
             recipientMasked: string;
-            /** @example APT-7K3M-9Q2X */
+            /**
+             * @description The appointment's reference, or APT-****-**** where the deployment hides references (branchbook.inbox.redact-references)
+             * @example APT-7K3M-9Q2X
+             */
             reference: string;
             /** @description True only for FAILED with DELIVERY_FAILED or DISPATCH_ERROR, and never for the confirmation of an appointment that is cancelled or has started */
             retryable: boolean;

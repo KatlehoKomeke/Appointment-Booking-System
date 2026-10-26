@@ -98,6 +98,12 @@ branchbook:
     # recipient redacted (FR-17). It is an operator view for the demo, so it is off unless a deployment asks for it:
     # docker compose, make dev-api and the tests switch it on; off, the path is a plain 404.
     enabled: false
+    # Shows every appointment reference in the inbox, and in its retry's answer, as APT-****-****: in the reference
+    # field and in each message's text. The hosted demo has no sign-in, and a public inbox listing references beside
+    # demo numbers, whose last four digits are easily guessed, would let anyone open or cancel another visitor's
+    # booking (BR-19). Off by default, as in docker compose, make dev-api and the tests (InboxReferencesHiddenIT alone
+    # switches it on); the hosted demo's task definition is to switch it on with BRANCHBOOK_INBOX_REDACT_REFERENCES=true.
+    redact-references: false
   retention:
     # Deletes every booking older than max-age, with its messages and idempotency keys, every hour from a minute after
     # start-up, which keeps the hosted demo's promise to delete each booking, with the name and number, after 48 hours

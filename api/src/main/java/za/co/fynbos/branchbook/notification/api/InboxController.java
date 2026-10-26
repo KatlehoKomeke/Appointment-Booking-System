@@ -20,6 +20,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import za.co.fynbos.branchbook.notification.api.InboxResponse.InboxMessageResponse;
+import za.co.fynbos.branchbook.notification.application.InboxMessage;
+import za.co.fynbos.branchbook.notification.application.InboxProperties;
 import za.co.fynbos.branchbook.notification.application.InboxQueries;
 import za.co.fynbos.branchbook.notification.application.RetryMessageHandler;
 import za.co.fynbos.branchbook.shared.web.OpenApiConfig;
@@ -29,6 +31,8 @@ import za.co.fynbos.branchbook.shared.web.OpenApiConfig;
  * message that failed (FR-18). No real message is ever sent, and recipients are redacted. Both
  * exist only while {@code branchbook.inbox.enabled} is true, so a deployment that does not ask for
  * them has no such paths, and an operator there replays a message with the SQL in docs/runbook.md.
+ * Where {@code branchbook.inbox.redact-references} is true too, both show every appointment
+ * reference as {@code APT-****-****}, so a public inbox opens no booking.
  */
 @RestController
 @RequestMapping(path = "/api/v1/messages", produces = MediaType.APPLICATION_JSON_VALUE)
@@ -38,15 +42,21 @@ import za.co.fynbos.branchbook.shared.web.OpenApiConfig;
     description = "Every booking's simulated messages, recipients redacted, and their retry.")
 class InboxController {
 
+  private static final String REFERENCES_HIDDEN =
+      " Where branchbook.inbox.redact-references is true, every appointment reference, in the"
+          + " reference field and in the text, shows as APT-****-****.";
+
   private static final String UUID_PATTERN =
       "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$";
 
   private final InboxQueries inbox;
   private final RetryMessageHandler retries;
+  private final InboxProperties properties;
 
-  InboxController(InboxQueries inbox, RetryMessageHandler retries) {
+  InboxController(InboxQueries inbox, RetryMessageHandler retries, InboxProperties properties) {
     this.inbox = inbox;
     this.retries = retries;
+    this.properties = properties;
   }
 
   /**
@@ -60,6 +70,7 @@ class InboxController {
       summary = "List the simulated messages",
       description =
           "The newest messages of every appointment, with recipients redacted to 082 *** ****."
+              + REFERENCES_HIDDEN
               + " Switched off unless branchbook.inbox.enabled is true; then the path is a 404.")
   @ApiResponse(responseCode = "200", description = "The messages, newest first")
   @ApiResponse(
@@ -76,7 +87,7 @@ class InboxController {
           @Min(value = 1, message = "must be at least 1")
           @Max(value = 200, message = "must be at most 200")
           int limit) {
-    return InboxResponse.from(inbox.newest(limit));
+    return InboxResponse.from(inbox.newest(limit).stream().map(this::shown).toList());
   }
 
   /**
@@ -94,6 +105,7 @@ class InboxController {
               + " appointment that is cancelled or has started, is returned unchanged with"
               + " retryable false. Waits up to 2 seconds for a send of the message in flight to"
               + " finish first, and keeps the message locked until it commits."
+              + REFERENCES_HIDDEN
               + " Switched off unless branchbook.inbox.enabled is true; then the path is a 404.")
   @ApiResponse(
       responseCode = "200",
@@ -133,6 +145,11 @@ class InboxController {
           @PathVariable
           @Pattern(regexp = UUID_PATTERN, message = "must be a UUID")
           String id) {
-    return InboxMessageResponse.from(retries.retry(UUID.fromString(id)));
+    return InboxMessageResponse.from(shown(retries.retry(UUID.fromString(id))));
+  }
+
+  /** The message as this deployment shows it: with its references hidden, if it asks for that. */
+  private InboxMessage shown(InboxMessage message) {
+    return properties.redactReferences() ? message.withReferencesHidden() : message;
   }
 }

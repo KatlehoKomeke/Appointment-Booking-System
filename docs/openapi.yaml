@@ -366,7 +366,9 @@ paths:
   /api/v1/messages:
     get:
       description: "The newest messages of every appointment, with recipients redacted\
-        \ to 082 *** ****. Switched off unless branchbook.inbox.enabled is true; then\
+        \ to 082 *** ****. Where branchbook.inbox.redact-references is true, every\
+        \ appointment reference, in the reference field and in the text, shows as\
+        \ APT-****-****. Switched off unless branchbook.inbox.enabled is true; then\
         \ the path is a 404."
       operationId: listMessages
       parameters:
@@ -404,8 +406,10 @@ paths:
         \ and the confirmation of an appointment that is cancelled or has started,\
         \ is returned unchanged with retryable false. Waits up to 2 seconds for a\
         \ send of the message in flight to finish first, and keeps the message locked\
-        \ until it commits. Switched off unless branchbook.inbox.enabled is true;\
-        \ then the path is a 404."
+        \ until it commits. Where branchbook.inbox.redact-references is true, every\
+        \ appointment reference, in the reference field and in the text, shows as\
+        \ APT-****-****. Switched off unless branchbook.inbox.enabled is true; then\
+        \ the path is a 404."
       operationId: retryMessage
       parameters:
       - description: "The message's id, from the inbox"
@@ -816,6 +820,8 @@ components:
           minimum: 0
         body:
           type: string
+          description: "The text of the message; where the deployment hides references,\
+            \ every one in it shows as APT-****-****"
         channel:
           type: string
           enum:
@@ -857,6 +863,8 @@ components:
           example: 082 *** ****
         reference:
           type: string
+          description: "The appointment's reference, or APT-****-**** where the deployment\
+            \ hides references (branchbook.inbox.redact-references)"
           example: APT-7K3M-9Q2X
         retryable:
           type: boolean

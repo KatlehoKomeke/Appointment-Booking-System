@@ -6,6 +6,7 @@ import java.util.Objects;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import za.co.fynbos.branchbook.booking.application.AppointmentLabel;
+import za.co.fynbos.branchbook.booking.domain.AppointmentReference;
 import za.co.fynbos.branchbook.booking.domain.MobileNumber;
 import za.co.fynbos.branchbook.notification.domain.NotificationChannel;
 import za.co.fynbos.branchbook.notification.domain.NotificationMessage;
@@ -95,6 +96,33 @@ public record InboxMessage(
         message.createdAt(),
         message.sentAt(),
         appointment.zone());
+  }
+
+  /**
+   * Shows every appointment reference as {@code APT-****-****}: in the reference itself, and
+   * wherever the subject, the body or the last error names one, such as an SMS's {@code Ref
+   * APT-7K3M-9Q2X}. The id is kept, so the message can still be retried.
+   *
+   * @return the same message with no reference in it
+   */
+  public InboxMessage withReferencesHidden() {
+    return new InboxMessage(
+        id,
+        AppointmentReference.REDACTED,
+        kind,
+        channel,
+        recipientRedacted,
+        subject == null ? null : AppointmentReference.hideIn(subject),
+        AppointmentReference.hideIn(body),
+        status,
+        failureReason,
+        retryable,
+        attempts,
+        nextAttemptAt,
+        lastError == null ? null : AppointmentReference.hideIn(lastError),
+        createdAt,
+        sentAt,
+        zone);
   }
 
   /**
