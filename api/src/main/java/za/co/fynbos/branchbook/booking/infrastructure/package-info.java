@@ -13,6 +13,9 @@
  *       a broken constraint or a transaction conflict into the answer it means.
  *   <li>{@link za.co.fynbos.branchbook.booking.infrastructure.JdbcBookedIntervals}: the seats
  *       active appointments hold, for scheduling's port.
+ *   <li>{@link za.co.fynbos.branchbook.booking.infrastructure.RetentionPurgeJob}: runs the
+ *       retention purge every hour, and exists only while {@code branchbook.retention.enabled} is
+ *       true.
  * </ul>
  *
  * <p>This is the only package that imports the PostgreSQL driver, to read a failure's SQLSTATE and

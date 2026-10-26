@@ -13,6 +13,9 @@
  *       backoff and a final FAILED.
  *   <li>{@link za.co.fynbos.branchbook.notification.application.InboxQueries} reads the simulated
  *       inbox: the newest messages of every appointment, recipients redacted.
+ *   <li>{@link za.co.fynbos.branchbook.notification.application.MessageEraser} deletes the messages
+ *       of appointments booking's retention purge is deleting, in the same transaction,
+ *       implementing booking's {@code NotificationEraser} port.
  *   <li>{@link za.co.fynbos.branchbook.notification.application.NotificationProperties} refuses at
  *       start-up a public base URL that could push a confirmation over one SMS segment.
  * </ul>

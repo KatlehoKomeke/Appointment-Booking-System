@@ -130,8 +130,21 @@ BranchBook is designed around the Protection of Personal Information Act, even t
   and `082 555 0000`, which the simulated gateway always refuses, to show a failed delivery. Never use a real
   person's details, including your own.
 - **A hosted demo cannot collect real data.** *Planned, after M6.* It will accept only the published demo numbers,
-  each locked to a fictional persona, and delete all data after 48 hours
-  ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)).
+  each locked to a fictional persona ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)).
+- **The hosted demo deletes every booking after 48 hours.** *Built; on in the hosted demo only.* While
+  `branchbook.retention.enabled` is true (`BRANCHBOOK_RETENTION_ENABLED=true`), a job runs every hour, from a minute
+  after start-up, and deletes every appointment booked `branchbook.retention.max-age` ago or earlier (`PT48H`, set by
+  `BRANCHBOOK_RETENTION_MAX_AGE`). It deletes all appointments of that age, whatever their status, and with each one
+  its SMS messages, which hold the number and the reference, and its idempotency keys. So within about an hour of a
+  booking turning 48 hours old, nothing the customer typed is left in the live database. Backups are not purged: the
+  hosted demo's automated database backups can restore a deleted booking until they expire, seven days after they
+  were taken, and tearing the database down keeps a final snapshot until someone deletes it
+  ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)). The branches, services, hours and holidays are never
+  touched. Only the hosted demo's ECS task definition switches it on. It is off by default, so `make up`,
+  `make dev-api` and the tests keep their bookings until you delete them, as the privacy page says of a local copy. A
+  max-age under 24 hours, the life of an `Idempotency-Key`, stops start-up, so a retry can never book a purged
+  appointment again. Each run logs one line of counts (`retention.purged appointments= messages= keys=`) and nothing
+  else (`RetentionPurgeIT`, `RetentionPurgeJobTest`).
 
 ## Hardening in the application
 

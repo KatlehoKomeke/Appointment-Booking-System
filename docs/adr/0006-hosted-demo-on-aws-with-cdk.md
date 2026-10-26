@@ -55,6 +55,11 @@ the public internet must not collect real personal information.
 - **Not every stack is in Cape Town.** `BranchbookAccount` is in `us-east-1`: IAM is global, AWS Budgets lives
   there, and the stack holds no customer data, so the data-residency decision is unaffected
   ([infra/README.md](../../infra/README.md#what-exists-today)).
+- **The 48-hour purge is the retention job,** behind `branchbook.retention.enabled`, not a `demo` profile. The hosted
+  demo's ECS task definition sets `BRANCHBOOK_RETENTION_ENABLED=true`; everywhere else it is off. Every hour it deletes
+  each appointment booked 48 hours ago or earlier, with its messages and idempotency keys
+  ([docs/runbook.md](../runbook.md#did-the-48-hour-purge-run)). It empties the live database only: a deleted booking
+  stays in the automated backups until they expire ([SECURITY.md](../../SECURITY.md#personal-information-popia)).
 - **The budget alarm already exists,** in `BranchbookAccount`. The teardown date will be recorded in
   [infra/README.md](../../infra/README.md) when the app stacks are first deployed.
 

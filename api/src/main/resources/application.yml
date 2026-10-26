@@ -91,6 +91,16 @@ branchbook:
     # recipient redacted (FR-17). It is an operator view for the demo, so it is off unless a deployment asks for it:
     # docker compose, make dev-api and the tests switch it on; off, the path is a plain 404.
     enabled: false
+  retention:
+    # Deletes every booking older than max-age, with its messages and idempotency keys, every hour from a minute after
+    # start-up, which keeps the hosted demo's promise to delete each booking, with the name and number, after 48 hours
+    # (SECURITY.md, ADR-0006). Off by default, and so off in docker compose, make dev-api and the tests: a copy run
+    # locally keeps its bookings until you delete them. Only the hosted demo's task definition switches it on
+    # (BRANCHBOOK_RETENTION_ENABLED=true).
+    enabled: false
+    # How long after its booking an appointment is deleted. At least PT24H, the life of an Idempotency-Key (BR-12), so
+    # a retry can never book again a booking that was purged; a shorter value stops start-up.
+    max-age: PT48H
 
 logging:
   pattern:

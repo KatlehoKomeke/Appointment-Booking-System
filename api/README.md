@@ -89,6 +89,8 @@ environment supplies the rest:
 | `PORT` | HTTP port, 8080 by default | Optional |
 | `BRANCHBOOK_DISPATCHER_ENABLED` | Runs the dispatcher that delivers PENDING messages every 2 seconds on its own thread. `true` by default; its interval and the simulated gateway's latency are in application.yml. | Optional; the tests switch it off and drive it themselves |
 | `BRANCHBOOK_INBOX_ENABLED` | Switches on the simulated inbox, `GET /api/v1/messages`, an operator view of every booking's messages. `false` by default. | `compose.yaml` and `make dev-api` set it to `true`, and so do the tests |
+| `BRANCHBOOK_RETENTION_ENABLED` | `branchbook.retention.enabled`. Switches on the hourly retention job, which deletes every appointment older than the max-age below, with its messages and idempotency keys, keeping the hosted demo's 48-hour promise ([SECURITY.md](../SECURITY.md#personal-information-popia)). `false` by default. | The hosted demo's ECS task definition sets it to `true`, and nothing else does. `compose.yaml`, `make dev-api` and the tests leave it off; the tests call `RetentionPurge` themselves |
+| `BRANCHBOOK_RETENTION_MAX_AGE` | `branchbook.retention.max-age`. How long after its booking an appointment is deleted, as an ISO-8601 duration. `PT48H` by default; less than `PT24H`, the life of an `Idempotency-Key`, stops start-up. | Optional; the default is the hosted demo's promise |
 | `PUBLIC_BASE_URL` | The address customers reach the app at, which ends the confirmation SMS's `/manage` link. At most 28 characters with no trailing slash, so the longest SMS fits one segment; a longer value stops start-up. `http://localhost:8080` by default. | `compose.yaml` locally (it follows `APP_PORT`); planned for the hosted demo (after M6): the ECS task definition |
 
 The booking rules that are settings rather than code are under `branchbook.booking` in application.yml: the
@@ -235,9 +237,9 @@ api/
     │   │   └── domain/                  plain Java: SlotCalendar, Slot, BookedInterval
     │   ├── booking/                     appointments: booking and lookup
     │   │   ├── api/                     the appointment endpoints and their request and response records
-    │   │   ├── application/             the booking transaction, lookup, the limiter, and the ports it declares
+    │   │   ├── application/             the booking transaction, lookup, the limiter, the retention purge, and the ports it declares
     │   │   ├── domain/                  plain Java: Appointment, MobileNumber, CustomerName, AppointmentReference
-    │   │   └── infrastructure/          JPA and SQL adapters, the constraint translator, the key purge
+    │   │   └── infrastructure/          JPA and SQL adapters, the constraint translator, the key purge, the retention job
     │   ├── notification/                the confirmation SMS and the simulated inbox
     │   │   ├── api/                     the inbox endpoint, which exists only while switched on
     │   │   ├── application/             the outbox writer, the message reads and the inbox query
