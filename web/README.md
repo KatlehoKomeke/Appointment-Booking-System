@@ -7,7 +7,8 @@ from one origin ([docs/architecture.md, section 2](../docs/architecture.md#2-sys
 
 **Status (M4):** built to the [UI design](#ui-design): the five booking steps, the confirmation page with the SMS's
 live delivery status, `/manage` and the simulated inbox, with the landing page, the privacy notice, a not-found page
-and an error page. Playwright tests the flow end to end in M6.
+and an error page. Each page but the landing page loads when it is first opened, and the confirmation page offers to
+book the same service again. Playwright tests the flow end to end in a real browser ([e2e/](../e2e/README.md)).
 
 ## Stack
 

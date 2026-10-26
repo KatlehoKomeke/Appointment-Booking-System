@@ -9,19 +9,22 @@
  */
 import type { RouteObject } from 'react-router';
 
-import { BookPage } from './booking/BookPage';
-import { ConfirmationPage } from './pages/ConfirmationPage';
 import { ErrorPage } from './pages/ErrorPage';
-import { InboxPage } from './pages/InboxPage';
 import { LandingPage } from './pages/LandingPage';
-import { ManagePage } from './pages/ManagePage';
 import { NotFoundPage } from './pages/NotFoundPage';
-import { PrivacyPage } from './pages/PrivacyPage';
+import { PageLoading } from './ui/PageLoading';
 import { Shell } from './ui/Shell';
 
 /**
  * The route table, shared by the browser router in `App.tsx` and the memory router the tests use. A page that fails
  * to render is replaced by the error page inside the shell, so the banner and footer stay.
+ *
+ * The landing page, the shell, the error page and the not-found page are in the first download, so the home page
+ * and anything that goes wrong show at once. Every other page, with the libraries only it uses (the forms and their
+ * validation), is fetched the first time it is opened, which keeps the first download small. Moving to such a page
+ * keeps the current one on screen until the new one is ready. A page opened straight from a link or a refresh shows
+ * the shell with {@link PageLoading} in the meantime. If its code cannot be fetched, say after a new release has
+ * replaced it, the error page offers a fresh start, which reloads the app.
  */
 export const routes: RouteObject[] = [
   {
@@ -29,13 +32,32 @@ export const routes: RouteObject[] = [
     children: [
       {
         errorElement: <ErrorPage />,
+        // On this route rather than the shell's, so the shell stays on screen around it.
+        hydrateFallbackElement: <PageLoading />,
         children: [
           { index: true, element: <LandingPage /> },
-          { path: 'book', element: <BookPage /> },
-          { path: 'appointments/:reference', element: <ConfirmationPage /> },
-          { path: 'manage', element: <ManagePage /> },
-          { path: 'messages', element: <InboxPage /> },
-          { path: 'privacy', element: <PrivacyPage /> },
+          {
+            path: 'book',
+            lazy: async () => ({ Component: (await import('./booking/BookPage')).BookPage }),
+          },
+          {
+            path: 'appointments/:reference',
+            lazy: async () => ({
+              Component: (await import('./pages/ConfirmationPage')).ConfirmationPage,
+            }),
+          },
+          {
+            path: 'manage',
+            lazy: async () => ({ Component: (await import('./pages/ManagePage')).ManagePage }),
+          },
+          {
+            path: 'messages',
+            lazy: async () => ({ Component: (await import('./pages/InboxPage')).InboxPage }),
+          },
+          {
+            path: 'privacy',
+            lazy: async () => ({ Component: (await import('./pages/PrivacyPage')).PrivacyPage }),
+          },
           { path: '*', element: <NotFoundPage /> },
         ],
       },

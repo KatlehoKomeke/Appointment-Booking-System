@@ -12,6 +12,11 @@ function stepper() {
   return screen.getByRole('navigation', { name: 'Booking steps' });
 }
 
+// The booking flow's code is fetched the first time /book opens, so a test waits for its stepper before reading it.
+function stepperLoaded() {
+  return screen.findByRole('navigation', { name: 'Booking steps' });
+}
+
 // The step the stepper says the customer is on, such as "Step 3 of 5".
 function stepShown() {
   return within(stepper()).getByText(/^Step \d of 5$/).textContent;
@@ -40,6 +45,7 @@ describe('BookPage', () => {
     const user = userEvent.setup();
     const { router } = renderRoute('/book');
 
+    await stepperLoaded();
     expect(stepShown()).toBe('Step 1 of 5');
     expect(within(stepper()).getByRole('link', { name: 'Back to home' })).toHaveAttribute(
       'href',
@@ -75,7 +81,7 @@ describe('BookPage', () => {
     const user = userEvent.setup();
     const { router } = renderRoute('/book?branch=SAN&service=FICA');
 
-    const toService = within(stepper()).getByRole('link', { name: 'Back to service' });
+    const toService = within(await stepperLoaded()).getByRole('link', { name: 'Back to service' });
     expect(toService).toHaveTextContent('Service');
     await user.click(toService);
 
@@ -91,9 +97,10 @@ describe('BookPage', () => {
     expect(router.state.location.search).toBe('');
   });
 
-  it('Back from the details step returns to the time step with the time still chosen', () => {
+  it('Back from the details step returns to the time step with the time still chosen', async () => {
     renderRoute(`${CHOSEN}&step=details`);
 
+    await stepperLoaded();
     expect(stepShown()).toBe('Step 4 of 5');
     expect(target(within(stepper()).getByRole('link', { name: 'Back to date and time' }))).toBe(
       CHOSEN,
@@ -133,6 +140,7 @@ describe('BookPage', () => {
   it('shows the details step for a review this tab has no details for, and corrects the URL', async () => {
     const { router } = renderRoute(`${CHOSEN}&step=review`);
 
+    await stepperLoaded();
     expect(stepShown()).toBe('Step 4 of 5');
     await waitFor(() => {
       expect(param(router, 'step')).toBe('details');
@@ -140,10 +148,11 @@ describe('BookPage', () => {
     expect(param(router, 'slot')).toBe('09:30');
   });
 
-  it('shows the review once the details are saved', () => {
+  it('shows the review once the details are saved', async () => {
     saveDetails({ firstName: 'Nomvula', lastName: 'Dlamini', mobile: DEMO_MOBILE });
     const { router } = renderRoute(`${CHOSEN}&step=review`);
 
+    await stepperLoaded();
     expect(stepShown()).toBe('Step 5 of 5');
     expect(target(within(stepper()).getByRole('link', { name: 'Back to your details' }))).toBe(
       `${CHOSEN}&step=details`,
@@ -156,10 +165,14 @@ describe('BookPage', () => {
     const user = userEvent.setup();
     const { router } = renderRoute('/book?branch=XYZ&service=FICA&date=2026-10-27');
 
+    // The time step's own request for this branch can fail first, with an alert of its own, before the page moves
+    // to the branch list; so wait for the step, then read the alert.
+    await waitFor(() => {
+      expect(stepShown()).toBe('Step 1 of 5');
+    });
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("We couldn't find that branch.");
     expect(alert).toHaveTextContent('Choose a branch from the list.');
-    expect(stepShown()).toBe('Step 1 of 5');
     expect(screen.getByRole('heading', { level: 1, name: 'Choose a branch' })).toBeInTheDocument();
 
     await user.click(await screen.findByRole('link', { name: /Sandton Summit Mall/ }));
@@ -173,8 +186,11 @@ describe('BookPage', () => {
   it('treats a branch code that is not a code at all as unknown', async () => {
     renderRoute('/book?branch=S4N&service=FICA');
 
+    // As above: the step first, since the time step's request can fail before the page moves on.
+    await waitFor(() => {
+      expect(stepShown()).toBe('Step 1 of 5');
+    });
     expect(await screen.findByRole('alert')).toHaveTextContent("We couldn't find that branch.");
-    expect(stepShown()).toBe('Step 1 of 5');
   });
 
   it("shows the branch's services, with the reason, for a service the branch does not offer", async () => {

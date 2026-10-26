@@ -1,0 +1,6 @@
+# e2e/.gitignore
+# Playwright's output on each run: traces, failure screenshots and the HTML report. They are rebuilt every run and
+# can show a test's synthetic customer, so they are never committed.
+test-results/
+playwright-report/
+blob-report/

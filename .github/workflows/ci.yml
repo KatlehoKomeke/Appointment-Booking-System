@@ -11,7 +11,10 @@
 # - web:   the API types must be what docs/openapi.yaml generates; then lint, type check, format check, unit tests
 #          in two time zones, and the production build.
 # - stack: builds the Docker image and starts it with PostgreSQL through docker compose, exactly as `make up` does on
-#          a reviewer's machine. It then runs scripts/smoke.sh and checks that the logs hold no credentials.
+#          a reviewer's machine. It then runs scripts/smoke.sh, the Playwright end-to-end tests in e2e/ at 390 and
+#          1280 px (failing on any CSP violation or console error), the smoke test again, and the 409 race
+#          (scripts/demo-409.sh), and checks that the logs hold no credentials. A failed run keeps the end-to-end
+#          report, its traces and the stack's logs as artifacts.
 #
 # The workflow only reads the repository. It uses no secrets and has no access to AWS.
 
@@ -123,7 +126,7 @@ jobs:
 
   stack:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Check out the repository
         uses: actions/checkout@v7
@@ -134,6 +137,60 @@ jobs:
       - name: Smoke-test the running application
         run: scripts/smoke.sh http://127.0.0.1:8080
 
+      # The end-to-end tests drive the same stack in Chromium, at 390 and 1280 px, failing on any CSP violation or
+      # console error (e2e/README.md). The browser is cached by Playwright's version, so it downloads only when that
+      # changes.
+      - name: Set up Node.js for the end-to-end tests
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install the end-to-end test dependencies
+        working-directory: e2e
+        run: npm ci
+
+      - name: Cache the Playwright browser
+        id: browsers
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+
+      - name: Install Chromium for Playwright
+        if: steps.browsers.outputs.cache-hit != 'true'
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Install Chromium's system libraries
+        if: steps.browsers.outputs.cache-hit == 'true'
+        working-directory: e2e
+        run: npx playwright install-deps chromium
+
+      - name: Run the end-to-end tests
+        working-directory: e2e
+        env:
+          E2E_BASE_URL: http://127.0.0.1:8080
+        run: npx playwright test
+
+      # A second smoke run after the end-to-end bookings proves the app still answers as it did on a fresh start.
+      - name: Smoke-test the running application again
+        run: scripts/smoke.sh http://127.0.0.1:8080
+
+      - name: Race twenty bookings for the last seat (make demo-409)
+        run: scripts/demo-409.sh http://127.0.0.1:8080
+
+      - name: Keep the end-to-end report and traces of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-report
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          if-no-files-found: ignore
+
       - name: Check that the logs hold no credentials
         run: |
           if docker compose logs app db | grep --ignore-case --extended-regexp 'password|local-dev-only'; then
@@ -143,7 +200,15 @@ jobs:
 
       - name: Show the logs of a failed run
         if: failure()
-        run: docker compose logs --no-color
+        run: docker compose logs --no-color | tee compose.log
+
+      - name: Keep the stack's logs of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: compose-logs
+          path: compose.log
+          if-no-files-found: ignore
 
       - name: Stop the stack
         if: always()

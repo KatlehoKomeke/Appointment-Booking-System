@@ -97,12 +97,37 @@ describe('ConfirmationPage', () => {
     expect(await navigator.clipboard.readText()).toBe(DEMO_REFERENCE);
   });
 
+  it('books the same service at the same branch again, from the date and time step', async () => {
+    const user = userEvent.setup();
+    rememberLookup(DEMO_REFERENCE, '0101');
+    const { router } = renderRoute(PATH);
+
+    // The visible words start the name; the rest names the service and branch for a screen reader's list of links.
+    const again = await screen.findByRole('link', {
+      name: 'Book this service again: Update personal details (FICA) at Sandton Summit Mall',
+    });
+    expect(again).toHaveTextContent(/^Book this service again$/);
+    expect(again).toHaveAttribute('href', '/book?branch=SAN&service=FICA');
+    expect(screen.getByRole('link', { name: 'Book another appointment' })).toHaveAttribute(
+      'href',
+      '/book',
+    );
+
+    await user.click(again);
+
+    expect(
+      await screen.findByRole('heading', { level: 1, name: 'Choose a date and time' }),
+    ).toBeInTheDocument();
+    expect(router.state.location.pathname).toBe('/book');
+    expect(router.state.location.search).toBe('?branch=SAN&service=FICA');
+  });
+
   it('asks a new tab for the last four digits once, and remembers them', async () => {
     const user = userEvent.setup();
     renderRoute('/appointments/apt-7k3m-9q2x');
 
     expect(
-      screen.getByRole('heading', { level: 1, name: 'Open your appointment' }),
+      await screen.findByRole('heading', { level: 1, name: 'Open your appointment' }),
     ).toBeInTheDocument();
     expect(document.title).toBe('Open your appointment - BranchBook');
     const digits = screen.getByRole('textbox', {
