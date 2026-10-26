@@ -3,6 +3,7 @@ package za.co.fynbos.branchbook.booking.application;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -35,6 +36,8 @@ import za.co.fynbos.branchbook.shared.problem.ProblemException;
  *   <li>Flush: {@code UPDATE ... WHERE id = ? AND version = ?}, which frees the seat.
  *   <li>Supersede the confirmation if it is still PENDING or FAILED, and write the cancellation SMS
  *       (BR-16, BR-24).
+ *   <li>Render the response from this transaction's own reads: the appointment it holds and the
+ *       messages it can see.
  *   <li>Commit.
  * </ol>
  *
@@ -43,8 +46,17 @@ import za.co.fynbos.branchbook.shared.problem.ProblemException;
  * transaction, finds the appointment cancelled and answers the same {@code 200} without writing
  * anything. Cancel is the only API writer of an existing appointment, so one re-run is always
  * enough; a second conflict would be {@code 503 TRY_AGAIN}. A lock not granted within 2 seconds is
- * also {@code 503}. Every instant comes from the injected clock, read once per attempt. Log lines
- * name the appointment by id, never by reference, name or number.
+ * also {@code 503}. Every instant comes from the injected clock, read once per attempt and cut to
+ * the microsecond the database keeps, so the response shows {@code cancelledAt} as a lookup will.
+ * Log lines name the appointment by id, never by reference, name or number.
+ *
+ * <p>The retention purge may delete the appointment at any moment the cancel does not hold its row
+ * (see {@link RetentionPurge}). Nothing is read after the commit, so a purge then cannot fail the
+ * response. A purge before the flush leaves the UPDATE nothing to change, which is a version
+ * conflict; the re-run then finds no appointment and answers {@code 404 APPOINTMENT_NOT_FOUND}
+ * without counting a wrong try, as the digits matched once already. A cancel that waits on the row
+ * while the purge holds it ends the same way when the purge commits, or in {@code 503 TRY_AGAIN}
+ * when its lock wait times out.
  */
 @Service
 public class CancelAppointmentHandler {
@@ -87,9 +99,10 @@ public class CancelAppointmentHandler {
    *
    * @param reference the reference as the customer typed it; case and hyphens do not matter
    * @param mobileLast4 the last four digits of the mobile number, already checked to be digits
-   * @return the appointment as it is after the commit, as a lookup would show it: cancelled, with
+   * @return the appointment as the cancel committed it, as a lookup would show it: cancelled, with
    *     its messages
-   * @throws AppointmentNotFoundException if the reference and the digits match no appointment
+   * @throws AppointmentNotFoundException if the reference and the digits match no appointment, or
+   *     the retention purge deleted it before the cancel could write
    * @throws LookupRateLimitedException if the reference has had too many wrong tries
    * @throws TooLateToCancelException if the appointment has started
    * @throws ProblemException {@code 503 TRY_AGAIN} if the version check fails twice
@@ -100,7 +113,7 @@ public class CancelAppointmentHandler {
           AppointmentReference.parse(reference).orElseThrow(AppointmentNotFoundException::new);
       Outcome outcome;
       try {
-        outcome = attempt(parsed, mobileLast4);
+        outcome = attempt(parsed, mobileLast4, false);
       } catch (OptimisticLockingFailureException concurrent) {
         log.info("cancel.rerun cause=VersionConflict");
         outcome = rerun(parsed, mobileLast4);
@@ -110,17 +123,20 @@ public class CancelAppointmentHandler {
               ? "cancel.cancelled appointmentId={}"
               : "cancel.already_cancelled appointmentId={}",
           outcome.appointmentId());
-      return views.byId(outcome.appointmentId(), outcome.now());
+      return outcome.view();
     } catch (ProblemException refused) {
       log.info("cancel.refused code={}", refused.code());
       throw refused;
     }
   }
 
-  /** The one re-run, which finds the appointment the other cancel committed. */
+  /**
+   * The one re-run, which finds the appointment the other cancel committed, or finds that the
+   * retention purge deleted it.
+   */
   private Outcome rerun(AppointmentReference reference, String mobileLast4) {
     try {
-      return attempt(reference, mobileLast4);
+      return attempt(reference, mobileLast4, true);
     } catch (OptimisticLockingFailureException again) {
       throw new ProblemException(
           ProblemCode.TRY_AGAIN,
@@ -130,17 +146,27 @@ public class CancelAppointmentHandler {
     }
   }
 
-  private Outcome attempt(AppointmentReference reference, String mobileLast4) {
-    Instant now = clock.instant();
+  /**
+   * One transaction. {@code proven} is true on the re-run, whose caller matched the digits on the
+   * first attempt, so a missing appointment there is a deleted one, not a guess, and is not
+   * counted.
+   */
+  private Outcome attempt(AppointmentReference reference, String mobileLast4, boolean proven) {
+    Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
     return Objects.requireNonNull(
-        transaction.execute(status -> cancel(reference, mobileLast4, now)));
+        transaction.execute(status -> cancel(reference, mobileLast4, proven, now)));
   }
 
-  private Outcome cancel(AppointmentReference reference, String mobileLast4, Instant now) {
-    Appointment appointment = access.open(reference, mobileLast4, now); // 1, 2, 3
+  private Outcome cancel(
+      AppointmentReference reference, String mobileLast4, boolean proven, Instant now) {
+    Appointment appointment =
+        proven
+            ? access.reopen(reference, mobileLast4)
+            : access.open(reference, mobileLast4, now); // 1, 2, 3
     return switch (appointment.cancel(now)) { // 4
       case TOO_LATE -> throw new TooLateToCancelException();
-      case ALREADY_CANCELLED -> new Outcome(appointment.id(), false, now);
+      case ALREADY_CANCELLED ->
+          new Outcome(appointment.id(), false, views.of(appointment, now)); // 7
       case CANCELLED -> {
         Cancellation cancellation =
             Cancellation.of(
@@ -150,7 +176,7 @@ public class CancelAppointmentHandler {
                 now);
         appointments.update(appointment); // 5
         outbox.enqueueCancellation(cancellation); // 6
-        yield new Outcome(appointment.id(), true, now);
+        yield new Outcome(appointment.id(), true, views.of(appointment, now)); // 7
       }
     };
   }
@@ -160,7 +186,7 @@ public class CancelAppointmentHandler {
    *
    * @param appointmentId the appointment
    * @param changed whether this transaction cancelled it, rather than finding it cancelled
-   * @param now the instant the attempt used, which the response's {@code canCancel} is decided at
+   * @param view the appointment as this transaction leaves it, which the response shows
    */
-  private record Outcome(UUID appointmentId, boolean changed, Instant now) {}
+  private record Outcome(UUID appointmentId, boolean changed, AppointmentView view) {}
 }

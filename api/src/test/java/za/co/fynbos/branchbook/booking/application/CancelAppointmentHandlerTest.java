@@ -3,8 +3,11 @@ package za.co.fynbos.branchbook.booking.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -20,6 +23,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
@@ -57,6 +61,8 @@ class CancelAppointmentHandlerTest {
 
   private final PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
 
+  private final AppointmentViews views = mock(AppointmentViews.class);
+
   private final CancelAppointmentHandler handler =
       new CancelAppointmentHandler(
           transactions,
@@ -68,8 +74,30 @@ class CancelAppointmentHandlerTest {
           appointments,
           catalogue,
           outbox,
-          mock(AppointmentViews.class),
+          views,
           Clock.fixed(NOW, ZoneOffset.UTC));
+
+  /**
+   * The response is rendered inside the cancel's transaction, before it commits, and nothing is
+   * read after it, so the retention purge cannot delete the appointment between the commit and the
+   * read and turn a done cancel into a 500.
+   */
+  @Test
+  void responseIsRenderedInsideTheTransactionBeforeItCommits() {
+    when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
+    when(appointments.findByReference(any())).thenAnswer(call -> Optional.of(confirmed()));
+    when(catalogue.branch(any())).thenReturn(branch());
+    when(catalogue.service(any())).thenReturn(service());
+
+    handler.cancel(REFERENCE, "0101");
+
+    InOrder order = inOrder(appointments, outbox, views, transactions);
+    order.verify(appointments).update(any());
+    order.verify(outbox).enqueueCancellation(any());
+    order.verify(views).of(any(), eq(NOW));
+    order.verify(transactions).commit(any());
+    verify(views, never()).byId(any(), any());
+  }
 
   /**
    * A version conflict on the re-run as well is {@code 503 TRY_AGAIN} with {@code Retry-After: 2},

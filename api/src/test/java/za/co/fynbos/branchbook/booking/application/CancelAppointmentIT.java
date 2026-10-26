@@ -8,6 +8,8 @@ import static za.co.fynbos.branchbook.support.Bookings.lookup;
 
 import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -28,10 +30,12 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
+import za.co.fynbos.branchbook.booking.application.RetentionPurge.Purged;
 import za.co.fynbos.branchbook.notification.application.NotificationDispatcher;
 import za.co.fynbos.branchbook.support.BookingPause;
 import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
+import za.co.fynbos.branchbook.support.LockWaits;
 import za.co.fynbos.branchbook.support.MutableClock;
 
 /**
@@ -60,6 +64,8 @@ class CancelAppointmentIT {
   @Autowired private DataSource dataSource;
 
   @Autowired private NotificationDispatcher dispatcher;
+
+  @Autowired private RetentionPurge retention;
 
   /**
    * BR-14, BR-8: Polokwane has one FICA seat. Once its holder cancels, another customer books the
@@ -375,6 +381,92 @@ class CancelAppointmentIT {
                 Integer.class))
         .as("written by one transaction")
         .isOne();
+  }
+
+  /**
+   * The retention purge deletes the appointment while the cancel is held before its UPDATE, after
+   * it has loaded the appointment and matched the digits. The UPDATE finds nothing to change, and
+   * the re-run finds no appointment: 404 APPOINTMENT_NOT_FOUND, never 500. The digits matched, so
+   * the 404 is not counted: four more misses at the reference leave a fifth still a 404, not a 429.
+   */
+  @Test
+  void cancelWhoseAppointmentThePurgeDeletesBeforeItsUpdateReturns404AndIsNotCounted()
+      throws Exception {
+    String reference = reference(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0122")));
+    MvcTestResult cancelled;
+    try (BookingPause pause =
+        BookingPause.beforeFirstStatement("UPDATE", "appointments", dataSource, jdbc)) {
+      CompletableFuture<MvcTestResult> cancelling =
+          CompletableFuture.supplyAsync(() -> cancel(mvc, reference, "0122"));
+      pause.awaitWaiting(1, 0);
+
+      assertThat(retention.purge(clock.instant().plus(Duration.ofHours(48))))
+          .as("the purge takes the appointment, its message and its key without waiting")
+          .isEqualTo(new Purged(1, 1, 1));
+
+      pause.release();
+      cancelled = cancelling.get(10, TimeUnit.SECONDS);
+    }
+
+    assertThatAppointmentNotFound(cancelled, reference);
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM notification_messages", Integer.class))
+        .as("no cancellation queued for an appointment that is gone")
+        .isZero();
+    for (int miss = 1; miss <= 4; miss++) {
+      assertThat(lookup(mvc, reference, "0122")).hasStatus(HttpStatus.NOT_FOUND);
+    }
+    assertThat(lookup(mvc, reference, "0122"))
+        .as("the cancel's 404 counted towards no block")
+        .hasStatus(HttpStatus.NOT_FOUND);
+  }
+
+  /**
+   * A cancel that waits on the appointment's row while the purge holds it answers 404 once the
+   * purge commits. The purge is held at its key delete by another transaction, after it has locked
+   * the appointment and deleted its message; the cancel's UPDATE then waits on the purge's lock.
+   */
+  @Test
+  void cancelWaitingOnTheRowThePurgeHoldsReturns404OnceThePurgeCommits() throws Exception {
+    String reference = reference(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0123")));
+    Purged purged;
+    MvcTestResult cancelled;
+    try (Connection holder = dataSource.getConnection()) {
+      holder.setAutoCommit(false);
+      try (PreparedStatement key =
+          holder.prepareStatement(
+              "SELECT 1 FROM idempotency_keys WHERE appointment_id ="
+                  + " (SELECT id FROM appointments WHERE reference = ?) FOR UPDATE")) {
+        key.setString(1, reference);
+        key.executeQuery().close();
+      }
+      try {
+        CompletableFuture<Purged> purging =
+            CompletableFuture.supplyAsync(
+                () -> retention.purge(clock.instant().plus(Duration.ofHours(48))));
+        LockWaits.await(jdbc, 0, 1);
+        CompletableFuture<MvcTestResult> cancelling =
+            CompletableFuture.supplyAsync(() -> cancel(mvc, reference, "0123"));
+        LockWaits.await(jdbc, 0, 2);
+
+        holder.rollback();
+        purged = purging.get(10, TimeUnit.SECONDS);
+        cancelled = cancelling.get(10, TimeUnit.SECONDS);
+      } finally {
+        holder.rollback();
+      }
+    }
+
+    assertThat(purged).isEqualTo(new Purged(1, 1, 1));
+    assertThatAppointmentNotFound(cancelled, reference);
+  }
+
+  private static void assertThatAppointmentNotFound(MvcTestResult result, String reference)
+      throws Exception {
+    assertThat(result)
+        .hasStatus(HttpStatus.NOT_FOUND)
+        .hasContentType(MediaType.APPLICATION_PROBLEM_JSON);
+    assertThat(result).bodyJson().extractingPath("$.code").isEqualTo("APPOINTMENT_NOT_FOUND");
+    assertThat(result.getResponse().getContentAsString()).doesNotContain(reference);
   }
 
   /**

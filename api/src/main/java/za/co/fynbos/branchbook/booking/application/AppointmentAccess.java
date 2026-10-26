@@ -57,6 +57,24 @@ class AppointmentAccess {
     return match.orElseThrow(AppointmentNotFoundException::new);
   }
 
+  /**
+   * Loads again, in a later transaction of the same request, an appointment the caller proved with
+   * {@link #open} moments ago, without counting the try: the digits matched then, and the limiter
+   * released them. The appointment may have gone since, deleted by the retention purge, which is no
+   * guess of the caller's, so that is a {@code 404} that counts towards no block.
+   *
+   * @param reference the reference, already parsed
+   * @param mobileLast4 the last four digits the caller proved it with
+   * @return the appointment, loaded through JPA without a lock
+   * @throws AppointmentNotFoundException if the appointment is no longer there
+   */
+  Appointment reopen(AppointmentReference reference, String mobileLast4) {
+    return appointments
+        .findByReference(reference)
+        .filter(appointment -> sameDigits(appointment.mobile().last4(), mobileLast4))
+        .orElseThrow(AppointmentNotFoundException::new);
+  }
+
   /** Compares in constant time, so the response time does not leak how many digits matched. */
   private static boolean sameDigits(String expected, String given) {
     return MessageDigest.isEqual(
