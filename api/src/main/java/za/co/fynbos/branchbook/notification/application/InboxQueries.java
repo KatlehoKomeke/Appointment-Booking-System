@@ -1,8 +1,9 @@
 package za.co.fynbos.branchbook.notification.application;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
@@ -10,31 +11,26 @@ import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 import za.co.fynbos.branchbook.booking.application.AppointmentDirectory;
 import za.co.fynbos.branchbook.booking.application.AppointmentLabel;
-import za.co.fynbos.branchbook.booking.domain.MobileNumber;
-import za.co.fynbos.branchbook.notification.domain.NotificationChannel;
 import za.co.fynbos.branchbook.notification.domain.NotificationMessage;
-import za.co.fynbos.branchbook.notification.domain.NotificationStatus;
 
 /**
  * Reads the simulated inbox: the newest messages of every appointment, each with its reference and
  * its recipient redacted (FR-17). The appointments are named through booking's {@link
- * AppointmentDirectory}, so this module still reads no table of another.
+ * AppointmentDirectory}, so this module still reads no table of another. Whether each message is
+ * {@code retryable} is decided by {@link RetryPolicy}, the rule the retry itself applies.
  */
 @Service
 public class InboxQueries {
 
-  /** The failure reasons a retry could cure; a superseded or capped message stays as it is. */
-  private static final Set<String> RETRYABLE_REASONS = Set.of("DELIVERY_FAILED", "DISPATCH_ERROR");
-
-  /** What an e-mail recipient would show as, if the e-mail channel is added. */
-  private static final String HIDDEN_ADDRESS = "***";
-
   private final NotificationMessageRepository messages;
   private final AppointmentDirectory appointments;
+  private final Clock clock;
 
-  InboxQueries(NotificationMessageRepository messages, AppointmentDirectory appointments) {
+  InboxQueries(
+      NotificationMessageRepository messages, AppointmentDirectory appointments, Clock clock) {
     this.messages = messages;
     this.appointments = appointments;
+    this.clock = clock;
   }
 
   /**
@@ -50,36 +46,13 @@ public class InboxQueries {
    */
   @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
   public List<InboxMessage> newest(int limit) {
+    Instant now = clock.instant();
     List<NotificationMessage> newest = messages.newest(limit);
     Map<UUID, AppointmentLabel> labels =
         appointments.labels(
             newest.stream().map(NotificationMessage::appointmentId).collect(Collectors.toSet()));
     return newest.stream()
-        .map(message -> entry(message, labels.get(message.appointmentId())))
+        .map(message -> InboxMessage.of(message, labels.get(message.appointmentId()), now))
         .toList();
-  }
-
-  private static InboxMessage entry(NotificationMessage message, AppointmentLabel label) {
-    boolean pending = message.status() == NotificationStatus.PENDING;
-    return new InboxMessage(
-        message.id(),
-        label.reference(),
-        message.kind().name(),
-        message.channel().name(),
-        message.channel() == NotificationChannel.SMS
-            ? MobileNumber.ofE164(message.recipient()).redacted()
-            : HIDDEN_ADDRESS,
-        message.subject(),
-        message.body(),
-        message.status().name(),
-        message.failureReason(),
-        message.status() == NotificationStatus.FAILED
-            && RETRYABLE_REASONS.contains(message.failureReason()),
-        message.attempts(),
-        pending ? message.nextAttemptAt() : null,
-        message.lastError(),
-        message.createdAt(),
-        message.sentAt(),
-        label.zone());
   }
 }

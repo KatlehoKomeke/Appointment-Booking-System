@@ -11,9 +11,10 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import za.co.fynbos.branchbook.support.IntegrationTest;
 
 /**
- * FR-17: with {@code branchbook.inbox.enabled} false, the application's default, the inbox does not
- * exist: its path is a plain 404 with no code, like any other unknown path. This test builds a
- * second application context, the only one that differs from {@link IntegrationTest}'s.
+ * FR-17, FR-18: with {@code branchbook.inbox.enabled} false, the application's default, the inbox
+ * and the retry of a message do not exist: their paths are a plain 404 with no code, like any other
+ * unknown path. This test builds a second application context, the only one that differs from
+ * {@link IntegrationTest}'s.
  */
 @IntegrationTest
 @TestPropertySource(properties = "branchbook.inbox.enabled=false")
@@ -27,5 +28,16 @@ class InboxSwitchedOffIT {
 
     assertThat(inbox).hasStatus(HttpStatus.NOT_FOUND);
     assertThat(inbox.getResponse().getContentAsString()).doesNotContain("\"code\"");
+  }
+
+  @Test
+  void retryIsAPlain404WhenSwitchedOff() throws Exception {
+    MvcTestResult retry =
+        mvc.post()
+            .uri("/api/v1/messages/{id}/retry", "dccc2431-28aa-4926-a555-ca6c80ddfd88")
+            .exchange();
+
+    assertThat(retry).hasStatus(HttpStatus.NOT_FOUND);
+    assertThat(retry.getResponse().getContentAsString()).doesNotContain("\"code\"");
   }
 }

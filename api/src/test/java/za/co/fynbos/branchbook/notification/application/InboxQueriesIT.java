@@ -66,7 +66,8 @@ class InboxQueriesIT {
         transactional(
             new InboxQueries(
                 purgingOnceMessagesAreRead(() -> purged.set(retention.purge(fortyEightHoursOn))),
-                appointments));
+                appointments,
+                clock));
 
     List<InboxMessage> listed = inbox.newest(50);
 

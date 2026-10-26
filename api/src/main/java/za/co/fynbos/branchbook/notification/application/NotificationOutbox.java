@@ -1,23 +1,30 @@
 package za.co.fynbos.branchbook.notification.application;
 
+import java.time.Instant;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import za.co.fynbos.branchbook.booking.application.Cancellation;
 import za.co.fynbos.branchbook.booking.application.Confirmation;
 import za.co.fynbos.branchbook.booking.application.ConfirmationOutbox;
+import za.co.fynbos.branchbook.booking.domain.MobileNumber;
 import za.co.fynbos.branchbook.notification.domain.NotificationKind;
 import za.co.fynbos.branchbook.notification.domain.NotificationMessage;
 import za.co.fynbos.branchbook.notification.domain.NotificationTemplates;
 import za.co.fynbos.branchbook.shared.correlation.CorrelationIds;
 
 /**
- * Writes the confirmation SMS as a PENDING row of the outbox, inside the booking transaction
- * (ADR-0003). It refuses to run outside a transaction, so a confirmation can never commit without
- * its booking. Delivering it is the dispatcher's job, from milestone M5.
+ * Writes the confirmation SMS inside the booking transaction, and the cancellation SMS inside the
+ * cancel transaction, each as a PENDING row of the outbox (ADR-0003). It refuses to run outside a
+ * transaction, so a message can never commit without the change it reports. Delivering it is the
+ * dispatcher's job.
  *
- * <p>Its log line names the message, never the recipient or the text (BR-19).
+ * <p>A cancellation first supersedes the appointment's confirmation if it is still PENDING or
+ * FAILED, so the customer is never told about an appointment after its cancellation (BR-24). Its
+ * log lines name the message and the appointment, never the recipient or the text (BR-19).
  */
 @Service
 public class NotificationOutbox implements ConfirmationOutbox {
@@ -35,21 +42,51 @@ public class NotificationOutbox implements ConfirmationOutbox {
   @Override
   @Transactional(propagation = Propagation.MANDATORY)
   public void enqueueConfirmation(Confirmation confirmation) {
-    String body =
+    enqueue(
+        confirmation.appointmentId(),
+        NotificationKind.CONFIRMATION,
+        confirmation.recipient(),
         templates.confirmationSms(
             confirmation.serviceSmsName(),
             confirmation.branchSmsName(),
             confirmation.startsAt(),
             confirmation.zone(),
-            confirmation.reference());
+            confirmation.reference()),
+        confirmation.now());
+  }
+
+  @Override
+  @Transactional(propagation = Propagation.MANDATORY)
+  public void enqueueCancellation(Cancellation cancellation) {
+    int superseded = messages.supersedeConfirmations(cancellation.appointmentId());
+    if (superseded > 0) {
+      log.info(
+          "outbox.superseded appointmentId={} count={}", cancellation.appointmentId(), superseded);
+    }
+    enqueue(
+        cancellation.appointmentId(),
+        NotificationKind.CANCELLATION,
+        cancellation.recipient(),
+        templates.cancellationSms(
+            cancellation.serviceSmsName(),
+            cancellation.branchSmsName(),
+            cancellation.startsAt(),
+            cancellation.zone(),
+            cancellation.reference()),
+        cancellation.now());
+  }
+
+  /** Writes one PENDING SMS, due at once, under the request's correlation id. */
+  private void enqueue(
+      UUID appointmentId, NotificationKind kind, MobileNumber recipient, String body, Instant now) {
     NotificationMessage message =
         NotificationMessage.pendingSms(
-            confirmation.appointmentId(),
-            NotificationKind.CONFIRMATION,
-            confirmation.recipient().e164(),
+            appointmentId,
+            kind,
+            recipient.e164(),
             body,
             CorrelationIds.current().orElseGet(CorrelationIds::systemId),
-            confirmation.now());
+            now);
     messages.insert(message);
     log.info(
         "outbox.enqueued messageId={} kind={} channel={}",

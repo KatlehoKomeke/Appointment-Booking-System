@@ -1,14 +1,16 @@
 # BranchBook API
 
 The Spring Boot application at the heart of BranchBook. It serves the booking API and the React app from
-[web/](../web/README.md) on the same origin, and will run the confirmation dispatcher (M5). How it is structured and
+[web/](../web/README.md) on the same origin, and runs the dispatcher that delivers its SMS. How it is structured and
 why is in [docs/architecture.md](../docs/architecture.md).
 
-**Status (M3):** the schema, the seeded catalogue, the branch API, availability, booking and lookup. The
-application starts, migrates PostgreSQL, answers its health probes, serves the app, lists branches with their
-bookable dates and each day's slots with the seats left, books an appointment with its confirmation SMS in one
-transaction, and opens it again with its reference and the last four digits. It publishes its OpenAPI contract. The
-dispatcher that delivers the SMS arrives in M5.
+**Status (M6, Tier 2 API built):** the application starts, migrates PostgreSQL, answers its health probes, serves
+the app, lists branches with their bookable dates and each day's slots with the seats left, books an appointment with
+its confirmation SMS in one transaction, opens it again with its reference and the last four digits, and delivers the
+SMS through a simulated gateway (M5). From M6 it also cancels an appointment before it starts, with its cancellation
+SMS; retries a failed message from the simulated inbox; books three demo appointments on a fresh compose stack; and
+serves two meters of its own on `/actuator/prometheus`. Where a deployment switches them on, it takes bookings only
+from the demo numbers and deletes each booking 48 hours after it was made. It publishes its OpenAPI contract.
 
 ## Prerequisites
 
@@ -71,8 +73,11 @@ and after each test and forgets the lookup counts. `Bookings` builds request bod
 and `ScriptedReferenceGenerator`, which replaces the random generator in every integration test, hands out the
 references a test scripts first, so a test can force a reference collision. The dispatcher's own loop is off in the
 tests: a test that delivers calls `NotificationDispatcher.runOnce` with the instant it wants, so no test sleeps.
-`BookingPause` holds a booking at step 10, after it has written its appointment and SMS and before it commits, so a
-test can look from outside the transaction or send a second request into it at a moment it chooses.
+`BookingPause` holds a booking at step 10, after it has written its appointment and SMS and before it commits, or a
+cancel at the statement a test names, such as its UPDATE of the appointment, or a retry at its reset before that
+statement locks anything, so a test can look from outside the transaction or send a second request into it at a moment
+it chooses. `LockWaits` waits until PostgreSQL shows the sessions a test expects waiting for a lock, so a race is
+forced, never hoped for, and no test sleeps.
 
 The schema is proven directly: `SchemaConstraintIT` runs raw SQL that bypasses the application and shows that each
 named constraint rejects what it should, and fails if a constraint is added without a case. It also shows that rows
@@ -90,11 +95,13 @@ environment supplies the rest:
 | `DB_USER`, `DB_PASSWORD` | Database credentials | `compose.yaml` locally; in the hosted demo, AWS Secrets Manager (`branchbook/database`), injected when the task starts |
 | `PORT` | HTTP port, 8080 by default | Optional |
 | `BRANCHBOOK_DISPATCHER_ENABLED` | Runs the dispatcher that delivers PENDING messages every 2 seconds on its own thread. `true` by default; its interval and the simulated gateway's latency are in application.yml. | Optional; the tests switch it off and drive it themselves |
-| `BRANCHBOOK_INBOX_ENABLED` | Switches on the simulated inbox, `GET /api/v1/messages`, an operator view of every booking's messages. `false` by default. | `compose.yaml` and `make dev-api` set it to `true`, and so do the tests |
+| `BRANCHBOOK_INBOX_ENABLED` | Switches on the simulated inbox, `GET /api/v1/messages`, an operator view of every booking's messages, and its retry, `POST /api/v1/messages/{id}/retry`. `false` by default. | `compose.yaml` and `make dev-api` set it to `true`, and so do the tests |
+| `BRANCHBOOK_INBOX_REDACT_REFERENCES` | `branchbook.inbox.redact-references`. Shows every reference as `APT-****-****` in the inbox list and the retry's response: in the `reference` field, the body, the subject and the last error. Message ids are unchanged, so a retry still works, and the SMS itself still carries the real reference. With it, a public deployment could switch the inbox on without listing other visitors' references. `false` by default. | Nothing sets it today: `compose.yaml`, `make dev-api` and every test but `InboxReferencesHiddenIT` leave it off, and the hosted demo keeps the inbox off (`BRANCHBOOK_INBOX_ENABLED=false`) |
+| `BRANCHBOOK_DEMO_DATA_ENABLED` | Books three demo appointments once the application is ready, if the database has none ([Demo data](#demo-data)). `false` by default; skipped with one INFO line while `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` is on. | `compose.yaml` only; `make dev-api` and the tests leave it off |
 | `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` | Takes bookings only from the published demo numbers, 082 555 0000 to 0199, so a public demo is never given a real person's number ([ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md)). Any other South African mobile is `422 DEMO_NUMBER_REQUIRED`. `false` by default. | The hosted demo's ECS task definition sets it to `true`, and `EXPECT_DEMO_NUMBERS_ONLY=1 scripts/smoke.sh <url>` fails if a deployment has it off. The start-up log says which numbers bookings take. `compose.yaml` and `make dev-api` leave it off, and the shared test configuration sets it to `false`; `DemoNumbersOnlyIT` switches it on |
 | `BRANCHBOOK_RETENTION_ENABLED` | `branchbook.retention.enabled`. Switches on the hourly retention job, which deletes every appointment older than the max-age below, with its messages and idempotency keys, keeping the hosted demo's 48-hour promise ([SECURITY.md](../SECURITY.md#personal-information-popia)). `false` by default. | The hosted demo's ECS task definition sets it to `true`, and nothing else does. `compose.yaml`, `make dev-api` and the tests leave it off; the tests call `RetentionPurge` themselves |
 | `BRANCHBOOK_RETENTION_MAX_AGE` | `branchbook.retention.max-age`. How long after its booking an appointment is deleted, as an ISO-8601 duration. `PT48H` by default; less than `PT24H`, the life of an `Idempotency-Key`, stops start-up. | Optional; the default is the hosted demo's promise |
-| `PUBLIC_BASE_URL` | The address customers reach the app at, which ends the confirmation SMS's `/manage` link. At most 28 characters with no trailing slash, so the longest SMS fits one segment; a longer value stops start-up. `http://localhost:8080` by default. | `compose.yaml` locally (it follows `APP_PORT`); in the hosted demo, the ECS task definition (`https://branchbook.click`) |
+| `PUBLIC_BASE_URL` | The address customers reach the app at, which ends the confirmation SMS's `/manage` link and the cancellation SMS's `/book` link. At most 28 characters with no trailing slash, so the longest SMS fits one segment; a longer value stops start-up. `http://localhost:8080` by default. | `compose.yaml` locally (it follows `APP_PORT`); in the hosted demo, the ECS task definition (`https://branchbook.click`) |
 
 The booking rules that are settings rather than code are under `branchbook.booking` in application.yml: the
 two-hour lead time, the thirty-day horizon, the lookup limit of five wrong tries per reference in an hour, and
@@ -112,15 +119,19 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 | `GET /api/v1/branches/{code}/availability?service=&date=` | One day's slots for one service at one branch, each with the seats left, or why the branch is closed that day |
 | `POST /api/v1/appointments` | Book a slot, with an `Idempotency-Key`. `201` with the appointment, its `Location` and its PENDING SMS |
 | `GET /api/v1/appointments/{reference}` | Open an appointment again, with `X-Mobile-Last4` |
-| `GET /api/v1/messages?limit=` | The simulated inbox: the newest messages of every booking, recipients redacted to `082 *** ****`. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
+| `POST /api/v1/appointments/{reference}/cancel` | Cancel an appointment before it starts, with `X-Mobile-Last4`. `200` with the appointment as a lookup now shows it: `CANCELLED`, its PENDING or FAILED confirmation superseded and its cancellation SMS PENDING |
+| `GET /api/v1/messages?limit=` | The simulated inbox: the newest messages of every booking, recipients redacted to `082 *** ****`, and references to `APT-****-****` while `branchbook.inbox.redact-references` is true. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
+| `POST /api/v1/messages/{id}/retry` | Make a FAILED message due again (the web inbox's Retry button, arriving with the web Tier 2 change, calls it); any other message is returned unchanged. The answer is the message as the inbox shows it, its reference redacted the same way. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
 | `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml) |
 | `/swagger-ui.html` | Swagger UI, to read and try the API |
 | `/` and the app's routes (`/book`, `/manage`, `/messages`, `/privacy`, `/appointments/{reference}`) | The React app |
-| `/readyz` | Readiness: up once the app has started and PostgreSQL answers. Used by the image's Docker health check; the planned load balancer will use it too. |
+| `/readyz` | Readiness: up once the app has started and PostgreSQL answers. Used by the image's Docker health check and the hosted demo's load balancer. |
 | `/livez` | Liveness: up while the process is healthy. Deliberately ignores the database. |
 | `/actuator/health`, `/actuator/info` | Overall health (no details) and build information |
+| `/actuator/prometheus` | Every meter in Prometheus's text format, the application's two included ([Metrics](#metrics)) |
 
-Every other actuator endpoint is closed. Every response carries the security headers described in
+Every other actuator endpoint is closed: `env`, `beans`, `heapdump`, `metrics` and `loggers` answer 404
+(`SecurityHeadersIT`). Every response carries the security headers described in
 [SecurityConfig](src/main/java/za/co/fynbos/branchbook/shared/security/SecurityConfig.java) and an
 `X-Correlation-Id`: the caller's, if it is up to 64 letters, digits and hyphens, otherwise a new one. Swagger UI's
 pages alone may use inline styles, which its rendering needs; inline scripts are refused everywhere.
@@ -193,6 +204,51 @@ Opening an appointment needs its reference, in any case and with or without hyph
 the number. Every mismatch is the same `404`, and five wrong tries block the reference, right digits included, until
 an hour after the first (`429` with `Retry-After`).
 
+How a cancel is decided (BR-13, BR-14, BR-16, BR-24):
+
+- It needs the same reference and digits as a lookup, through the same check, and its wrong tries count towards the
+  same five.
+- One `READ COMMITTED` transaction loads the appointment through JPA without a lock, cancels it, and flushes:
+  `UPDATE ... WHERE id = ? AND version = ?`, which frees the seat at once. It then marks the appointment's
+  confirmation FAILED with `SUPERSEDED_BY_CANCELLATION` if it is still PENDING or FAILED, and writes the PENDING
+  cancellation SMS. All of it commits together.
+- A confirmation the dispatcher is sending at that moment is locked, so the cancel waits for that one send, for up
+  to 2 seconds; a longer send makes the cancel `503 TRY_AGAIN`, with nothing changed. If it went out, the cancel
+  leaves it alone: a confirmation is delivered before its cancellation, or never.
+- A repeat is the same `200` and writes nothing. Two cancels at the same moment both get it: the second one's version
+  check fails, and it reads the appointment once more and finds it cancelled.
+- At or after the start it is `409 TOO_LATE_TO_CANCEL`, and the appointment stays `CONFIRMED`.
+- An appointment the 48-hour retention purge has deleted, before the cancel or while it runs, is the same
+  `404 APPOINTMENT_NOT_FOUND` as an unknown reference, never a `500`.
+
+`POST /api/v1/appointments/APT-7K3M-9Q2X/cancel` with `X-Mobile-Last4: 0101`, shortened:
+
+```json
+{
+  "reference": "APT-7K3M-9Q2X",
+  "status": "CANCELLED",
+  "canCancel": false,
+  "cancelledAt": "2026-10-26T08:10:00+02:00",
+  "notifications": [
+    { "kind": "CONFIRMATION", "status": "FAILED", "failureReason": "SUPERSEDED_BY_CANCELLATION", "...": "..." },
+    {
+      "kind": "CANCELLATION",
+      "status": "PENDING",
+      "recipientMasked": "082 *** 0101",
+      "body": "Appt cancelled: FICA update, Sandton Summit, Tue 27 Oct 09:30 SAST. Ref APT-7K3M-9Q2X. Rebook: http://localhost:8080/book",
+      "...": "..."
+    }
+  ]
+}
+```
+
+The retry of a message locks it with `FOR UPDATE` until it commits, and waits up to 2 seconds for a send of it in
+flight, so it never races the dispatcher or a cancel. It resets a FAILED message whose `failureReason` is
+`DELIVERY_FAILED` or `DISPATCH_ERROR` to PENDING, with no attempts and due now. Every other message, and the
+confirmation of an appointment that is cancelled or has started, comes back unchanged with `retryable` false, by the
+same rule that sets `retryable` in the inbox. Where the inbox is off, [docs/runbook.md](../docs/runbook.md) holds the
+guarded SQL that replays a message instead.
+
 Every error is an RFC 9457 problem with a stable `code` ([docs/errors.md](../docs/errors.md)). Its `instance` names
 the occurrence, never the request path, and an unexpected exception is logged with its type and stack frames but
 not its message, which could quote personal data:
@@ -208,6 +264,75 @@ not its message, which could quote personal data:
   "correlationId": "readme-example-1"
 }
 ```
+
+## Metrics
+
+`GET /actuator/prometheus` serves every meter in Prometheus's text format (`text/plain;version=0.0.4`). Spring
+Boot's own are there: `http_server_requests_seconds` by method, URI template, status and exception type,
+`hikaricp_connections_*`, `jvm_*`, `process_*` and `logback_events_total`. The application adds two (FR-30):
+
+| Metric | Type | What it says |
+|---|---|---|
+| `appointments_booked_total{outcome}` | Counter | Every `POST /api/v1/appointments`, counted once its response is written, by how it ended. `outcome` is its only tag. |
+| `outbox_pending` | Gauge | The messages still PENDING after the dispatcher's last tick, those backing off after a refusal included. One `COUNT` query per tick, every 2 seconds; a scrape never touches the database. `NaN` until the first tick, so a dispatcher that is switched off shows no number rather than a healthy 0. |
+
+[BookingOutcome](src/main/java/za/co/fynbos/branchbook/booking/application/BookingOutcome.java) is the one place
+that decides the outcome, and it must name every problem code to compile (`BookingOutcomeTest`). The counting happens
+in [BookingOutcomeMeter](src/main/java/za/co/fynbos/branchbook/booking/api/BookingOutcomeMeter.java), after the
+response is written, so it also sees the 400s Spring gives before the controller runs and the 503s that only the
+problem handler names:
+
+| The booking request was answered with | `outcome` |
+|---|---|
+| `201`, a new appointment | `confirmed` |
+| `201` with `Idempotent-Replayed: true` | `replayed` |
+| `409 SLOT_FULL` | `slot_full` |
+| `409 DUPLICATE_APPOINTMENT` | `duplicate` |
+| `409 CUSTOMER_OVERLAP` | `customer_overlap` |
+| `400 VALIDATION_FAILED` (a malformed, missing or unknown field, or an unreadable body); `400 IDEMPOTENCY_KEY_REQUIRED`; `404 BRANCH_NOT_FOUND`; `422 SERVICE_NOT_OFFERED_AT_BRANCH`, `DATE_OUTSIDE_BOOKING_WINDOW`, `SLOT_ON_CLOSED_DAY`, `SLOT_OUTSIDE_HOURS`, `SLOT_OFF_GRID`, `SLOT_WITHIN_LEAD_TIME`, `MOBILE_NUMBER_REQUIRED`, `DEMO_NUMBER_REQUIRED` or `IDEMPOTENCY_KEY_REUSED` | `validation` |
+| `503 TRY_AGAIN`: a lock not granted in 2 s, no free connection in 3 s, a statement over 5 s, or a second deadlock or serialization conflict | `try_again` |
+| `500 INTERNAL_ERROR` after the booking committed, as when the client has gone before its `201` is written | `confirmed` (or `replayed`): the appointment exists and holds its seat |
+| `500 INTERNAL_ERROR` that booked nothing | Not counted. It is a defect, not an outcome of booking; it shows as `status="500"` in `http_server_requests_seconds` and in the log with its correlation id. |
+| A refusal before the request reaches the endpoint: `405`, `406` or `415` | Not counted |
+
+The booking endpoint has no `429`. Should another endpoint's code, such as `LOOKUP_RATE_LIMITED`, ever answer a
+booking, it is left out rather than counted as something it is not. Bookings that do not come through HTTP, such as
+the demo data, are not counted. So `confirmed` counts exactly the appointments booked through the API: a client that
+never got its `201` and retries with the same key adds one `replayed`. All seven series exist from start-up at 0, so
+a rate over one that never moved is 0, not missing (`BookingOutcomeMeterTest`). `MetricsIT` books, replays and
+refuses through the API and reads the scrape, and checks that the scrape holds no name, number or reference;
+`DemoNumbersOnlyIT`, which runs with only the demo numbers taken, checks that `DEMO_NUMBER_REQUIRED` counts as
+`validation`. The SECURITY.md section on hardening says where the endpoint is reachable, and `scripts/smoke.sh`
+checks that the running stack serves it.
+
+## Demo data
+
+With `BRANCHBOOK_DEMO_DATA_ENABLED=true` (`branchbook.demo-data.enabled`), which only `compose.yaml` sets, the
+application books three appointments once it is ready, if the `appointments` table is empty, so the first screen
+and the simulated inbox have something to show (FR-28):
+
+| Branch | Service | Customer | Number |
+|---|---|---|---|
+| Bellville Kingsway (`BEL`) | FICA update | Ayanda Demo | +27 60 000 0001 |
+| Umhlanga Ridge (`UMH`) | Card replacement | Pieter Demo | +27 60 000 0002 |
+| Umhlanga Ridge (`UMH`) | FICA update | Priya Demo | +27 60 000 0000 |
+
+[DemoDataLoader](src/main/java/za/co/fynbos/branchbook/booking/infrastructure/DemoDataLoader.java) books each
+through `BookAppointmentHandler`, with its own `Idempotency-Key`, at the first free slot of the branch's next open
+day after today, as `SlotCalendar` finds it, so the lead time, Sundays and public holidays are respected whatever day
+the stack starts. It never books at Polokwane, whose single seats `make demo-409` races for, or at Sandton, which the
+smoke test and the README's walkthrough use. The three confirmations carry one correlation id, `sys-<uuid>`; the one
+to the number ending 0000 fails all five attempts by design and shows as FAILED in the inbox about 30 seconds after
+start-up. The load runs on a virtual thread of its own, `demo-data`, so it never delays readiness, and a fixture that
+cannot be booked is logged as a warning naming its branch and service only (`demo_data.no_free_slot`,
+`demo_data.fixture_refused` or `demo_data.fixture_failed`); the application
+carries on. A restart books nothing more while any appointment exists. While
+`branchbook.booking.demo-numbers-only` is on, the loader books nothing and logs one INFO line,
+`demo_data.skipped reason=demo_numbers_only`, before it reads the database. Its `+27 60 000` numbers are outside the
+demo block, and it books through the booking handler, past the API's demo-number check, so it checks the setting
+itself rather than store numbers that deployment promised not to take. `DemoDataLoaderIT` drives the loader
+directly, and checks that the loader the application builds hands the load to that thread; `DemoDataPropertiesTest`
+reads `compose.yaml` and checks that the app's environment there switches the loader on.
 
 ## The contract
 
@@ -242,14 +367,14 @@ api/
     │   │   ├── api/                     the availability endpoint
     │   │   ├── application/             the availability query; the port to read booked seats
     │   │   └── domain/                  plain Java: SlotCalendar, Slot, BookedInterval
-    │   ├── booking/                     appointments: booking and lookup
+    │   ├── booking/                     appointments: booking, lookup and cancellation
     │   │   ├── api/                     the appointment endpoints and their request and response records
-    │   │   ├── application/             the booking transaction, lookup, the limiter, the retention purge, and the ports it declares
+    │   │   ├── application/             the booking and cancel transactions, lookup, the limiter, the retention purge, and their ports
     │   │   ├── domain/                  plain Java: Appointment, MobileNumber, CustomerName, AppointmentReference
     │   │   └── infrastructure/          JPA and SQL adapters, the constraint translator, the key purge, the retention job
-    │   ├── notification/                the confirmation SMS and the simulated inbox
-    │   │   ├── api/                     the inbox endpoint, which exists only while switched on
-    │   │   ├── application/             the outbox writer, the message reads and the inbox query
+    │   ├── notification/                the confirmation and cancellation SMS, and the simulated inbox
+    │   │   ├── api/                     the inbox and retry endpoints, which exist only while switched on
+    │   │   ├── application/             the outbox writer, the dispatcher, the message reads, the inbox and the retry
     │   │   ├── domain/                  plain Java: NotificationTemplates, Gsm7
     │   │   └── infrastructure/          SQL for notification_messages
     │   └── shared/                      cross-cutting concerns

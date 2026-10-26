@@ -74,9 +74,24 @@ class SecurityHeadersIT {
         .doesNotContainHeader("Access-Control-Allow-Credentials");
   }
 
+  /**
+   * Only health, info and prometheus are exposed (MetricsIT lists them); every other actuator
+   * endpoint is a 404, the raw metrics browser and the log-level switch included.
+   */
   @ParameterizedTest
-  @ValueSource(strings = {"/actuator/env", "/actuator/beans", "/actuator/heapdump"})
-  void operationalEndpointsBeyondHealthAndInfoAreClosed(String path) {
+  @ValueSource(
+      strings = {
+        "/actuator/env",
+        "/actuator/beans",
+        "/actuator/heapdump",
+        "/actuator/threaddump",
+        "/actuator/metrics",
+        "/actuator/loggers",
+        "/actuator/configprops",
+        "/actuator/mappings",
+        "/actuator/scheduledtasks"
+      })
+  void operationalEndpointsBeyondHealthInfoAndPrometheusAreClosed(String path) {
     assertThat(mvc.get().uri(path)).hasStatus(HttpStatus.NOT_FOUND);
   }
 }

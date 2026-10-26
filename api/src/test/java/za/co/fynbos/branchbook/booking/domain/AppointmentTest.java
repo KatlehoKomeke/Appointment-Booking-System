@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-/** How a booking becomes an appointment, and when it can still be cancelled. */
+/** How a booking becomes an appointment, when it can still be cancelled, and cancelling it. */
 class AppointmentTest {
 
   private static final Instant BOOKED = Instant.parse("2026-10-26T06:00:00Z");
@@ -47,6 +47,50 @@ class AppointmentTest {
     assertThat(appointment.canCancel(STARTS.minusSeconds(1))).isTrue();
     assertThat(appointment.canCancel(STARTS)).isFalse();
     assertThat(appointment.canCancel(STARTS.plus(Duration.ofDays(1)))).isFalse();
+  }
+
+  /** BR-14: a cancel before the start cancels, stamps the time, and ends further cancelling. */
+  @Test
+  void cancelBeforeTheStartCancelsAndRecordsWhen() {
+    Appointment appointment = confirm(Duration.ofMinutes(15), 1);
+    Instant now = STARTS.minusSeconds(1);
+
+    assertThat(appointment.cancel(now)).isEqualTo(CancelOutcome.CANCELLED);
+
+    assertThat(appointment.status()).isEqualTo(AppointmentStatus.CANCELLED);
+    assertThat(appointment.cancelledAt()).isEqualTo(now);
+    assertThat(appointment.canCancel(now)).isFalse();
+  }
+
+  /** BR-14, BR-25: at the start, or after it, it is too late, and the appointment is unchanged. */
+  @ParameterizedTest
+  @ValueSource(longs = {0, 1, 86_400})
+  void cancelAtOrAfterTheStartIsTooLateAndChangesNothing(long secondsAfterTheStart) {
+    Appointment appointment = confirm(Duration.ofMinutes(15), 1);
+
+    assertThat(appointment.cancel(STARTS.plusSeconds(secondsAfterTheStart)))
+        .isEqualTo(CancelOutcome.TOO_LATE);
+
+    assertThat(appointment.status()).isEqualTo(AppointmentStatus.CONFIRMED);
+    assertThat(appointment.cancelledAt()).isNull();
+  }
+
+  /**
+   * BR-14: cancelling again is a no-op the caller can tell apart from a cancel, even after the
+   * start, and keeps the first cancellation's time.
+   */
+  @Test
+  void repeatCancelIsANoOpThatKeepsTheFirstCancellation() {
+    Appointment appointment = confirm(Duration.ofMinutes(15), 1);
+    Instant first = STARTS.minus(Duration.ofHours(2));
+    appointment.cancel(first);
+
+    assertThat(appointment.cancel(first.plusSeconds(60)))
+        .isEqualTo(CancelOutcome.ALREADY_CANCELLED);
+    assertThat(appointment.cancel(STARTS.plusSeconds(60)))
+        .isEqualTo(CancelOutcome.ALREADY_CANCELLED);
+    assertThat(appointment.status()).isEqualTo(AppointmentStatus.CANCELLED);
+    assertThat(appointment.cancelledAt()).isEqualTo(first);
   }
 
   @ParameterizedTest

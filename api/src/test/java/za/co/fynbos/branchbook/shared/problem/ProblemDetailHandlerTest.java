@@ -10,6 +10,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
@@ -200,6 +201,35 @@ class ProblemDetailHandlerTest {
     assertThat(result).hasStatus(HttpStatus.NOT_FOUND);
     assertThat(result).bodyJson().extractingPath("$.correlationId").asString().isNotBlank();
     assertThat(result).bodyJson().doesNotHavePath("$.code").doesNotHavePath("$.detail");
+  }
+
+  /**
+   * FR-30: every coded problem is noted on its request with the code the response carries, so the
+   * booking meter counts a request by how it was answered without classifying failures again.
+   */
+  @ParameterizedTest
+  @CsvSource({
+    "/slot-full, SLOT_FULL",
+    "/database-down, TRY_AGAIN",
+    "/transient/55P03, TRY_AGAIN",
+    "/needs-header, VALIDATION_FAILED",
+    "/bug, INTERNAL_ERROR",
+    "/broken-mapping/1, INTERNAL_ERROR"
+  })
+  void everyCodedProblemIsNotedOnItsRequest(String path, ProblemCode code) {
+    MvcTestResult result = mvc.get().uri(path).exchange();
+
+    assertThat(result).bodyJson().extractingPath("$.code").isEqualTo(code.name());
+    assertThat(AnsweredProblem.of(result.getRequest())).contains(code);
+  }
+
+  /** A status the API never returns on purpose carries no code, so nothing is noted. */
+  @Test
+  void problemWithoutACodeIsNotNoted() {
+    MvcTestResult result = mvc.get().uri("/no-such-path/1").exchange();
+
+    assertThat(result).hasStatus(HttpStatus.NOT_FOUND);
+    assertThat(AnsweredProblem.of(result.getRequest())).isEmpty();
   }
 
   @RestController

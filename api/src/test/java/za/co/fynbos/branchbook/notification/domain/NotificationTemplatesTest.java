@@ -8,7 +8,10 @@ import java.util.List;
 import java.util.Locale;
 import org.junit.jupiter.api.Test;
 
-/** BR-18: the confirmation SMS says what it must, in English, in one GSM-7 segment. */
+/**
+ * BR-18: the confirmation and the cancellation SMS say what they must, in English, in one GSM-7
+ * segment.
+ */
 class NotificationTemplatesTest {
 
   private static final ZoneId JOHANNESBURG = ZoneId.of("Africa/Johannesburg");
@@ -77,6 +80,48 @@ class NotificationTemplatesTest {
     assertThat(longestBaseUrl).hasSize(28);
     assertThat(NotificationTemplates.longestConfirmationSeptets(longestBaseUrl))
         .isEqualTo(Gsm7.SINGLE_SEGMENT);
+  }
+
+  /** BR-14: the cancellation SMS is exactly the published example, 121 characters. */
+  @Test
+  void rendersThePublishedCancellationExampleExactly() {
+    String sms =
+        templates.cancellationSms(
+            "FICA update",
+            "Sandton Summit",
+            Instant.parse("2026-10-27T07:30:00Z"),
+            JOHANNESBURG,
+            "APT-7K3M-9Q2X");
+
+    assertThat(sms)
+        .isEqualTo(
+            "Appt cancelled: FICA update, Sandton Summit, Tue 27 Oct 09:30 SAST. Ref APT-7K3M-9Q2X."
+                + " Rebook: http://localhost:8080/book")
+        .hasSize(121);
+  }
+
+  @Test
+  void cancellationFitsOneGsm7SegmentForLongestSeededNames() {
+    Instant twoDigitDay = Instant.parse("2026-11-28T09:30:00Z");
+    for (String branch : SEEDED_BRANCHES) {
+      for (String service : SEEDED_SERVICES) {
+        String sms =
+            templates.cancellationSms(service, branch, twoDigitDay, JOHANNESBURG, "APT-7K3M-9Q2X");
+
+        assertThat(Gsm7.isEncodable(sms)).as(sms).isTrue();
+        assertThat(Gsm7.septets(sms)).as(sms).isLessThanOrEqualTo(Gsm7.SINGLE_SEGMENT);
+      }
+    }
+  }
+
+  /**
+   * The start-up check covers the cancellation too: its worst case with the longest base URL
+   * start-up accepts is 141 septets, within one segment.
+   */
+  @Test
+  void longestCancellationWithTheLongestAllowedBaseUrlIs141Septets() {
+    assertThat(NotificationTemplates.longestCancellationSeptets("https://" + "b".repeat(20)))
+        .isEqualTo(141);
   }
 
   /** A server with a German default locale must still write Wed 30 Sep, never Mi. 30 Sept. */

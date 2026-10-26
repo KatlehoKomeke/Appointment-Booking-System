@@ -10,11 +10,13 @@ import za.co.fynbos.branchbook.notification.domain.NotificationTemplates;
 /**
  * The notification settings, under {@code branchbook.notification}.
  *
- * <p>The application refuses to start with a base URL that could push a confirmation over one SMS
- * segment, so a configuration mistake shows at start-up, never in a customer's message (BR-18).
+ * <p>The application refuses to start with a base URL that could push a confirmation or a
+ * cancellation over one SMS segment, so a configuration mistake shows at start-up, never in a
+ * customer's message (BR-18).
  *
  * @param publicBaseUrl the address customers reach the app at, without a trailing slash, for
  *     example {@code http://localhost:8080}; it ends the confirmation SMS's link to {@code /manage}
+ *     and the cancellation SMS's link to {@code /book}
  */
 @Validated
 @ConfigurationProperties("branchbook.notification")
@@ -25,7 +27,7 @@ public record NotificationProperties(@NotBlank String publicBaseUrl) {
 
   /**
    * Refuses a base URL that is malformed, ends with a slash, has a character outside the GSM-7
-   * alphabet, or would make the longest confirmation exceed one segment.
+   * alphabet, or would make the longest confirmation or cancellation exceed one segment.
    */
   public NotificationProperties {
     if (publicBaseUrl == null || !BASE_URL.matcher(publicBaseUrl).matches()) {
@@ -37,11 +39,13 @@ public record NotificationProperties(@NotBlank String publicBaseUrl) {
       throw new IllegalArgumentException(
           "branchbook.notification.public-base-url must use only GSM-7 characters");
     }
-    int septets = NotificationTemplates.longestConfirmationSeptets(publicBaseUrl);
+    int septets =
+        Math.max(
+            NotificationTemplates.longestConfirmationSeptets(publicBaseUrl),
+            NotificationTemplates.longestCancellationSeptets(publicBaseUrl));
     if (septets > Gsm7.SINGLE_SEGMENT) {
       throw new IllegalArgumentException(
-          "branchbook.notification.public-base-url is too long: the longest confirmation SMS would"
-              + " take "
+          "branchbook.notification.public-base-url is too long: the longest SMS would take "
               + septets
               + " characters, more than one segment of "
               + Gsm7.SINGLE_SEGMENT);

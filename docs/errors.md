@@ -75,6 +75,18 @@ One request yields exactly one code:
   reference at all is a `404` and is not counted, because it can never become a match. A lookup counts as a try
   while it is being checked and is released if its digits were right, so lookups of one reference that arrive
   together are refused with `429` and `Retry-After: 1` once the wrong ones and those still being checked reach five.
+- **Cancel** (`POST /api/v1/appointments/{reference}/cancel`): exactly as a lookup up to the `404`, and counted
+  towards the same five wrong tries of the reference. Then an appointment that is already cancelled is a `200` that
+  writes nothing, even after its start; then one that has started is `409 TOO_LATE_TO_CANCEL` and is left as it
+  was. A second cancel of the same appointment at the same moment is not an error: its version check fails, it
+  reads the appointment once more and returns the same `200`. A lock not granted within 2 s is `503 TRY_AGAIN`. An
+  appointment that the 48-hour retention purge has deleted, before the cancel or while it runs, is
+  `404 APPOINTMENT_NOT_FOUND`, never a `500`; one the purge deletes after the cancel checked its digits is not
+  counted as a wrong try.
+- **Retry** (`POST /api/v1/messages/{id}/retry`, only while `branchbook.inbox.enabled` is true): an `id` that is not
+  a UUID is `400 VALIDATION_FAILED`; then an unknown id is `404 MESSAGE_NOT_FOUND`. Any message that exists is a
+  `200`: reset to PENDING if a retry could send it, otherwise returned unchanged with `retryable` false. While
+  `branchbook.inbox.redact-references` is true, its reference shows as `APT-****-****`, as in the inbox.
 
 ## Field codes
 
@@ -87,7 +99,7 @@ name such as `X-Mobile-Last4`, or the name of a path or query parameter such as 
 | `REQUIRED` | a header or query parameter | It is missing. |
 | `NOT_NULL` | a body field | It is missing or `null`. |
 | `NOT_BLANK` | `customer.firstName`, `customer.lastName` | It is missing or only spaces. |
-| `PATTERN` | `branchCode` and `serviceCode` in a body; `code` in a path; `service` in a query; `X-Mobile-Last4` | It has the wrong shape: 2 to 8 letters for a branch code, 2 to 12 letters for a service code, four digits for the header. |
+| `PATTERN` | `branchCode` and `serviceCode` in a body; `code` or `id` in a path; `service` in a query; `X-Mobile-Last4` | It has the wrong shape: 2 to 8 letters for a branch code, 2 to 12 letters for a service code, a UUID for a message id, four digits for the header. |
 | `NAME_INVALID` | `customer.firstName`, `customer.lastName` | Not a name: 1 to 60 characters that start with a letter and hold only letters, spaces, hyphens and apostrophes. |
 | `OFFSET_REQUIRED` | `startsAt` | Not an ISO-8601 date and time with an offset, such as `2026-10-27T09:30:00+02:00`. |
 | `UNKNOWN_FIELD` | the unknown field, or `(body)` | The request does not define it, such as `endsAt`, which the server computes. Only the first is reported. |
@@ -103,9 +115,9 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 
 | Status | Seconds | When |
 |---|---|---|
-| `429 LOOKUP_RATE_LIMITED` | Up to 3600 | The seconds left until an hour after the reference's first wrong lookup, rounded up. |
+| `429 LOOKUP_RATE_LIMITED` | Up to 3600 | The seconds left until an hour after the reference's first wrong lookup or cancel, rounded up. |
 | `429 LOOKUP_RATE_LIMITED` | 1 | Fewer than five wrong lookups, but the wrong lookups and the lookups of the reference still being checked together reach five. |
-| `503 TRY_AGAIN` | 2 | A lock not granted within 2 s, a statement over 5 s, or a deadlock or serialisation failure that happened again after the one automatic re-run. |
+| `503 TRY_AGAIN` | 2 | A lock not granted within 2 s, a statement over 5 s, a deadlock or serialisation failure that happened again after the one automatic re-run, or a cancel whose version check failed again after its one re-read. |
 | `503 TRY_AGAIN` | 5 | No database connection within 3 s, or any other temporary failure. |
 
 ## Codes
@@ -115,8 +127,8 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 | `VALIDATION_FAILED` | 400 | The request is malformed: a missing or badly shaped field, unknown JSON property, a `startsAt` without an offset, or a missing or malformed `X-Mobile-Last4` header. | Inline messages on the fields named in `errors[]`. |
 | `IDEMPOTENCY_KEY_REQUIRED` | 400 | `POST /api/v1/appointments` arrived without an `Idempotency-Key` header holding a UUID. | Nothing; the web app always sends one. |
 | `BRANCH_NOT_FOUND` | 404 | The branch code is unknown or the branch is inactive. | "We couldn't find that branch." |
-| `APPOINTMENT_NOT_FOUND` | 404 | The reference is unknown or malformed, **or** the last four digits are wrong. Every case returns the same body, the digits are compared in constant time, and the answer is never `403`, so the API cannot be used to discover references. | "We couldn't find an appointment with those details." |
-| `MESSAGE_NOT_FOUND` | 404 | Retry of a simulated message id that does not exist (Tier 2 retry endpoint, local profiles only). | Not shown to customers. |
+| `APPOINTMENT_NOT_FOUND` | 404 | The reference is unknown or malformed, **or** the last four digits are wrong, **or** the appointment has been deleted by the 48-hour retention purge, even while a cancel of it ran. Every case returns the same body, the digits are compared in constant time, and the answer is never `403`, so the API cannot be used to discover references. | "We couldn't find an appointment with those details." |
+| `MESSAGE_NOT_FOUND` | 404 | Retry of a simulated message id that does not exist. The retry, `POST /api/v1/messages/{id}/retry`, exists only while `branchbook.inbox.enabled` is true, as the inbox does; otherwise its path is a plain `404` with no code. | Not shown to customers. |
 | `SERVICE_NOT_OFFERED_AT_BRANCH` | 422 | The branch does not offer the requested service, or no active service has that code. | "This branch doesn't offer that service." |
 | `DATE_OUTSIDE_BOOKING_WINDOW` | 422 | The date is outside the 30 bookable days, `[today, today + 30 days)` in the branch's time zone. | The date is not selectable. |
 | `SLOT_ON_CLOSED_DAY` | 422 | The branch is closed that day, or it is a public holiday. | The day is shown as closed, with the reason. |
@@ -129,8 +141,8 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 | `DUPLICATE_APPOINTMENT` | 409 | This mobile already has an upcoming appointment for this service. The body names no reference, branch or time. | "You already have an upcoming appointment for this service." |
 | `CUSTOMER_OVERLAP` | 409 | This mobile already has an appointment at an overlapping time, at any branch. | "You already have an appointment at that time." |
 | `SLOT_FULL` | 409 | The last seat was taken while the customer was filling in their details. Carries up to three `alternatives[]`. | "That time was just taken", with the alternatives and the details kept. |
-| `TOO_LATE_TO_CANCEL` | 409 | Cancellation was requested at or after the appointment's start time. | "This appointment has already started." |
-| `LOOKUP_RATE_LIMITED` | 429 | Five wrong lookups of one reference block it, even for the right digits, until an hour after the first. Carries `Retry-After`. | "Too many attempts. Try again later." |
+| `TOO_LATE_TO_CANCEL` | 409 | Cancellation was requested at or after the appointment's start time. The appointment is left as it was, still `CONFIRMED`. Cancelling an appointment that is already cancelled is a `200`, never this. | "This appointment has already started." |
+| `LOOKUP_RATE_LIMITED` | 429 | Five wrong tries of one reference, lookups and cancels together, block it, even for the right digits, until an hour after the first. Carries `Retry-After`. | "Too many attempts. Try again later." |
 | `INTERNAL_ERROR` | 500 | An unexpected failure, such as a second reference collision in one booking. Only the correlation id is returned. | A generic error with the correlation id to quote. |
 | `TRY_AGAIN` | 503 | A lock or statement timeout, a deadlock after one automatic retry, no database connection, or any other temporary failure. Always carries `Retry-After`. | The web app retries once with the same idempotency key, then asks the customer to try again. |
 

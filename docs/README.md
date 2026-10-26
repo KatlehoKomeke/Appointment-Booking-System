@@ -15,7 +15,7 @@ each milestone. Where two disagree, the earlier one is right and the later one i
 | [domain-rules.md](domain-rules.md) | Every business rule, where it is enforced and the test that proves it. | Written; each rule says whether it is proven or planned, and CI checks that every test a proven rule cites exists |
 | [errors.md](errors.md) | Every error code the API returns, when, and what the customer sees. | Written |
 | [openapi.yaml](openapi.yaml) | The API contract: every path, parameter, response and error. Swagger UI shows it at `/swagger-ui.html` on a running instance. | Generated from the code; `OpenApiContractIT` fails when it is out of date, and `make contract` regenerates it |
-| [runbook.md](runbook.md) | Operating the system: health checks, replaying a failed message, tracing a request. | Built in M5 |
+| [runbook.md](runbook.md) | Operating the system: health checks, replaying a failed message, the 48-hour purge, tracing a request, reading the metrics. | Built in M5; the metrics in M6 |
 | [../infra/README.md](../infra/README.md) | The AWS CDK app: what exists in AWS, how GitHub Actions connects without keys, and the first-time setup. | Written; grows with each stack |
 | [../web/README.md](../web/README.md#ui-design) | The UI design: the main Tier 1 screens and states as mockups, the colour, type and spacing tokens, the components, the accessibility decisions and the copy rules. Its images are in [assets/ui/](assets/ui/). | Designed; built in M4 and tested end to end in M6 |
 | [delivery.md](delivery.md) | How code gets from a laptop to AWS: the git hooks, the workflows, continuous deployment, Dependabot, the GitHub settings it relies on and the known gaps. | Written |
@@ -53,7 +53,7 @@ module, such as booking's `AppointmentRepository`, are left out.
 |---|---|---|---|
 | `CatalogueReadPort` | `catalogue` | `JdbcCatalogue` (`catalogue`) | Built (M1) |
 | `BookedIntervalsPort` | `scheduling` | `JdbcBookedIntervals` (`booking`) | Built (M2) |
-| `ConfirmationOutbox` | `booking` | `NotificationOutbox` (`notification`), which writes the PENDING SMS | Built (M3) |
+| `ConfirmationOutbox` | `booking` | `NotificationOutbox` (`notification`), which writes the PENDING confirmation SMS, and on a cancel supersedes it and writes the cancellation SMS | Built (M3; the cancel in M6) |
 | `AppointmentNotifications` | `booking` | `MessageQueries` (`notification`), which reads a booking's SMS | Built (M3) |
 | `NotificationEraser` | `booking` | `MessageEraser` (`notification`), which deletes a purged booking's messages in the purge's transaction | Built |
-| `MessageGateway` | `notification` | `SimulatedSmsGateway`, which sends nothing real | Planned (M5) |
+| `MessageGateway` | `notification` | `SimulatedSmsGateway`, which sends nothing real | Built (M5) |

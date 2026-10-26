@@ -3,7 +3,7 @@
 # scripts/smoke.sh: checks that a running BranchBook works end to end over HTTP. It checks the readiness probe, the
 # app and its assets, the app's routes, the branch and availability APIs and their error contract (including a request
 # rejected before Spring MVC), that the booking and lookup endpoints answer, the OpenAPI document and Swagger UI, real
-# 404s, closed operational endpoints and the security headers.
+# 404s, closed operational endpoints, the metrics endpoint and the security headers.
 #
 # It writes nothing, so it is safe against any instance: the booking and lookup checks use requests that are refused
 # before the database is touched, and a lookup of a reference that cannot exist, which is never counted.
@@ -115,6 +115,22 @@ lookup_answers() {
   curl --silent ${2:+--header "X-Mobile-Last4: $2"} "$base_url$1" | grep --quiet --fixed-strings -- "\"code\":\"$3\""
 }
 
+# Succeeds if /actuator/prometheus serves the application's two meters in Prometheus's text format. The scrape is read
+# whole before it is searched, so a search that stops at the first match cannot cut curl off mid-body. A 403 also
+# passes: an edge firewall in front of the app, such as the hosted demo's WAF, blocks every /actuator path on purpose,
+# and the metrics are then read from inside the network instead.
+metrics_are_served() {
+  local scrape status
+  status="$(curl --silent --output /dev/null --write-out '%{http_code}' "$base_url/actuator/prometheus")"
+  if [[ "$status" == 403 ]]; then
+    printf '      /actuator/prometheus is blocked at the edge (403), so the meters are not checked here\n'
+    return 0
+  fi
+  scrape="$(curl --silent --fail "$base_url/actuator/prometheus")"
+  grep --quiet --fixed-strings -- 'appointments_booked_total{outcome="confirmed"}' <<<"$scrape" \
+    && grep --quiet -E '^outbox_pending ' <<<"$scrape"
+}
+
 # Succeeds if the script that index.html loads is served, which proves the web build is inside the jar.
 app_script_is_served() {
   local script
@@ -161,6 +177,7 @@ check 'a rejected request is a 400' status_is '/api/v1/branches;x=1' 400
 check 'a rejected request is a problem' rejected_request_is_a_problem
 check 'an unknown path is a real 404' status_is /no-such-page 404
 check 'operational endpoints are closed' is_closed /actuator/env
+check 'the metrics are served for Prometheus, unless an edge firewall blocks them' metrics_are_served
 check 'content security policy is sent' header_is / Content-Security-Policy \
   "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
 check 'framing is denied' header_is / X-Frame-Options DENY

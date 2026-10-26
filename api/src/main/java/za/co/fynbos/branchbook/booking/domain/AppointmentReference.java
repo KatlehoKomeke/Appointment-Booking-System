@@ -29,7 +29,17 @@ public record AppointmentReference(String value) {
    */
   public static final String PATTERN = "^APT-[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}$";
 
+  /**
+   * What a reference shows as wherever it is hidden: in a log line, and in the simulated inbox of a
+   * deployment that hides references.
+   */
+  public static final String REDACTED = "APT-****-****";
+
   private static final Pattern STORED = Pattern.compile(PATTERN);
+
+  /** The stored form anywhere in a text: {@link #PATTERN} without its anchors. */
+  private static final Pattern WITHIN_TEXT =
+      Pattern.compile("APT-[A-HJKMNP-Z2-9]{4}-[A-HJKMNP-Z2-9]{4}");
 
   /** What a customer may type: any letter case, with or without the hyphens. */
   private static final Pattern TYPED =
@@ -84,13 +94,24 @@ public record AppointmentReference(String value) {
   }
 
   /**
+   * Replaces every reference in its stored form within a text, such as an SMS's {@code Ref
+   * APT-7K3M-9Q2X}, with {@link #REDACTED}.
+   *
+   * @param text the text
+   * @return the text with no reference left in it
+   */
+  public static String hideIn(String text) {
+    return WITHIN_TEXT.matcher(text).replaceAll(Matcher.quoteReplacement(REDACTED));
+  }
+
+  /**
    * Hides the reference, which is half of what opens an appointment, so one passed to a logger or
    * put in a message by mistake shows nothing (BR-19). {@link #value()} is the stored form.
    *
-   * @return {@code APT-****-****}
+   * @return {@link #REDACTED}, {@code APT-****-****}
    */
   @Override
   public String toString() {
-    return "APT-****-****";
+    return REDACTED;
   }
 }

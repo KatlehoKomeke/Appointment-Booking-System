@@ -5,6 +5,12 @@ import java.time.ZoneId;
 import java.util.Objects;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
+import za.co.fynbos.branchbook.booking.application.AppointmentLabel;
+import za.co.fynbos.branchbook.booking.domain.AppointmentReference;
+import za.co.fynbos.branchbook.booking.domain.MobileNumber;
+import za.co.fynbos.branchbook.notification.domain.NotificationChannel;
+import za.co.fynbos.branchbook.notification.domain.NotificationMessage;
+import za.co.fynbos.branchbook.notification.domain.NotificationStatus;
 
 /**
  * One message as the simulated inbox shows it: with its appointment's reference and the recipient
@@ -20,7 +26,8 @@ import org.jspecify.annotations.Nullable;
  * @param body the text, which names the reference
  * @param status {@code PENDING}, {@code SENT} or {@code FAILED}
  * @param failureReason why it failed, or {@code null}
- * @param retryable whether a retry could send it: FAILED with DELIVERY_FAILED or DISPATCH_ERROR
+ * @param retryable whether a retry could send it: FAILED with DELIVERY_FAILED or DISPATCH_ERROR,
+ *     and for a confirmation, an appointment neither cancelled nor started ({@link RetryPolicy})
  * @param attempts how many times delivery has been tried
  * @param nextAttemptAt when the dispatcher may next try it, or {@code null} unless PENDING
  * @param lastError a short code for why the last attempt failed, or {@code null}
@@ -54,6 +61,68 @@ public record InboxMessage(
     Objects.requireNonNull(body, "body");
     Objects.requireNonNull(createdAt, "createdAt");
     Objects.requireNonNull(zone, "zone");
+  }
+
+  /** What an e-mail recipient would show as, if the e-mail channel is added. */
+  private static final String HIDDEN_ADDRESS = "***";
+
+  /**
+   * Shows a stored message in the inbox: with its appointment's reference, the recipient redacted,
+   * and whether a retry could send it, by the same rule the retry itself applies.
+   *
+   * @param message the message as stored
+   * @param appointment what booking says about the message's appointment
+   * @param now the current instant, which decides whether a confirmation's appointment has started
+   * @return the inbox entry
+   */
+  static InboxMessage of(NotificationMessage message, AppointmentLabel appointment, Instant now) {
+    boolean pending = message.status() == NotificationStatus.PENDING;
+    return new InboxMessage(
+        message.id(),
+        appointment.reference(),
+        message.kind().name(),
+        message.channel().name(),
+        message.channel() == NotificationChannel.SMS
+            ? MobileNumber.ofE164(message.recipient()).redacted()
+            : HIDDEN_ADDRESS,
+        message.subject(),
+        message.body(),
+        message.status().name(),
+        message.failureReason(),
+        RetryPolicy.allows(message, appointment, now),
+        message.attempts(),
+        pending ? message.nextAttemptAt() : null,
+        message.lastError(),
+        message.createdAt(),
+        message.sentAt(),
+        appointment.zone());
+  }
+
+  /**
+   * Shows every appointment reference as {@code APT-****-****}: in the reference itself, and
+   * wherever the subject, the body or the last error names one, such as an SMS's {@code Ref
+   * APT-7K3M-9Q2X}. The id is kept, so the message can still be retried.
+   *
+   * @return the same message with no reference in it
+   */
+  public InboxMessage withReferencesHidden() {
+    return new InboxMessage(
+        id,
+        AppointmentReference.REDACTED,
+        kind,
+        channel,
+        recipientRedacted,
+        subject == null ? null : AppointmentReference.hideIn(subject),
+        AppointmentReference.hideIn(body),
+        status,
+        failureReason,
+        retryable,
+        attempts,
+        nextAttemptAt,
+        lastError == null ? null : AppointmentReference.hideIn(lastError),
+        createdAt,
+        sentAt,
+        zone);
   }
 
   /**

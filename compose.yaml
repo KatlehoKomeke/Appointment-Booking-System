@@ -43,6 +43,10 @@ services:
       PUBLIC_BASE_URL: http://localhost:${APP_PORT:-8080}
       # The simulated inbox at /messages, an operator view of every booking's messages, recipients redacted.
       BRANCHBOOK_INBOX_ENABLED: 'true'
+      # On a fresh database, books three demo appointments at Bellville and Umhlanga after start-up, one to a number
+      # ending 0000 whose SMS always fails, so the app and the inbox have something to show. Never Polokwane or
+      # Sandton, which make demo-409 and make smoke use.
+      BRANCHBOOK_DEMO_DATA_ENABLED: 'true'
     ports:
       - '127.0.0.1:${APP_PORT:-8080}:8080'
     # Longer than the application's 20-second graceful shutdown, so in-flight requests finish.

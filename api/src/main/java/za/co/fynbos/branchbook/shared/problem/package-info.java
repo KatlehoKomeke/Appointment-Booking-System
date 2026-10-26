@@ -9,5 +9,9 @@
  * those before it; both build them through {@code Problems} and log unexpected failures through
  * {@code LoggableFailure}, which withholds exception messages. The codes and their meaning are
  * documented in docs/errors.md.
+ *
+ * <p>{@link za.co.fynbos.branchbook.shared.problem.AnsweredProblem} notes on the request which code
+ * it was answered with, so a module can count its requests by outcome without classifying failures
+ * a second time.
  */
 package za.co.fynbos.branchbook.shared.problem;

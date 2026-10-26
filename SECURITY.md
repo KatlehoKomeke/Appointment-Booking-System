@@ -78,7 +78,10 @@ every booking is deleted 48 hours after it is made (`BRANCHBOOK_RETENTION_ENABLE
 nothing. Both have been live since 2026-10-26 (058e6fd): a number outside the range gets `422
 DEMO_NUMBER_REQUIRED` and nothing is written, and the deletion runs every hour. The simulated inbox is off on the hosted demo
 (`BRANCHBOOK_INBOX_ENABLED=false`), so other visitors cannot see anyone's booking; each booker still sees their own
-SMS and its status on the confirmation page.
+SMS and its status on the confirmation page. `BRANCHBOOK_INBOX_REDACT_REFERENCES=true` (off by default, and off in
+compose, `make dev-api` and every test but `InboxReferencesHiddenIT`) shows every reference in the inbox and its
+retry as `APT-****-****`, in the reference field, the body, the subject and the last error, so the hosted demo
+could switch the inbox back on without handing anyone another booking's reference.
 
 The hosted demo's other controls, all in [infra/lib/app-stack.ts](infra/lib/app-stack.ts) and
 [infra/lib/data-stack.ts](infra/lib/data-stack.ts): AWS WAF on the load balancer blocks `/actuator` (403), allows 30
@@ -107,7 +110,8 @@ BranchBook is designed around the Protection of Personal Information Act, even t
   ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)).
 - **No exposure.** *Built in M3.* Once an appointment exists, the API never returns its full mobile number: the
   caller who booked it, or who has just proved its last four digits, sees `082 *** 0101`. The simulated inbox,
-  built in M4, shows only `082 *** ****`, and is off unless a deployment switches it on (`branchbook.inbox.enabled`)
+  built in M4, shows only `082 *** ****`, and is off unless a deployment switches it on (`branchbook.inbox.enabled`);
+  its retry, built in M6, exists only with it and can do no more than make a failed message due again
   ([BR-19](docs/domain-rules.md#br-19); `AppointmentApiIT.responsesNeverContainUnmaskedMobile`,
   `InboxApiIT.listsTheNewestMessagesWithTheirReferencesAndRedactedRecipients`).
   Error bodies never contain personal data or another booking's details ([BR-23](docs/domain-rules.md#br-23)).
@@ -124,11 +128,21 @@ BranchBook is designed around the Protection of Personal Information Act, even t
   - `LogRedactionIT.bookingLogsContainNoCustomerNameOrMobile` takes one synthetic customer through every outcome
     of a booking and a lookup, then checks the application's log and PostgreSQL's for their name, their number in
     any form, masked or not, and the appointment's reference.
+    `LogRedactionIT.cancelAndRetryLogsContainNoCustomerNameMobileOrReference` does the same for a cancellation and
+    the retry of its messages.
 - **Log lines name appointments by id.** *Built in M3.* A reference and the last four digits open an appointment, so log
   lines carry the appointment's id and never its reference.
+- **No personal data in metrics.** *Built in M6.* `/actuator/prometheus` holds counts, durations and JVM figures.
+  Their tags are fixed words: methods, statuses, exception types, and URI templates such as
+  `/api/v1/appointments/{reference}`, never the path a caller sent; an unknown path is `uri="/**"`. The booking
+  counter's only tag is its outcome, one of seven words (FR-30). `MetricsIT.scrapeHoldsNoPersonalData` books, looks
+  the booking up, cancels it, opens the app page that names its reference and types a number into an unknown path,
+  then checks the scrape for the customer's name, their number in any form and the reference.
 - **Synthetic test data only.** Tests and demos use made-up names and the published demo numbers: `082 555 01xx`,
-  and `082 555 0000`, which the simulated gateway always refuses, to show a failed delivery. Never use a real
-  person's details, including your own.
+  and `082 555 0000`, which the simulated gateway always refuses, to show a failed delivery. The demo data that
+  docker compose books on a fresh database uses `+27 60 000 0001`, `+27 60 000 0002` and `+27 60 000 0000`, the last
+  refused like any number ending 0000, with the fictional surname Demo ([api/README.md](api/README.md#demo-data)).
+  Never use a real person's details, including your own.
 - **A hosted demo cannot collect a real number.** *Built; on in the hosted demo only.* While
   `branchbook.booking.demo-numbers-only` is true (`BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true`), a booking is taken
   only for the demo block, `082 555 0000` to `082 555 0199`. Any other South African mobile is refused with
@@ -164,6 +178,13 @@ BranchBook is designed around the Protection of Personal Information Act, even t
 - **Lookups resist enumeration.** *Built in M3.* The same 404 for an unknown reference and for wrong digits, and a
   per-reference rate limit: five wrong lookups block a reference for an hour from the first
   ([BR-13](docs/domain-rules.md#br-13)).
+- **Only three operational endpoints.** `/actuator/health`, `/actuator/info` and `/actuator/prometheus` are exposed;
+  `env`, `beans`, `heapdump`, `metrics`, `loggers` and the rest answer 404
+  (`SecurityHeadersIT.operationalEndpointsBeyondHealthInfoAndPrometheusAreClosed`). `/actuator/prometheus` needs no
+  credentials, like health. It carries no personal data (above), but it does show request rates and timings,
+  connection-pool use, JVM figures and the application's working directory in the disk-space meters. It is reachable
+  wherever the app's port is: on `127.0.0.1` only under docker compose, and on the hosted demo AWS WAF blocks
+  `/actuator` with a 403 ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)).
 - **Containers run as a non-root user** with pinned base images ([Dockerfile](Dockerfile)).
 - **Dependencies are pinned and updated through Dependabot** ([dependabot.yml](.github/dependabot.yml)). Dependabot
   alerts and security updates are on. Code scanning is not configured.
@@ -184,7 +205,9 @@ These risks are accepted in v1, or reduced but not closed. Each has the control 
 | **Unauthenticated SMS sending.** Anyone can book with any South African mobile number, which invites SMS pumping, harassment and slot squatting. | Open by design ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)). v1 sends nothing real: confirmations go to a simulated gateway (built in M5), and the hosted demo accepts only the published demo numbers. | An OTP before an appointment counts as confirmed, per-recipient and per-prefix caps, CAPTCHA, blocking premium-rate prefixes, and cost alerts |
 | **Learning that a number has a booking.** Booking with another person's number returns `409 DUPLICATE_APPOINTMENT` or `409 CUSTOMER_OVERLAP`, though never the reference, branch or time ([BR-23](docs/domain-rules.md#br-23)). | Accepted for the demo | OTP verification of the number before any answer |
 | **Reference enumeration.** Guessing references to find appointments. | Built in M3: eight characters from a 31-symbol alphabet, the same 404 for an unknown reference and for wrong digits, and the lookup rate limit ([BR-13](docs/domain-rules.md#br-13)) | Appointments bound to a verified customer through the bank's identity provider |
-| **Blocking someone's lookup.** Five wrong tries block a known reference for an hour, and the counts are kept in memory for one instance ([docs/architecture.md](docs/architecture.md#lookup)). | Accepted: a reference appears only in the customer's own SMS and pages | A shared rate-limit store, and identity-bound lookups |
+| **Blocking someone's lookup.** Five wrong tries, lookups and cancels together, block a known reference for an hour, and the counts are kept in memory for one instance ([docs/architecture.md](docs/architecture.md#lookup)). | Accepted: a reference appears only in the customer's own SMS and pages | A shared rate-limit store, and identity-bound lookups |
+| **Cancelling with a leaked reference.** The reference and the last four digits that open an appointment also cancel it. | Accepted for the demo: the same credential and rate limit as a lookup ([BR-13](docs/domain-rules.md#br-13)), no cancel once the appointment has started, and a cancellation SMS to the booked number ([BR-14](docs/domain-rules.md#br-14)) | An OTP to the booked number before a cancel, and identity-bound appointments |
+| **Operational metrics on the public port.** `/actuator/prometheus` answers anyone who can reach the app, and shows its load and internals, though no personal data. | Accepted: compose binds the port to `127.0.0.1`, and the hosted demo's WAF blocks `/actuator` | Serve the actuator on a separate management port (`management.server.port`) reachable only from the monitoring network |
 | **The pipeline's access boundary.** IAM alone does not stop a change pushed to `main` from deploying with wider access. | One administrator collaborator and the `aws-demo` branch policy | The hardening options in [infra/README.md](infra/README.md#who-can-change-what-in-aws) |
 | **The hosted demo's database certificate is not verified.** `sslmode=require` encrypts the connection to RDS but does not check the server's certificate, so it does not stop an impostor inside the VPC. | Accepted for the demo: the database is reachable only from the task's security group, in subnets with no internet route | `sslmode=verify-full` with the RDS certificate bundle in the image |
-| **Opening another visitor's booking on the hosted demo.** The demo has no sign-in, and a demo number's last four digits are public, so anyone who learnt a booking's reference could open it and see the name typed into it. The simulated inbox would list every reference. | Reduced: the inbox is off on the hosted demo (`BRANCHBOOK_INBOX_ENABLED=false`), so `/api/v1/messages` answers 404 and a reference appears only on its booker's confirmation page; guessing one meets the lookup rate limit ([BR-13](docs/domain-rules.md#br-13)) | The inbox stays off (`branchbook.inbox.enabled` defaults to false), and lookups are bound to a verified customer |
+| **Opening another visitor's booking on the hosted demo.** The demo has no sign-in, and a demo number's last four digits are public, so anyone who learnt a booking's reference could open it and see the name typed into it, or cancel it. The simulated inbox would list every reference unless `BRANCHBOOK_INBOX_REDACT_REFERENCES` is on. | Reduced: the inbox is off on the hosted demo (`BRANCHBOOK_INBOX_ENABLED=false`), so `/api/v1/messages` answers 404 and a reference appears only on its booker's confirmation page; guessing one meets the lookup rate limit ([BR-13](docs/domain-rules.md#br-13)) | The inbox stays off (`branchbook.inbox.enabled` defaults to false), and lookups are bound to a verified customer |

@@ -15,11 +15,12 @@ servers:
 tags:
 - description: "The branches customers can book at, and what each offers."
   name: Branches
-- description: "Every booking's simulated messages, recipients redacted."
-  name: Simulated inbox
 - description: The slots a service can be booked in at a branch.
   name: Availability
-- description: "Book an appointment, and open it again."
+- description: "Every booking's simulated messages, recipients redacted, and their\
+    \ retry."
+  name: Simulated inbox
+- description: "Book an appointment, open it again, and cancel it."
   name: Appointments
 paths:
   /api/v1/appointments:
@@ -164,6 +165,91 @@ paths:
       summary: Open an appointment
       tags:
       - Appointments
+  /api/v1/appointments/{reference}/cancel:
+    post:
+      description: "Needs the reference and the last four digits, exactly as opening\
+        \ the appointment does, and counts wrong digits towards the same limit. Cancelling\
+        \ frees the seat at once and queues a cancellation SMS in the same transaction;\
+        \ a confirmation still PENDING or FAILED is marked FAILED with SUPERSEDED_BY_CANCELLATION\
+        \ and is not sent from then on. Cancelling again, or from two tabs at once,\
+        \ returns the same 200 and writes nothing more. Only possible before the appointment\
+        \ starts."
+      operationId: cancelAppointment
+      parameters:
+      - description: The reference; case and hyphens do not matter
+        example: APT-7K3M-9Q2X
+        in: path
+        name: reference
+        required: true
+        schema:
+          type: string
+      - description: The last four digits of the mobile number used to book
+        example: "0101"
+        in: header
+        name: X-Mobile-Last4
+        required: true
+        schema:
+          type: string
+          pattern: "^[0-9]{4}$"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Appointment"
+          description: "Cancelled now, or already cancelled"
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "VALIDATION_FAILED: X-Mobile-Last4 is missing or not four digits"
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "APPOINTMENT_NOT_FOUND: the reference and the digits match\
+            \ no appointment"
+        "409":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "TOO_LATE_TO_CANCEL: the appointment has started; it is left\
+            \ as it was, still CONFIRMED"
+        "429":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "LOOKUP_RATE_LIMITED: five wrong tries for this reference,\
+            \ lookups and cancels together, or too many of its tries at once"
+          headers:
+            Retry-After:
+              description: "Seconds until the reference can be tried again: what is\
+                \ left of the hour after five wrong tries, or 1 when other tries of\
+                \ it are being checked"
+              schema:
+                type: integer
+              style: simple
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "TRY_AGAIN: the appointment or its messages stayed locked for\
+            \ 2 seconds, another change of the appointment won the race twice, or\
+            \ the database is unavailable; the appointment is left as it was"
+          headers:
+            Retry-After:
+              description: Seconds to wait before trying again
+              schema:
+                type: integer
+              style: simple
+      summary: Cancel an appointment
+      tags:
+      - Appointments
   /api/v1/branches:
     get:
       description: Ordered by name.
@@ -280,7 +366,9 @@ paths:
   /api/v1/messages:
     get:
       description: "The newest messages of every appointment, with recipients redacted\
-        \ to 082 *** ****. Switched off unless branchbook.inbox.enabled is true; then\
+        \ to 082 *** ****. Where branchbook.inbox.redact-references is true, every\
+        \ appointment reference, in the reference field and in the text, shows as\
+        \ APT-****-****. Switched off unless branchbook.inbox.enabled is true; then\
         \ the path is a 404."
       operationId: listMessages
       parameters:
@@ -309,6 +397,63 @@ paths:
                 $ref: "#/components/schemas/Problem"
           description: "VALIDATION_FAILED: limit is not from 1 to 200"
       summary: List the simulated messages
+      tags:
+      - Simulated inbox
+  /api/v1/messages/{id}/retry:
+    post:
+      description: "Resets a FAILED message whose failureReason is DELIVERY_FAILED\
+        \ or DISPATCH_ERROR to PENDING with no attempts, due now. Any other message,\
+        \ and the confirmation of an appointment that is cancelled or has started,\
+        \ is returned unchanged with retryable false. Waits up to 2 seconds for a\
+        \ send of the message in flight to finish first, and keeps the message locked\
+        \ until it commits. Where branchbook.inbox.redact-references is true, every\
+        \ appointment reference, in the reference field and in the text, shows as\
+        \ APT-****-****. Switched off unless branchbook.inbox.enabled is true; then\
+        \ the path is a 404."
+      operationId: retryMessage
+      parameters:
+      - description: "The message's id, from the inbox"
+        example: dccc2431-28aa-4926-a555-ca6c80ddfd88
+        in: path
+        name: id
+        required: true
+        schema:
+          type: string
+          pattern: "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InboxMessage"
+          description: "The message: reset to PENDING, or unchanged when a retry could\
+            \ not send it"
+        "400":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "VALIDATION_FAILED: id is not a UUID"
+        "404":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "MESSAGE_NOT_FOUND: no message has that id"
+        "503":
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+          description: "TRY_AGAIN: the message stayed locked for 2 seconds, or the\
+            \ database is unavailable"
+          headers:
+            Retry-After:
+              description: Seconds to wait before trying again
+              schema:
+                type: integer
+              style: simple
+      summary: Retry a failed simulated message
       tags:
       - Simulated inbox
 components:
@@ -675,6 +820,8 @@ components:
           minimum: 0
         body:
           type: string
+          description: "The text of the message; where the deployment hides references,\
+            \ every one in it shows as APT-****-****"
         channel:
           type: string
           enum:
@@ -716,10 +863,14 @@ components:
           example: 082 *** ****
         reference:
           type: string
+          description: "The appointment's reference, or APT-****-**** where the deployment\
+            \ hides references (branchbook.inbox.redact-references)"
           example: APT-7K3M-9Q2X
         retryable:
           type: boolean
-          description: True only for FAILED with DELIVERY_FAILED or DISPATCH_ERROR
+          description: "True only for FAILED with DELIVERY_FAILED or DISPATCH_ERROR,\
+            \ and never for the confirmation of an appointment that is cancelled or\
+            \ has started"
         sentAt:
           type:
           - string

@@ -51,6 +51,25 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
           + " WHERE status = 'PENDING' AND next_attempt_at <= :now"
           + " ORDER BY next_attempt_at, id LIMIT 1 FOR UPDATE SKIP LOCKED";
 
+  private static final String LOCK_BY_ID =
+      "SELECT " + COLUMNS + " FROM notification_messages WHERE id = :id FOR UPDATE";
+
+  private static final String SUPERSEDE_CONFIRMATIONS =
+      """
+      UPDATE notification_messages
+      SET status = 'FAILED', failure_reason = 'SUPERSEDED_BY_CANCELLATION'
+      WHERE appointment_id = :appointmentId AND kind = 'CONFIRMATION'
+        AND status IN ('PENDING', 'FAILED')""";
+
+  private static final String RESET_FOR_RETRY =
+      """
+      UPDATE notification_messages
+      SET status = 'PENDING', attempts = 0, next_attempt_at = :now, last_error = NULL,
+          failure_reason = NULL
+      WHERE id = :id
+      RETURNING\s"""
+          + COLUMNS;
+
   private static final String NEWEST =
       "SELECT "
           + COLUMNS
@@ -94,6 +113,18 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
   @Override
   public List<NotificationMessage> newest(int limit) {
     return jdbc.sql(NEWEST).param("limit", limit).query((rs, row) -> message(rs)).list();
+  }
+
+  @Override
+  public Optional<NotificationMessage> lockById(UUID id) {
+    return jdbc.sql(LOCK_BY_ID).param("id", id).query((rs, row) -> message(rs)).optional();
+  }
+
+  @Override
+  public long countPending() {
+    return jdbc.sql("SELECT count(*) FROM notification_messages WHERE status = 'PENDING'")
+        .query(Long.class)
+        .single();
   }
 
   @Override
@@ -146,6 +177,31 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
         .param("lastError", lastError)
         .param("id", id)
         .update();
+  }
+
+  @Override
+  public int supersedeConfirmations(UUID appointmentId) {
+    return jdbc.sql(SUPERSEDE_CONFIRMATIONS).param("appointmentId", appointmentId).update();
+  }
+
+  @Override
+  public void markSuperseded(UUID id) {
+    jdbc.sql(
+            """
+            UPDATE notification_messages
+            SET status = 'FAILED', failure_reason = 'SUPERSEDED_BY_CANCELLATION'
+            WHERE id = :id""")
+        .param("id", id)
+        .update();
+  }
+
+  @Override
+  public NotificationMessage resetForRetry(UUID id, Instant now) {
+    return jdbc.sql(RESET_FOR_RETRY)
+        .param("now", utc(now))
+        .param("id", id)
+        .query((rs, row) -> message(rs))
+        .single();
   }
 
   @Override

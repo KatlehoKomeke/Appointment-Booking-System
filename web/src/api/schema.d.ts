@@ -44,6 +44,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/appointments/{reference}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel an appointment
+         * @description Needs the reference and the last four digits, exactly as opening the appointment does, and counts wrong digits towards the same limit. Cancelling frees the seat at once and queues a cancellation SMS in the same transaction; a confirmation still PENDING or FAILED is marked FAILED with SUPERSEDED_BY_CANCELLATION and is not sent from then on. Cancelling again, or from two tabs at once, returns the same 200 and writes nothing more. Only possible before the appointment starts.
+         */
+        post: operations["cancelAppointment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/branches": {
         parameters: {
             query?: never;
@@ -113,11 +133,31 @@ export interface paths {
         };
         /**
          * List the simulated messages
-         * @description The newest messages of every appointment, with recipients redacted to 082 *** ****. Switched off unless branchbook.inbox.enabled is true; then the path is a 404.
+         * @description The newest messages of every appointment, with recipients redacted to 082 *** ****. Where branchbook.inbox.redact-references is true, every appointment reference, in the reference field and in the text, shows as APT-****-****. Switched off unless branchbook.inbox.enabled is true; then the path is a 404.
          */
         get: operations["listMessages"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/messages/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a failed simulated message
+         * @description Resets a FAILED message whose failureReason is DELIVERY_FAILED or DISPATCH_ERROR to PENDING with no attempts, due now. Any other message, and the confirmation of an appointment that is cancelled or has started, is returned unchanged with retryable false. Waits up to 2 seconds for a send of the message in flight to finish first, and keeps the message locked until it commits. Where branchbook.inbox.redact-references is true, every appointment reference, in the reference field and in the text, shows as APT-****-****. Switched off unless branchbook.inbox.enabled is true; then the path is a 404.
+         */
+        post: operations["retryMessage"];
         delete?: never;
         options?: never;
         head?: never;
@@ -304,6 +344,7 @@ export interface components {
         InboxMessage: {
             /** Format: int32 */
             attempts: number;
+            /** @description The text of the message; where the deployment hides references, every one in it shows as APT-****-**** */
             body: string;
             /** @enum {string} */
             channel: "SMS" | "EMAIL";
@@ -323,9 +364,12 @@ export interface components {
             nextAttemptAt: string | null;
             /** @example 082 *** **** */
             recipientMasked: string;
-            /** @example APT-7K3M-9Q2X */
+            /**
+             * @description The appointment's reference, or APT-****-**** where the deployment hides references (branchbook.inbox.redact-references)
+             * @example APT-7K3M-9Q2X
+             */
             reference: string;
-            /** @description True only for FAILED with DELIVERY_FAILED or DISPATCH_ERROR */
+            /** @description True only for FAILED with DELIVERY_FAILED or DISPATCH_ERROR, and never for the confirmation of an appointment that is cancelled or has started */
             retryable: boolean;
             /** Format: date-time */
             sentAt: string | null;
@@ -563,6 +607,87 @@ export interface operations {
             };
         };
     };
+    cancelAppointment: {
+        parameters: {
+            query?: never;
+            header: {
+                /**
+                 * @description The last four digits of the mobile number used to book
+                 * @example 0101
+                 */
+                "X-Mobile-Last4": string;
+            };
+            path: {
+                /**
+                 * @description The reference; case and hyphens do not matter
+                 * @example APT-7K3M-9Q2X
+                 */
+                reference: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cancelled now, or already cancelled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Appointment"];
+                };
+            };
+            /** @description VALIDATION_FAILED: X-Mobile-Last4 is missing or not four digits */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description APPOINTMENT_NOT_FOUND: the reference and the digits match no appointment */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description TOO_LATE_TO_CANCEL: the appointment has started; it is left as it was, still CONFIRMED */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description LOOKUP_RATE_LIMITED: five wrong tries for this reference, lookups and cancels together, or too many of its tries at once */
+            429: {
+                headers: {
+                    /** @description Seconds until the reference can be tried again: what is left of the hour after five wrong tries, or 1 when other tries of it are being checked */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description TRY_AGAIN: the appointment or its messages stayed locked for 2 seconds, another change of the appointment won the race twice, or the database is unavailable; the appointment is left as it was */
+            503: {
+                headers: {
+                    /** @description Seconds to wait before trying again */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
     listBranches: {
         parameters: {
             query?: never;
@@ -718,6 +843,61 @@ export interface operations {
             /** @description VALIDATION_FAILED: limit is not from 1 to 200 */
             400: {
                 headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    retryMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /**
+                 * @description The message's id, from the inbox
+                 * @example dccc2431-28aa-4926-a555-ca6c80ddfd88
+                 */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The message: reset to PENDING, or unchanged when a retry could not send it */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InboxMessage"];
+                };
+            };
+            /** @description VALIDATION_FAILED: id is not a UUID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description MESSAGE_NOT_FOUND: no message has that id */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description TRY_AGAIN: the message stayed locked for 2 seconds, or the database is unavailable */
+            503: {
+                headers: {
+                    /** @description Seconds to wait before trying again */
+                    "Retry-After"?: number;
                     [name: string]: unknown;
                 };
                 content: {

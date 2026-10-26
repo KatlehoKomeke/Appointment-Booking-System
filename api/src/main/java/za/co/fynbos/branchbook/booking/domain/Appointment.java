@@ -26,7 +26,8 @@ import org.jspecify.annotations.Nullable;
  * double-booked and no mobile number is in two places at once, whatever code writes the row (BR-8,
  * BR-9; see {@code V2__schema.sql}). The booking transaction creates an appointment with {@link
  * #confirm}, which computes the end from the service's duration, so a caller can never choose it
- * (BR-2). Cancellation arrives with the optional cancel endpoint.
+ * (BR-2). The customer's only change to it afterwards is {@link #cancel}, before it starts (BR-14);
+ * its {@code version} makes two concurrent cancels of one appointment write once.
  */
 @Entity
 @Table(name = "appointments")
@@ -165,14 +166,43 @@ public class Appointment {
   }
 
   /**
-   * Tells whether the customer may still cancel: only a confirmed appointment that has not started
-   * (BR-25). A past appointment stays confirmed but can no longer be cancelled.
+   * Tells whether the customer may still cancel: only an appointment whose status may move to
+   * CANCELLED, which is a confirmed one, and that has not started (BR-25). A past appointment stays
+   * confirmed but can no longer be cancelled.
    *
    * @param now the current instant
    * @return {@code true} if the appointment is confirmed and starts after {@code now}
    */
   public boolean canCancel(Instant now) {
-    return status == AppointmentStatus.CONFIRMED && now.isBefore(startsAt);
+    return status.canTransitionTo(AppointmentStatus.CANCELLED) && now.isBefore(startsAt);
+  }
+
+  /**
+   * Cancels the appointment if the customer still may (BR-14). Its seat is free from the moment the
+   * change commits, because the database's seat rules count only active appointments.
+   *
+   * <p>An appointment that is already cancelled is left alone and says so, even after its start, so
+   * a customer who cancels twice, or in two tabs, gets the same answer and no second message.
+   * Otherwise only {@link #canCancel} decides: at or after the start, the appointment is left as it
+   * was. Nothing here writes to the database; the caller's flush does, guarded by the version.
+   *
+   * @param now the current instant, which becomes the cancellation time
+   * @return {@link CancelOutcome#CANCELLED} if this call cancelled it, {@link
+   *     CancelOutcome#ALREADY_CANCELLED} if it already was, or {@link CancelOutcome#TOO_LATE} if it
+   *     can no longer be cancelled
+   */
+  public CancelOutcome cancel(Instant now) {
+    Objects.requireNonNull(now, "now");
+    if (status == AppointmentStatus.CANCELLED) {
+      return CancelOutcome.ALREADY_CANCELLED;
+    }
+    if (!canCancel(now)) {
+      return CancelOutcome.TOO_LATE;
+    }
+    status = AppointmentStatus.CANCELLED;
+    cancelledAt = now;
+    updatedAt = now;
+    return CancelOutcome.CANCELLED;
   }
 
   /**

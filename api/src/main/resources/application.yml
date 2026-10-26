@@ -98,6 +98,12 @@ branchbook:
     # recipient redacted (FR-17). It is an operator view for the demo, so it is off unless a deployment asks for it:
     # docker compose, make dev-api and the tests switch it on; off, the path is a plain 404.
     enabled: false
+    # Shows every appointment reference in the inbox, and in its retry's answer, as APT-****-****: in the reference
+    # field and in each message's text. The hosted demo has no sign-in, and a public inbox listing references beside
+    # demo numbers, whose last four digits are easily guessed, would let anyone open or cancel another visitor's
+    # booking (BR-19). Off by default, as in docker compose, make dev-api and the tests (InboxReferencesHiddenIT alone
+    # switches it on); the hosted demo's task definition is to switch it on with BRANCHBOOK_INBOX_REDACT_REFERENCES=true.
+    redact-references: false
   retention:
     # Deletes every booking older than max-age, with its messages and idempotency keys, every hour from a minute after
     # start-up, which keeps the hosted demo's promise to delete each booking, with the name and number, after 48 hours
@@ -108,6 +114,11 @@ branchbook:
     # How long after its booking an appointment is deleted. At least PT24H, the life of an Idempotency-Key (BR-12), so
     # a retry can never book again a booking that was purged; a shorter value stops start-up.
     max-age: PT48H
+  demo-data:
+    # Books three demo appointments at Bellville and Umhlanga, through the real booking path, when the application
+    # starts on an empty database, so the first screen and the simulated inbox have something to show (FR-28). Only
+    # docker compose switches it on: a database that a developer or a test fills itself must stay as they left it.
+    enabled: false
 
 logging:
   pattern:
@@ -150,8 +161,11 @@ management:
   endpoints:
     web:
       exposure:
-        # Only health and info are reachable over HTTP. Endpoints such as env, beans and heapdump stay closed.
-        include: health, info
+        # Only health, info and prometheus are reachable over HTTP. Endpoints such as env, beans, metrics and heapdump
+        # stay closed. prometheus serves the meters in Prometheus's text format: Spring Boot's own and the two the
+        # application adds, appointments_booked_total by outcome and outbox_pending (FR-30). No meter carries
+        # personal data: tags hold codes and URI templates, never a value a customer typed.
+        include: health, info, prometheus
   endpoint:
     health:
       probes:
