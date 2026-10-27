@@ -80,7 +80,7 @@ One request yields exactly one code:
   writes nothing, even after its start; then one that has started is `409 TOO_LATE_TO_CANCEL` and is left as it
   was. A second cancel of the same appointment at the same moment is not an error: its version check fails, it
   reads the appointment once more and returns the same `200`. A lock not granted within 2 s is `503 TRY_AGAIN`. An
-  appointment that the 48-hour retention purge has deleted, before the cancel or while it runs, is
+  appointment that the retention purge has deleted once it was over, before the cancel or while it runs, is
   `404 APPOINTMENT_NOT_FOUND`, never a `500`; one the purge deletes after the cancel checked its digits is not
   counted as a wrong try.
 - **Retry** (`POST /api/v1/messages/{id}/retry`, only while `branchbook.inbox.enabled` is true): an `id` that is not
@@ -127,7 +127,7 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 | `VALIDATION_FAILED` | 400 | The request is malformed: a missing or badly shaped field, unknown JSON property, a `startsAt` without an offset, or a missing or malformed `X-Mobile-Last4` header. | Inline messages on the fields named in `errors[]`. |
 | `IDEMPOTENCY_KEY_REQUIRED` | 400 | `POST /api/v1/appointments` arrived without an `Idempotency-Key` header holding a UUID. | Nothing; the web app always sends one. |
 | `BRANCH_NOT_FOUND` | 404 | The branch code is unknown or the branch is inactive. | "We couldn't find that branch." |
-| `APPOINTMENT_NOT_FOUND` | 404 | The reference is unknown or malformed, **or** the last four digits are wrong, **or** the appointment has been deleted by the 48-hour retention purge, even while a cancel of it ran. Every case returns the same body, the digits are compared in constant time, and the answer is never `403`, so the API cannot be used to discover references. | "We couldn't find an appointment with those details." |
+| `APPOINTMENT_NOT_FOUND` | 404 | The reference is unknown or malformed, **or** the last four digits are wrong, **or** the appointment is over and the retention purge has deleted it, even while a cancel of it ran. Every case returns the same body, the digits are compared in constant time, and the answer is never `403`, so the API cannot be used to discover references. | "We couldn't find an appointment with those details." |
 | `MESSAGE_NOT_FOUND` | 404 | Retry of a simulated message id that does not exist. The retry, `POST /api/v1/messages/{id}/retry`, exists only while `branchbook.inbox.enabled` is true, as the inbox does; otherwise its path is a plain `404` with no code. | Not shown to customers. |
 | `SERVICE_NOT_OFFERED_AT_BRANCH` | 422 | The branch does not offer the requested service, or no active service has that code. | "This branch doesn't offer that service." |
 | `DATE_OUTSIDE_BOOKING_WINDOW` | 422 | The date is outside the 30 bookable days, `[today, today + 30 days)` in the branch's time zone. | The date is not selectable. |

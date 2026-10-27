@@ -1,7 +1,7 @@
 # Runbook
 
 How to look after a running BranchBook: whether it is healthy, what happened to a message, what an AWS refusal
-means and how to let the hosted demo send real SMS, how to replay one that failed, whether the hosted demo's 48-hour
+means and how to let the hosted demo send real SMS, how to replay one that failed, whether the hosted demo's retention
 purge ran, and how to follow one request through the logs. The commands
 are for the local stack that `make up` starts; `make psql` opens a SQL prompt on its database. Every number in this
 file is a synthetic demo number.
@@ -144,19 +144,21 @@ the message up within 2 seconds. Should a confirmation of a cancelled appointmen
 means, the dispatcher marks it `SUPERSEDED_BY_CANCELLATION` instead of sending it. A message to 082 555 0000 will
 fail again, by design.
 
-## Did the 48-hour purge run?
+<a id="did-the-48-hour-purge-run"></a>
 
-The hosted demo deletes every booking 48 hours after it was made, with its messages and idempotency keys
-([SECURITY.md](../SECURITY.md#personal-information-popia)). The retention job does it: a minute after start-up, then
+## Did the retention purge run?
+
+The hosted demo keeps every booking until its appointment is over, then deletes it, with its messages and idempotency
+keys ([SECURITY.md](../SECURITY.md#personal-information-popia)). A booking for a future date is never touched. The retention job does it: a minute after start-up, then
 every hour. Each run writes one INFO line with what it deleted, and nothing else:
 
 ```text
 retention.purged appointments=12 messages=12 keys=3
 ```
 
-`appointments=0 messages=0 keys=0` means nothing was old enough. No such line at all means the job is not running:
+`appointments=0 messages=0 keys=0` means no appointment had ended since the last run. No such line at all means the job is not running:
 `branchbook.retention.enabled` is not true in that deployment. `keys` is usually lower than `appointments`: the
-hourly key purge has normally removed a key by the time its booking is 48 hours old. A purged booking is gone for
+hourly key purge has normally removed a key, 24 hours after its booking, by the time the appointment is over. A purged booking is gone for
 its customer too: a lookup or a cancel of it is `404 APPOINTMENT_NOT_FOUND`, even when the purge deletes it while
 the cancel runs, never a `500` ([errors.md](errors.md)).
 
@@ -170,7 +172,7 @@ The counts are what the run had already deleted, and stay deleted; the rest wait
 A batch fails when another transaction holds one of its message or key rows for longer than the 2-second
 `lock_timeout`, or when one of its statements runs past the 5-second `statement_timeout`; `cause` is the exception's
 type, and a lock timeout shows as `UncategorizedSQLException`. The dispatcher is an unlikely culprit: it locks only
-PENDING messages, and a booking's messages have long been sent or failed by the time it is 48 hours old. One WARN
+PENDING messages, and a booking's messages have long been sent or failed by the time its appointment is over. One WARN
 needs nothing. If the same WARN comes back hour after hour, look at what is holding locks or running long while the
 job runs:
 
@@ -186,7 +188,7 @@ An appointment that another transaction held at that moment is skipped without a
 To see what the next run will delete, on the database:
 
 ```sql
-SELECT count(*) FROM appointments WHERE created_at <= now() - interval '48 hours';
+SELECT count(*) FROM appointments WHERE ends_at <= now();
 ```
 
 Right after a run it is 0, apart from what a failed batch or a held appointment left for the next run.
@@ -194,8 +196,9 @@ Right after a run it is 0, apart from what a failed batch or a held appointment 
 ### Switch it on
 
 It is off unless the deployment sets `BRANCHBOOK_RETENTION_ENABLED=true`, which only the hosted demo's ECS task
-definition does. `BRANCHBOOK_RETENTION_MAX_AGE` changes the 48 hours (`PT48H`); anything under `PT24H` stops
-start-up. To watch the job locally, start the API with the variable set and look for the line a minute later:
+definition does. `BRANCHBOOK_RETENTION_AFTER_END` keeps a booking for longer after its appointment ends, as an
+ISO-8601 duration (`PT0S` by default); a negative value stops start-up. The query above then needs that delay
+subtracted from `now()`. To watch the job locally, start the API with the variable set and look for the line a minute later:
 
 ```bash
 BRANCHBOOK_RETENTION_ENABLED=true make dev-api

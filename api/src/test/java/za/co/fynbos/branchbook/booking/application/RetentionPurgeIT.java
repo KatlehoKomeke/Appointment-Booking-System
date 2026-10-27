@@ -26,29 +26,30 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
+import org.springframework.transaction.PlatformTransactionManager;
 import za.co.fynbos.branchbook.booking.application.RetentionPurge.Purged;
 import za.co.fynbos.branchbook.support.Bookings;
 import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
-import za.co.fynbos.branchbook.support.MutableClock;
 import za.co.fynbos.branchbook.support.TestClockConfiguration;
 
 /**
- * The hosted demo's promise (SECURITY.md, ADR-0006): the retention purge deletes every appointment
- * booked max-age ago or earlier, 48 hours by default, with its messages and its idempotency keys,
- * and nothing else. Appointments are booked through the API with the clock set, so their {@code
- * created_at} is exact, and the purge is called with the instant to purge as of, so no test waits
- * for its schedule. One test waits for real: a key row held by another connection makes a batch
- * wait out the 2-second {@code lock_timeout}.
+ * The hosted demo's promise (SECURITY.md, ADR-0006): the retention purge keeps every booking until
+ * its appointment is over, then deletes it, with its messages and its idempotency keys, and nothing
+ * else. A booking for a future date is never touched, however long ago it was made. Appointments
+ * are booked through the API, and the purge is called with the instant to purge as of, so no test
+ * waits for its schedule. One test waits for real: a key row held by another connection makes a
+ * batch wait out the 2-second {@code lock_timeout}.
  */
 @IntegrationTest
 @ExtendWith({DatabaseReset.class, OutputCaptureExtension.class})
 class RetentionPurgeIT {
 
-  private static final Duration FORTY_EIGHT_HOURS = Duration.ofHours(48);
+  /** An instant after every appointment these tests book on 27 October has ended. */
+  private static final Instant AFTER_THEY_ALL_END = Instant.parse("2026-10-27T12:00:00Z");
 
-  /** When the old appointments are booked: the clock's default instant. */
-  private static final Instant BOOKED = TestClockConfiguration.DEFAULT_INSTANT;
+  /** When the earliest appointment, 09:00 SAST on 27 October for 15 minutes, ends. */
+  private static final Instant FIRST_ENDS = Instant.parse("2026-10-27T07:15:00Z");
 
   /** The customer's name, synthetic and unlike anything else the application logs. */
   private static final String FIRST_NAME = "Lindiwe";
@@ -61,8 +62,6 @@ class RetentionPurgeIT {
 
   @Autowired private MockMvcTester mvc;
 
-  @Autowired private MutableClock clock;
-
   @Autowired private JdbcTemplate jdbc;
 
   @Autowired private DataSource dataSource;
@@ -71,69 +70,120 @@ class RetentionPurgeIT {
 
   @Autowired private RetentionProperties properties;
 
-  /** The settings application.yml ships: off, and 48 hours once switched on. */
+  @Autowired private PlatformTransactionManager transactionManager;
+
+  @Autowired private AppointmentRepository appointments;
+
+  @Autowired private IdempotencyKeyStore keys;
+
+  @Autowired private NotificationEraser notifications;
+
+  /**
+   * The settings application.yml ships: off, and at the end of the appointment once switched on.
+   */
   @Test
-  void isSwitchedOffByDefaultAndKeepsBookingsFortyEightHours() {
+  void isSwitchedOffByDefaultAndDeletesAtTheEnd() {
     assertThat(properties.enabled()).isFalse();
-    assertThat(properties.maxAge()).isEqualTo(FORTY_EIGHT_HOURS);
+    assertThat(properties.afterEnd()).isEqualTo(Duration.ZERO);
   }
 
   /**
-   * An appointment booked exactly 48 hours ago goes, with its message and key; one booked a second
-   * later stays, with its own, until it is 48 hours old too. The catalogue is never touched.
+   * An appointment goes, with its message and key, at the instant it ends and not a second before;
+   * one that ends later stays, with its own, until it has ended too. The catalogue is never
+   * touched.
    */
   @Test
-  void appointmentBookedExactlyMaxAgeAgoGoesWithItsMessagesAndKeys() {
-    Booked old = book("2026-10-27T09:00:00+02:00", "082 555 0141");
-    clock.advance(Duration.ofSeconds(1));
-    Booked younger = book("2026-10-27T09:15:00+02:00", "082 555 0142");
+  void anAppointmentGoesOnceItHasEndedNotBefore() {
+    Booked first = book("2026-10-27T09:00:00+02:00", "082 555 0141");
+    Booked later = book("2026-10-27T09:15:00+02:00", "082 555 0142");
     Map<String, Integer> catalogue = catalogueCounts();
 
-    Purged purged = retention.purge(BOOKED.plus(FORTY_EIGHT_HOURS));
+    assertThat(retention.purge(FIRST_ENDS.minusSeconds(1))).isEqualTo(Purged.NONE);
+    assertThat(rowsOf(first)).as("still on").containsExactly(1, 1, 1);
 
-    assertThat(purged).isEqualTo(new Purged(1, 1, 1));
-    assertThat(rowsOf(old)).as("appointment, messages, keys").containsExactly(0, 0, 0);
-    assertThat(rowsOf(younger)).as("appointment, messages, keys").containsExactly(1, 1, 1);
+    assertThat(retention.purge(FIRST_ENDS)).isEqualTo(new Purged(1, 1, 1));
+    assertThat(rowsOf(first)).as("appointment, messages, keys").containsExactly(0, 0, 0);
+    assertThat(rowsOf(later)).as("appointment, messages, keys").containsExactly(1, 1, 1);
     assertThat(catalogueCounts()).isEqualTo(catalogue);
 
-    assertThat(retention.purge(BOOKED.plus(FORTY_EIGHT_HOURS).plusSeconds(1)))
+    assertThat(retention.purge(FIRST_ENDS.plus(Duration.ofMinutes(15))))
         .isEqualTo(new Purged(1, 1, 1));
-    assertThat(rowsOf(younger)).containsExactly(0, 0, 0);
+    assertThat(rowsOf(later)).containsExactly(0, 0, 0);
     assertThat(catalogueCounts()).isEqualTo(catalogue);
   }
 
-  /** Five old appointments in batches of two: three transactions, and every one goes. */
+  /**
+   * The rule this purge replaced deleted a booking 48 hours after it was made, so a customer who
+   * booked a week ahead lost the booking before the day. A booking for a future date now survives
+   * every run until its appointment has ended, however long ago it was made.
+   */
+  @Test
+  void aFutureBookingIsKeptHoweverLongAgoItWasMade() {
+    Booked future = book("2026-11-20T10:00:00+02:00", "082 555 0148");
+    Instant made = TestClockConfiguration.DEFAULT_INSTANT;
+
+    assertThat(retention.purge(made.plus(Duration.ofHours(48)))).isEqualTo(Purged.NONE);
+    assertThat(retention.purge(made.plus(Duration.ofDays(20)))).isEqualTo(Purged.NONE);
+    assertThat(rowsOf(future)).as("kept until the day").containsExactly(1, 1, 1);
+
+    Instant ends = Instant.parse("2026-11-20T08:15:00Z");
+    assertThat(retention.purge(ends.minusSeconds(1))).isEqualTo(Purged.NONE);
+    assertThat(retention.purge(ends)).isEqualTo(new Purged(1, 1, 1));
+    assertThat(rowsOf(future)).containsExactly(0, 0, 0);
+  }
+
+  /** {@code after-end} keeps a booking for that long after its appointment ends, then it goes. */
+  @Test
+  void aDelayAfterTheEndIsHonoured() {
+    Booked booked = book("2026-10-27T09:00:00+02:00", "082 555 0149");
+    RetentionPurge twoHoursLater =
+        new RetentionPurge(
+            transactionManager,
+            appointments,
+            keys,
+            notifications,
+            new RetentionProperties(true, Duration.ofHours(2)));
+
+    assertThat(twoHoursLater.purge(FIRST_ENDS)).isEqualTo(Purged.NONE);
+    assertThat(twoHoursLater.purge(FIRST_ENDS.plus(Duration.ofHours(2)).minusSeconds(1)))
+        .isEqualTo(Purged.NONE);
+    assertThat(rowsOf(booked)).containsExactly(1, 1, 1);
+
+    assertThat(twoHoursLater.purge(FIRST_ENDS.plus(Duration.ofHours(2))))
+        .isEqualTo(new Purged(1, 1, 1));
+    assertThat(rowsOf(booked)).containsExactly(0, 0, 0);
+  }
+
+  /** Five ended appointments in batches of two: three transactions, and every one goes. */
   @Test
   void severalBatchesAllGo() {
-    List<Booked> old = bookFive();
+    List<Booked> ended = bookFive();
 
-    Purged purged = retention.purge(BOOKED.plus(FORTY_EIGHT_HOURS), 2);
+    Purged purged = retention.purge(AFTER_THEY_ALL_END, 2);
 
     assertThat(purged).isEqualTo(new Purged(5, 5, 5));
-    assertThat(old).allSatisfy(booked -> assertThat(rowsOf(booked)).containsExactly(0, 0, 0));
+    assertThat(ended).allSatisfy(booked -> assertThat(rowsOf(booked)).containsExactly(0, 0, 0));
   }
 
   /**
    * An appointment another transaction holds, as a booking or a cancellation would, is skipped
    * without waiting and survives with its rows; the next run, once it is released, takes it. The
-   * held appointment is the oldest, so it is the first row the first batch reaches.
+   * held appointment ends first, so it is the first row the first batch reaches.
    */
   @Test
   void lockedAppointmentIsSkippedAndGoesOnTheNextRunOnceReleased(CapturedOutput output)
       throws SQLException {
     int before = output.getAll().length();
     Booked held = book("2026-10-27T09:00:00+02:00", "082 555 0151");
-    clock.advance(Duration.ofSeconds(1));
     Booked second = book("2026-10-27T09:15:00+02:00", "082 555 0152");
     Booked third = book("2026-10-27T09:30:00+02:00", "082 555 0153");
-    Instant now = BOOKED.plusSeconds(1).plus(FORTY_EIGHT_HOURS);
 
     Purged whileHeld;
     try (Connection holder = dataSource.getConnection()) {
       holder.setAutoCommit(false);
       lock(holder, "SELECT 1 FROM appointments WHERE id = ? FOR UPDATE", held.id());
       try {
-        whileHeld = retention.purge(now, 2);
+        whileHeld = retention.purge(AFTER_THEY_ALL_END, 2);
       } finally {
         holder.rollback();
       }
@@ -147,7 +197,7 @@ class RetentionPurgeIT {
     assertThat(rowsOf(third)).containsExactly(0, 0, 0);
     assertThat(rowsOf(held)).as("skipped, not deleted").containsExactly(1, 1, 1);
 
-    assertThat(retention.purge(now, 2)).isEqualTo(new Purged(1, 1, 1));
+    assertThat(retention.purge(AFTER_THEY_ALL_END, 2)).isEqualTo(new Purged(1, 1, 1));
     assertThat(rowsOf(held)).containsExactly(0, 0, 0);
   }
 
@@ -171,17 +221,15 @@ class RetentionPurgeIT {
                 book("2026-10-27T09:15:00+02:00", "082 555 0162"),
                 book("2026-10-27T09:30:00+02:00", "082 555 0163"),
                 book("2026-10-27T09:45:00+02:00", "082 555 0164")));
-    clock.advance(Duration.ofSeconds(1));
     Booked last = book("2026-10-27T10:30:00+02:00", "082 555 0165");
     booked.add(last);
-    Instant now = BOOKED.plusSeconds(1).plus(FORTY_EIGHT_HOURS);
 
     Purged whileHeld;
     try (Connection holder = dataSource.getConnection()) {
       holder.setAutoCommit(false);
       lock(holder, "SELECT 1 FROM idempotency_keys WHERE appointment_id = ? FOR UPDATE", last.id());
       try {
-        whileHeld = retention.purge(now, 2);
+        whileHeld = retention.purge(AFTER_THEY_ALL_END, 2);
       } finally {
         holder.rollback();
       }
@@ -195,7 +243,7 @@ class RetentionPurgeIT {
         .containsPattern(
             "WARN.*retention\\.batch_failed appointments=4 messages=4 keys=4 cause=\\w+\\R");
 
-    assertThat(retention.purge(now, 2)).isEqualTo(new Purged(1, 1, 1));
+    assertThat(retention.purge(AFTER_THEY_ALL_END, 2)).isEqualTo(new Purged(1, 1, 1));
     assertThat(booked).allSatisfy(each -> assertThat(rowsOf(each)).containsExactly(0, 0, 0));
     assertHoldsNothingOfTheCustomers(since(output, before), booked);
   }
@@ -208,7 +256,7 @@ class RetentionPurgeIT {
     return output.getAll().substring(before);
   }
 
-  /** Five appointments booked at {@link #BOOKED}, by five customers, a quarter-hour apart. */
+  /** Five appointments on 27 October, by five customers, a quarter-hour apart. */
   private List<Booked> bookFive() {
     return List.of(
         book("2026-10-27T09:00:00+02:00", "082 555 0143"),
@@ -218,7 +266,7 @@ class RetentionPurgeIT {
         book("2026-10-27T10:00:00+02:00", "082 555 0147"));
   }
 
-  /** Books FICA at Sandton through the API, at the clock's current instant. */
+  /** Books FICA at Sandton through the API, as the test clock's customer would. */
   private Booked book(String startsAt, String mobile) {
     Map<String, Object> body = body("SAN", "FICA", startsAt, mobile);
     customer(body).put("firstName", FIRST_NAME);

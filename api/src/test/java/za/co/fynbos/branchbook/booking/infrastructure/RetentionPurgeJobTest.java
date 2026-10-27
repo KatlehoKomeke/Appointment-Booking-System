@@ -22,7 +22,6 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.config.FixedDelayTask;
 import org.springframework.scheduling.config.ScheduledTaskHolder;
 import za.co.fynbos.branchbook.BranchBookApplication;
-import za.co.fynbos.branchbook.booking.application.RetentionProperties;
 import za.co.fynbos.branchbook.booking.application.RetentionPurge;
 import za.co.fynbos.branchbook.booking.application.RetentionPurge.Purged;
 
@@ -106,16 +105,6 @@ class RetentionPurgeJobTest {
     assertThat(output.getAll())
         .containsOnlyOnce("retention.purged")
         .containsPattern("INFO.*retention\\.purged appointments=3 messages=4 keys=2\\R");
-  }
-
-  /**
-   * The settings' floor is the key store's real key lifetime, so a purged appointment's key has
-   * always expired and a retry can never book it again (BR-12).
-   */
-  @Test
-  void maxAgeFloorIsNoShorterThanAKeysLifetime() {
-    assertThat(RetentionProperties.MINIMUM_MAX_AGE)
-        .isGreaterThanOrEqualTo(JdbcIdempotencyKeyStore.KEY_TTL);
   }
 
   /**

@@ -11,8 +11,8 @@ import za.co.fynbos.branchbook.booking.application.RetentionPurge.Purged;
 
 /**
  * Runs the retention purge every hour, so the hosted demo deletes each booking, with its messages
- * and keys, within an hour of its turning {@code branchbook.retention.max-age} old (SECURITY.md,
- * ADR-0006).
+ * and keys, within the hour after its appointment ends, or after {@code
+ * branchbook.retention.after-end} more where that is set (SECURITY.md, ADR-0006).
  *
  * <p>It exists only while {@code branchbook.retention.enabled} is true: on in the hosted demo's
  * task definition, off by default, and so off in docker compose, {@code make dev-api} and the

@@ -136,15 +136,16 @@ branchbook:
     # switches it on); the hosted demo's task definition is to switch it on with BRANCHBOOK_INBOX_REDACT_REFERENCES=true.
     redact-references: false
   retention:
-    # Deletes every booking older than max-age, with its messages and idempotency keys, every hour from a minute after
-    # start-up, which keeps the hosted demo's promise to delete each booking, with the name and number, after 48 hours
-    # (SECURITY.md, ADR-0006). Off by default, and so off in docker compose, make dev-api and the tests: a copy run
+    # Deletes every booking whose appointment is over, with its messages and idempotency keys, every hour from a minute
+    # after start-up, which keeps the hosted demo's promise to keep a booking, with the name and number, until its
+    # appointment is over and delete it within the hour after it ends (SECURITY.md, ADR-0006). A booking for a future
+    # date is never touched. Off by default, and so off in docker compose, make dev-api and the tests: a copy run
     # locally keeps its bookings until you delete them. Only the hosted demo's task definition switches it on
     # (BRANCHBOOK_RETENTION_ENABLED=true).
     enabled: false
-    # How long after its booking an appointment is deleted. At least PT24H, the life of an Idempotency-Key (BR-12), so
-    # a retry can never book again a booking that was purged; a shorter value stops start-up.
-    max-age: PT48H
+    # How long after its appointment ends a booking is kept before it is deleted (BRANCHBOOK_RETENTION_AFTER_END), as
+    # an ISO-8601 duration. Zero by default; a negative value stops start-up.
+    after-end: PT0S
   demo-data:
     # Books three demo appointments at Bellville and Umhlanga, through the real booking path, when the application
     # starts on an empty database, so the first screen and the simulated inbox have something to show (FR-28). Only

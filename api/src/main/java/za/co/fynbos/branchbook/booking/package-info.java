@@ -14,10 +14,9 @@
  * transaction that also supersedes a confirmation still PENDING or FAILED and writes the
  * cancellation SMS ({@code application.CancelAppointmentHandler}, Tier 2), the read that tells
  * scheduling which seats active appointments hold ({@code infrastructure}, implementing
- * scheduling's port), and the retention purge that deletes bookings older than {@code
- * branchbook.retention.max-age} for the hosted demo ({@code application.RetentionPurge}, run hourly
- * by {@code infrastructure.RetentionPurgeJob} only while {@code branchbook.retention.enabled} is
- * true).
+ * scheduling's port), and the retention purge that deletes bookings once their appointment has
+ * ended for the hosted demo ({@code application.RetentionPurge}, run hourly by {@code
+ * infrastructure.RetentionPurgeJob} only while {@code branchbook.retention.enabled} is true).
  *
  * <p>From M6: every booking request is counted by its outcome, the {@code
  * appointments_booked_total} metric ({@code api.BookingOutcomeMeter}, {@code

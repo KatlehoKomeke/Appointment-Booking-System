@@ -13,16 +13,18 @@ import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Deletes every appointment booked {@code branchbook.retention.max-age} ago or earlier, with its
- * messages and its idempotency keys, so the hosted demo keeps no booking, and no customer's name or
- * number, for longer than it promises (SECURITY.md, ADR-0006).
+ * Deletes every appointment that has ended, {@code branchbook.retention.after-end} ago or earlier
+ * (zero by default), with its messages and its idempotency keys, so the hosted demo keeps a
+ * booking, and the customer's name and number, until its appointment is over and no longer
+ * (SECURITY.md, ADR-0006). A booking for a future date is never touched, however long ago it was
+ * made; a cancelled appointment goes by the same rule, once its original end time has passed.
  *
  * <p>It works in batches of up to {@value #BATCH} appointments, one READ COMMITTED transaction
  * each, until a batch comes back short. A batch:
  *
  * <ol>
- *   <li>locks the oldest such appointments with {@code FOR UPDATE SKIP LOCKED}, so one that another
- *       transaction holds right now is left for the next run rather than waited for;
+ *   <li>locks the appointments that ended first with {@code FOR UPDATE SKIP LOCKED}, so one that
+ *       another transaction holds right now is left for the next run rather than waited for;
  *   <li>deletes their messages through {@link NotificationEraser}, waiting at most the session's
  *       {@code lock_timeout} for a message the dispatcher is sending;
  *   <li>deletes the idempotency keys that point at them;
@@ -51,7 +53,7 @@ public class RetentionPurge {
   private final AppointmentRepository appointments;
   private final IdempotencyKeyStore keys;
   private final NotificationEraser notifications;
-  private final Duration maxAge;
+  private final Duration afterEnd;
 
   RetentionPurge(
       PlatformTransactionManager transactionManager,
@@ -66,12 +68,12 @@ public class RetentionPurge {
     this.appointments = appointments;
     this.keys = keys;
     this.notifications = notifications;
-    this.maxAge = properties.maxAge();
+    this.afterEnd = properties.afterEnd();
   }
 
   /**
-   * Deletes every appointment booked max-age before {@code now} or earlier, with its messages and
-   * keys, in batches of {@value #BATCH}.
+   * Deletes every appointment that ended {@code after-end} before {@code now} or earlier, with its
+   * messages and keys, in batches of {@value #BATCH}.
    *
    * @param now the current instant, from the application's clock; the tests pass their own
    * @return what was deleted; if a batch failed, what the batches before it deleted
@@ -91,7 +93,7 @@ public class RetentionPurge {
     if (batchSize < 1) {
       throw new IllegalArgumentException("batchSize must be at least 1");
     }
-    Instant cutoff = now.minus(maxAge);
+    Instant cutoff = now.minus(afterEnd);
     Purged total = Purged.NONE;
     while (true) {
       Batch batch;
@@ -116,7 +118,7 @@ public class RetentionPurge {
 
   /** One batch, inside its own transaction: lock, then delete in the order the keys require. */
   private Batch deleteBatch(Instant cutoff, int batchSize) {
-    List<UUID> ids = appointments.lockCreatedNoLaterThan(cutoff, batchSize);
+    List<UUID> ids = appointments.lockEndedNoLaterThan(cutoff, batchSize);
     if (ids.isEmpty()) {
       return new Batch(0, Purged.NONE);
     }
