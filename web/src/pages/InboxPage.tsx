@@ -53,9 +53,9 @@ export function InboxPage() {
 
   return (
     <div className={styles.page}>
-      <Alert tone="info" title="Simulated: no real messages are sent.">
-        This demo operator view lists every booking&apos;s messages and is switched off in
-        production.
+      <Alert tone="info" title="Demo operator view.">
+        It lists every booking&apos;s messages, recipients redacted, and is switched off in
+        production. Here every message is simulated, as on any local run.
       </Alert>
       <PageHeading
         title={TITLE}

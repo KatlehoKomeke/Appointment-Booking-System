@@ -58,7 +58,7 @@ the public internet must not collect real personal information.
 - **The 48-hour purge is the retention job,** behind `branchbook.retention.enabled`, not a `demo` profile. The hosted
   demo's ECS task definition sets `BRANCHBOOK_RETENTION_ENABLED=true`; everywhere else it is off. Every hour it deletes
   each appointment booked 48 hours ago or earlier, with its messages and idempotency keys
-  ([docs/runbook.md](../runbook.md#did-the-48-hour-purge-run)). It empties the live database only: a deleted booking
+  ([docs/runbook.md](../runbook.md#did-the-retention-purge-run)). It empties the live database only: a deleted booking
   stays in the automated backups until they expire ([SECURITY.md](../../SECURITY.md#personal-information-popia)).
 - **Demo numbers are a block, not personas,** behind `branchbook.booking.demo-numbers-only`, not a `demo` profile.
   The hosted demo's task definition sets `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true`, so bookings take only
@@ -120,5 +120,21 @@ The decision otherwise stands.
 - **The cost and abuse controls** are the per-recipient daily cap, WAF's per-address booking limit, `MaxPrice` and
   AWS's monthly spend limit; with no one-time code, anyone can make the demo text any South African number, up to the
   cap a day ([SECURITY.md](../../SECURITY.md#known-risks)).
+- **South Africa only, and one way to send.** A protect configuration in `BranchbookApp` blocks SMS to every one of
+  the 245 countries AWS lists except South Africa, and every voice and MMS destination. The task role may call
+  `sms-voice:SendTextMessage` through that protect configuration and nothing else.
+- **Fewer messages.** At most five SMS a day go to one number (`BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP=5`), and WAF
+  allows 10 booking and cancel `POST`s per IP in 5 minutes, down from 30.
+- **WAF compares the decoded path.** Its path rules decode and lowercase the path first, so `/%61ctuator` is blocked
+  too, and the task serves only `health` and `info` (`MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info`).
+- **No delivery events are logged,** because they carry the destination number (BR-19).
+- **Unchanged:** the retention job stays on and the simulated inbox stays off.
 
 The decision otherwise stands.
+
+**2026-10-27, retention after the appointment.** Facts that have changed since the notes above. The decision stands.
+
+- **A booking is deleted once its appointment is over, not 48 hours after it was made.** Bookings open 30 days
+  ahead, so the 48-hour rule deleted appointments that had not happened yet. The hourly retention job now removes a
+  booking, with its messages and idempotency keys, within the hour after its appointment ends, and a cancelled one
+  after the time it would have ended. The notes above that say "48 hours" describe the rule as it first shipped.

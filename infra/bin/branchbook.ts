@@ -84,6 +84,9 @@ if (process.env.BRANCHBOOK_HOSTED_DEMO === 'true') {
     hostedZoneId: context('demoHostedZoneId'),
     // Personal data, so never committed; the alarms still exist without it, on a topic with no subscriber.
     alertEmail: process.env.BRANCHBOOK_DEMO_ALERT_EMAIL,
+    // BRANCHBOOK_SMS_AWS_DRY_RUN=true, the app's own setting's name, deploys a task that asks AWS to check each send
+    // without sending it.
+    smsDryRun: process.env.BRANCHBOOK_SMS_AWS_DRY_RUN === 'true',
   });
 }
 

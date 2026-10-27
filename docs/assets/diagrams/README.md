@@ -34,7 +34,7 @@ The rows run in reading order: the system, the application, the local stack, del
 | [local-runtime](local-runtime.svg) | SVG | What `make up` builds and starts, how it knows the stack is ready, and where else the same image runs | [architecture.md, section 10.1](../../architecture.md#101-locally-the-image-and-the-stack) |
 | [delivery-pipeline](delivery-pipeline.svg) | SVG | What happens between `git commit` and AWS: which checks run where, which of them block, what deploys, and where the gaps are | [README.md](../../../README.md#how-it-is-tested-and-delivered); [delivery.md](../../delivery.md#at-a-glance); [architecture.md, section 10.2](../../architecture.md#102-from-a-commit-to-aws) |
 | [push-timeline](push-timeline.svg) | SVG | What one push to `main` runs, how long each job takes, and whether the deploy waits for the tests | [delivery.md](../../delivery.md#one-push-measured) |
-| [aws-footprint](aws-footprint.svg) | SVG | What exists in AWS, in which Region, who deployed it, what it costs, and how a reviewer's request reaches the hosted demo | [infra/README.md](../../../infra/README.md#what-exists-today); [architecture.md, section 10.3](../../architecture.md#103-in-aws) |
+| [aws-footprint](aws-footprint.svg) | SVG | What exists in AWS, in which Region, who deployed it, what it costs, how a reviewer's request reaches the hosted demo, and how the demo's SMS leave it | [infra/README.md](../../../infra/README.md#what-exists-today); [architecture.md, section 10.3](../../architecture.md#103-in-aws) |
 | keyless-deploy | Mermaid | How the deploy job gets short-lived credentials, what is checked, and how it proves the deploy landed | [infra/README.md](../../../infra/README.md#how-github-reaches-aws-without-keys) |
 | [access-boundary](access-boundary.svg) | SVG | Whether the pipeline can widen its own access, which guard stops it, and which guards IAM itself enforces | [infra/README.md](../../../infra/README.md#who-can-change-what-in-aws) |
 | [secret-layers](secret-layers.svg) | SVG | Which layer stops a secret at each stage, which layers can be skipped, and which act only after the code is public | [SECURITY.md](../../../SECURITY.md#secrets) |
@@ -49,17 +49,17 @@ files live in `.github/workflows/`.
 
 | Diagram | Watch paths | Expected to change at | Verified at |
 | --- | --- | --- | --- |
-| system-at-a-glance | the module packages and their controllers; `web/src/`; `api/src/main/resources/application.yml`; `infra/bin/branchbook.ts`; `infra/cdk.json` | Tier 2 | `152b96f` |
+| system-at-a-glance | the module packages, their controllers and their scheduled jobs; `web/src/`; `api/src/main/resources/application.yml`; `compose.yaml`; `infra/bin/branchbook.ts`; `infra/lib/app-stack.ts` (the task's settings); `infra/cdk.json` | when a module, a background job or the SMS gateway changes | `feat/real-sms` |
 | request-flow | `scheduling/`; `catalogue/application/BranchCalendarProvider.java`; `catalogue/infrastructure/`; `booking/infrastructure/JdbcBookedIntervals.java`; `shared/correlation/`; `shared/security/`; `shared/problem/` | when the availability path changes | `85cd726` |
 | module-map | the top-level packages; `ArchitectureTest.java` in `api/src/test/` | M3, M5 | `85cd726` |
 | booking-transaction | `booking/application/`; `V2__schema.sql` | M3 | `85cd726` |
 | confirmation-states | `notification/`; the `notification_messages` table in `V2__schema.sql` | M5 | `85cd726` |
 | appointment-lifecycle | `booking/domain/AppointmentStatus.java` | Tier 2 | `85cd726` |
 | data-model | `api/src/main/resources/db/migration/`; the writers in `booking/application/` and `notification/application/` | With a new migration | `3985f40` |
-| local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; the `Makefile` up and dev targets; `web/vite.config.ts`; `application.yml` (probes, connection pool); the controllers (the routes in the API box) | Tier 2 (the cancel route) | `152b96f` |
+| local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; the `Makefile` up and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box) | when a route, a management endpoint or the compose stack changes | `feat/real-sms` |
 | delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/bin/branchbook.ts`; the `main` ruleset and the `aws-demo` environment | when `deploy` waits for `ci`; after M6 | `85cd726` |
 | push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured only when the job structure changes | `85cd726` (measured at `c5feafe`) |
-| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/cdk.json` | when a stack changes; when the pipeline deploys the demo | `ef6917c` |
+| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/cdk.json` | when a stack changes; when the pipeline deploys the demo | `feat/real-sms` |
 | keyless-deploy | `deploy.yml`; `infra/lib/account-stack.ts` | on hardening; after M6 | `85cd726` |
 | access-boundary | `infra/lib/account-stack.ts`; `infra/bin/branchbook.ts`; `deploy.yml`; `aws-connection-check.yml`; the `aws-demo` environment; the bootstrap commands in infra/README.md | on hardening; after M6 | `85cd726` |
 | secret-layers | `.gitignore`; `.githooks/pre-commit`; `.gitleaks.toml`; `secret-scan.yml`; `ci.yml` (job `stack`); the repository's security settings | after M6 | `85cd726` |
@@ -148,7 +148,7 @@ fill:
 | `aws-db` | `#C925D1` | database | Amazon RDS for PostgreSQL |
 | `aws-net` | `#8C4FFF` | networking | Route 53, VPC, Application Load Balancer |
 | `aws-sec` | `#DD344C` | security | IAM OIDC provider, IAM role, AWS STS; AWS WAF, ACM, Secrets Manager |
-| `aws-mgmt` | `#E7157B` | management and integration | AWS CloudFormation, SSM Parameter Store; CloudWatch, SNS |
+| `aws-mgmt` | `#E7157B` | management and integration | AWS CloudFormation, SSM Parameter Store; CloudWatch, SNS; AWS End User Messaging SMS |
 | `aws-store` | `#7AA116` | storage and cost | S3 assets bucket (bootstrap), AWS Budgets |
 
 No other colours. Mermaid blocks carry no colour at all.
