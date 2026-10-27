@@ -28,9 +28,10 @@ Nothing installs the hooks for you: until you run `make hooks`, your commits are
   `feat(booking): reserve the idempotency key before the seat lock`. No `commit-msg` hook enforces this; it is a
   convention. Keep every commit buildable on its own: CI builds only the head of each push, so run `make test` before
   pushing. History is never squashed into one commit, and never contains "wip" commits.
-- **Releases.** A `vX.Y.Z` release tag is planned for M7 ([Milestones](README.md#milestones)). No workflow deploys
-  on a tag push. `ci` can be started by hand from a `v*` tag, and because `aws-demo` admits `v*` tags its `deploy`
-  job would then deploy that tag, until the next push to `main` ([docs/delivery.md](docs/delivery.md#known-gaps)).
+- **Releases.** `v1.0.0`, tagged at the end of M7, is the first release ([Milestones](README.md#milestones)). No
+  workflow deploys on a tag push. `ci` can be started by hand from a `v*` tag, and because `aws-demo` admits `v*` tags
+  its `deploy` job would then deploy that tag, until the next push to `main`
+  ([docs/delivery.md](docs/delivery.md#known-gaps)).
 
 ## Documentation standards
 
@@ -134,7 +135,7 @@ corrected. Re-check it after every major commit and at the end of every mileston
 
 - [ ] The README's Stage row and its Milestones table.
 - [ ] The status paragraph at the top of [docs/architecture.md](docs/architecture.md) and each section's status line.
-- [ ] Flip what is now built, found by search (here for M7, the milestone under way; the steps are in
+- [ ] Flip what is now built, found by search (shown for M7, the last milestone; the steps are in
   [When a milestone lands](docs/assets/diagrams/README.md#when-a-milestone-lands)):
 
   ```sh

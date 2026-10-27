@@ -144,8 +144,8 @@ name (set-up steps left out):
 
 1. Dependabot pushes its branches into this repository, so each of its pull requests also fires `push` events.
    The first Dependabot run shows it: `secret-scan` ran on both events, `ci` on `pull_request` only.
-2. No tag push starts `ci`: its push trigger names `main` alone, so a `v*` tag push runs only `secret-scan`. No tag
-   has been pushed yet; check this at the first release tag (M7).
+2. No tag push starts `ci`: its push trigger names `main` alone, so a `v*` tag push runs only `secret-scan`. Pushing
+   `v1.0.0` on 2026-10-27 confirmed it: only `secret-scan` ran.
 3. A manual run can start from any branch or tag. `ci`'s four jobs run wherever it starts; `deploy` then declares
    `aws-demo`, which admits only `main` and `v*` tags, so from any other ref it is refused before a token is issued,
    and `aws-connection-check` is refused outright. From a `v*` tag, `deploy` would deploy that tag

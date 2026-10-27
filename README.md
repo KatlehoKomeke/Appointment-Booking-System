@@ -15,7 +15,7 @@ an SMS confirmation that cannot be lost: simulated locally, and a real SMS throu
 
 | Area | Today |
 |---|---|
-| Stage | Milestones M0 to M6 built: the web app's five-step booking flow, confirmation page, `/manage` and simulated inbox; booking in one transaction that also writes the confirmation SMS; lookup with the reference and the last four digits; a dispatcher that delivers the SMS through a simulated gateway, or through AWS End User Messaging SMS where a deployment asks, with the race proofs; and cancelling and retrying, in the API and the web app, with end-to-end tests in a real browser. M7, the final documentation and the release, is under way. |
+| Stage | Milestones M0 to M7 built: the web app's five-step booking flow, confirmation page, `/manage` and simulated inbox; booking in one transaction that also writes the confirmation SMS; lookup with the reference and the last four digits; a dispatcher that delivers the SMS through a simulated gateway, or through AWS End User Messaging SMS where a deployment asks, with the race proofs; and cancelling and retrying, in the API and the web app, with end-to-end tests in a real browser. M7 is built too: the final documentation pass, a clean-clone rehearsal and the `v1.0.0` release tag, pushed on 2026-10-27. |
 | Design | The whole design, including planned work, is on the [architecture page](https://katlehokomeke.github.io/Appointment-Booking-System/); its header names the commit it was last checked against. The repository records what is built and wins where the two disagree. |
 | Run locally | `make up`, then open http://localhost:8080 |
 | Hosted demo | https://branchbook.click, in AWS Cape Town (af-south-1) since 2026-10-26, open to anyone with no sign-in, and with the simulated inbox off so no visitor sees another's booking. Any South African mobile may book there: a number outside the demo block 082 555 0000 to 0199 is sent a real SMS through AWS End User Messaging SMS, at most five a day to one number (best effort over a shared route, and only to verified numbers while the AWS account is in the SMS sandbox). Defined in AWS CDK and deployed by the pipeline on every push to `main`, first by hand on 2026-10-26; each booking is deleted within the hour after its appointment ends, or at once when it is cancelled ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md), [infra/README.md](infra/README.md#the-hosted-demo)). |
@@ -32,7 +32,7 @@ an SMS confirmation that cannot be lost: simulated locally, and a real SMS throu
 | M4 | Booking UI: the five-step flow, the confirmation page, read-only `/manage`, the simulated inbox | Built |
 | M5 | The dispatcher and simulated SMS gateway, delivery status, the simulated inbox, the race and idempotency proofs | Built |
 | M6 | Tier 2 if time allows, UI states and accessibility, web and end-to-end tests, CI completion | Built: cancel, retry, demo data and two metrics in the API and the web app; Playwright in CI at 390 and 1280 px |
-| M7 | Final documentation pass, clean-clone rehearsal, release tag | In progress: the rehearsal passed from a fresh clone; the tag follows |
+| M7 | Final documentation pass, clean-clone rehearsal, release tag | Built: the documentation pass, a rehearsal from a fresh clone, and `v1.0.0` tagged on 2026-10-27 |
 | AWS | Hosted demo: the deploy role, budget and release record, and the data and app stacks, first deployed by hand on 2026-10-26 and by the pipeline on every push to `main` since it took over | Built |
 
 ## The full design
