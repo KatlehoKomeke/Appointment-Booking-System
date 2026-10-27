@@ -59,7 +59,7 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <marker id="ah-dash" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-dash" d="M0,0 L8,4 L0,8 z"/></marker>
     <marker id="ah-bad" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-bad" d="M0,0 L8,4 L0,8 z"/></marker>
   </defs>
-  <rect class="card" x="0.5" y="0.5" width="959" height="871" rx="16"/>
+  <rect class="card" x="0.5" y="0.5" width="959" height="1023" rx="16"/>
   <g id="group-catalogue">
     <rect class="box-soft" x="24.5" y="24.5" width="559" height="442" rx="12"/>
     <text class="g" x="40" y="46">catalogue owns</text>
