@@ -79,4 +79,4 @@ and annotates the pull request, and a failed test is retried once. A failure kee
 
 On CI they run in `ci`'s `stack` job, on every push to `main` and every pull request, against the stack that job
 starts, and a failed run keeps `playwright-report/` and `test-results/` as the `e2e-report` artifact
-([docs/delivery.md](../docs/delivery.md#the-five-workflows)).
+([docs/delivery.md](../docs/delivery.md#the-three-workflows)).

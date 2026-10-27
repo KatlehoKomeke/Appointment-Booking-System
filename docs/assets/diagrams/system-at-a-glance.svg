@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
   <title id="title">BranchBook at a glance</title>
-  <desc id="desc">BranchBook at a glance, read top to bottom; everything drawn is built. Upper band, what runs today with make up. A Customer, using a browser on a phone or laptop, reaches the app over HTTP, locally at 127.0.0.1:8080. Everything runs in one Spring Boot 4.1 jar, branchbook.jar, on Java 25. The main path runs from the Customer to the Web app, to the REST API, to PostgreSQL. The Web app is built (M4): React 19 and TypeScript, served by the jar from one origin, so there is no CORS. Its booking screens call the API through a typed client and TanStack Query. The Web app calls the REST API under /api/v1 with JSON whose types are generated from docs/openapi.yaml, and each request runs on a virtual thread. Built in the REST API: branches (M1), availability (M2), the OpenAPI 3.1 contract with Swagger UI (M2), book and look up (M3), and cancel (M6). The REST API reaches PostgreSQL through JdbcClient and JPA, one transaction per use case. Modules: catalogue (built, M1), scheduling (built, M2), notification (built, M5: it writes the confirmation SMS from M3 and sends it from M5) and booking (built, M3). A flow from booking writes the appointment and its PENDING confirmation SMS row in one transaction. The shared module holds the packages problem, correlation, security, time, config and web. ArchitectureTest checks that the modules have no cycles and that only application code opens transactions. Background: IdempotencyKeyPurgeJob deletes expired idempotency keys every hour. RetentionPurgeJob runs on the hosted demo only and, every hour, deletes each booking once its appointment is over. DemoDataLoader books three demo appointments on a fresh compose stack. RecipientSendLedgerPurgeJob deletes the SMS daily cap's ledger rows every hour, once they are 24 hours old. HolidayCoverageCheck runs at start-up and daily at 06:00 SAST. NotificationDispatcher (built, M5) runs every 2 s, claims due rows from PostgreSQL and sends each message through the SMS gateway: the simulated gateway, which sends no real message, runs locally and for the published demo numbers; on the hosted demo, every other number is texted through AWS End User Messaging. PostgreSQL 17 is migrated by Flyway with the btree_gist extension; it has 9 tables and 56 named constraints, and 2 exclusion constraints stop double booking. Lower band, how it ships, left to right: Laptop, where an opt-in pre-commit hook scans for secrets; GitHub, with the workflows ci, secret-scan, infra and deploy; the deploy workflow signs in to AWS through OpenID Connect, so no keys are stored; AWS us-east-1, where the BranchbookAccount stack holds the deploy role and the budget; AWS af-south-1, where the BranchbookRelease stack records the deployed commit; and the hosted demo at branchbook.click, built and deployed by hand by the administrator rather than by the pipeline: the stacks BranchbookData, for the network and the database, and BranchbookApp, for the app behind AWS WAF and a load balancer. Legend: Built; Main path; AWS category: security, management and integration.</desc>
+  <desc id="desc">BranchBook at a glance, read top to bottom; everything drawn is built. Upper band, what runs today with make up. A Customer, using a browser on a phone or laptop, reaches the app over HTTP, locally at 127.0.0.1:8080. Everything runs in one Spring Boot 4.1 jar, branchbook.jar, on Java 25. The main path runs from the Customer to the Web app, to the REST API, to PostgreSQL. The Web app is built (M4): React 19 and TypeScript, served by the jar from one origin, so there is no CORS. Its booking screens call the API through a typed client and TanStack Query. The Web app calls the REST API under /api/v1 with JSON whose types are generated from docs/openapi.yaml, and each request runs on a virtual thread. Built in the REST API: branches (M1), availability (M2), the OpenAPI 3.1 contract with Swagger UI (M2), book and look up (M3), and cancel (M6). The REST API reaches PostgreSQL through JdbcClient and JPA, one transaction per use case. Modules: catalogue (built, M1), scheduling (built, M2), notification (built, M5: it writes the confirmation SMS from M3 and sends it from M5) and booking (built, M3). A flow from booking writes the appointment and its PENDING confirmation SMS row in one transaction. The shared module holds the packages problem, correlation, security, time, config and web. ArchitectureTest checks that the modules have no cycles and that only application code opens transactions. Background: IdempotencyKeyPurgeJob deletes expired idempotency keys every hour. RetentionPurgeJob runs on the hosted demo only and, every hour, deletes each booking once its appointment is over. DemoDataLoader books three demo appointments on a fresh compose stack. RecipientSendLedgerPurgeJob deletes the SMS daily cap's ledger rows every hour, once they are 24 hours old. HolidayCoverageCheck runs at start-up and daily at 06:00 SAST. NotificationDispatcher (built, M5) runs every 2 s, claims due rows from PostgreSQL and sends each message through the SMS gateway: the simulated gateway, which sends no real message, runs locally and for the published demo numbers; on the hosted demo, every other number is texted through AWS End User Messaging. PostgreSQL 17 is migrated by Flyway with the btree_gist extension; it has 9 tables and 56 named constraints, and 2 exclusion constraints stop double booking. Lower band, how it ships, left to right: Laptop, where an opt-in pre-commit hook scans for secrets; GitHub, with the workflows ci and secret-scan; ci's deploy job signs in to AWS through OpenID Connect, so no keys are stored; AWS us-east-1, where the BranchbookAccount stack holds the deploy role and the budget; AWS af-south-1, where the BranchbookRelease stack records the deployed commit; and the hosted demo at branchbook.click, which the same job deploys on every push to main: the stacks BranchbookData, for the network and the database, and BranchbookApp, for the app behind AWS WAF and a load balancer. Legend: Built; Main path; AWS category: security, management and integration.</desc>
   <!--
     Diagram id: system-at-a-glance
     Shown in: README.md (hero, under the fictional-bank notice); docs/architecture.md (2. System context and containers)
@@ -15,10 +15,11 @@
       api/src/test/java/za/co/fynbos/branchbook/ArchitectureTest.java; web/package.json; web/src/routes.tsx;
       web/src/api/client.ts; web/src/api/queries.ts; compose.yaml; Makefile; Dockerfile;
       docs/domain-rules.md (Status lines); docs/architecture.md; .githooks/pre-commit;
-      .github/workflows/ci.yml, secret-scan.yml, infra.yml, deploy.yml; infra/bin/branchbook.ts;
+      .github/workflows/ci.yml (jobs api, web, stack, infra and deploy), secret-scan.yml,
+      aws-connection-check.yml; infra/bin/branchbook.ts;
       infra/lib/account-stack.ts; infra/lib/release-stack.ts; infra/lib/data-stack.ts; infra/lib/app-stack.ts
       (BRANCHBOOK_SMS_GATEWAY=aws, BRANCHBOOK_RETENTION_ENABLED); infra/cdk.json; infra/README.md
-    Verified at 4d4ba68 (2026-10-27)
+    Verified at 21798b6 (2026-10-27)
     Conventions: docs/assets/diagrams/README.md
     Planned elements carry class="planned" data-milestone; none is left in this diagram.
   -->
@@ -223,10 +224,10 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
       <text class="s" x="76" y="731" text-anchor="middle">secret scan</text>
     </g>
     <g id="ship-github">
-      <rect class="box" x="152.5" y="672.5" width="139" height="75" rx="8"/>
-      <text class="t" x="222" y="694" text-anchor="middle">GitHub</text>
-      <text class="s mono" x="222" y="713" text-anchor="middle">ci · secret-scan</text>
-      <text class="s mono" x="222" y="731" text-anchor="middle">infra · deploy</text>
+      <rect class="box" x="152.5" y="672.5" width="147" height="75" rx="8"/>
+      <text class="t" x="226" y="694" text-anchor="middle">GitHub</text>
+      <text class="s mono" x="226" y="713" text-anchor="middle">ci · secret-scan</text>
+      <text class="s" x="226" y="731" text-anchor="middle">job <tspan class="s mono">deploy</tspan> in <tspan class="s mono">ci</tspan></text>
     </g>
     <g id="ship-us-east-1">
       <rect class="box" x="416.5" y="672.5" width="155" height="75" rx="6"/>
@@ -245,18 +246,19 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <g id="ship-hosted-demo">
       <rect class="box" x="788.5" y="672.5" width="147" height="75" rx="8"/>
       <text class="t" x="862" y="694" text-anchor="middle">Hosted demo</text>
-      <rect class="pill-built" x="804.5" y="701.5" width="115" height="19" rx="9.5"/>
-      <text class="pill-built-t" x="862" y="715" text-anchor="middle">built · by hand</text>
+      <rect class="pill-built" x="807" y="701.5" width="110" height="19" rx="9.5"/>
+      <text class="pill-built-t" x="862" y="715" text-anchor="middle">built · pipeline</text>
       <text class="s mono" x="862" y="736" text-anchor="middle">branchbook.click</text>
     </g>
     <g id="ship-edges">
       <path class="edge" d="M128,710 H152" marker-end="url(#ah)"/>
       <g id="edge-openid-connect">
-        <path class="edge" d="M292,710 H416" marker-end="url(#ah)"/>
-        <text class="l halo" x="354" y="702" text-anchor="middle">OpenID Connect</text>
-        <text class="l halo" x="354" y="726" text-anchor="middle">no stored keys</text>
+        <path class="edge" d="M300,710 H416" marker-end="url(#ah)"/>
+        <text class="l halo" x="358" y="702" text-anchor="middle">OpenID Connect</text>
+        <text class="l halo" x="358" y="726" text-anchor="middle">no stored keys</text>
       </g>
       <path class="edge" d="M572,710 H596" marker-end="url(#ah)"/>
+      <path class="edge" d="M764,710 H788" marker-end="url(#ah)"/>
     </g>
   </g>
   <g id="legend">

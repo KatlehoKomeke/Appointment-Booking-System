@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
   <title id="title">BranchBook in AWS</title>
-  <desc id="desc">What BranchBook has in AWS: the pipeline's release record and the hosted demo at branchbook.click, all built. Outside AWS, on the left: the Administrator, IAM user branchbook-admin, who signs in with aws login and gets short-lived credentials; GitHub, repository KatlehoKomeke/Appointment-Booking-System, with the environment aws-demo (main and v* tags only, no reviewers) holding the secret AWS_DEPLOY_ROLE_ARN, the workflows deploy.yml (every push to main) and aws-connection-check.yml (manual), and infra.yml, which runs the tests and synth with no AWS access; a reviewer's browser, which needs no sign-in; and the administrator's machine, which runs cdk deploy by hand and builds the ARM64 image for ECR. The AWS account, whose ID is never committed, costs about $82 a month before VAT while the demo runs, inside the $90 budget; the domain costs about $3 a year, and each SMS is charged on top, up to the account's SMS spend limit. In us-east-1 (N. Virginia), built: the stack BranchbookAccount, deployed by hand by the administrator, holds the IAM OIDC provider for token.actions.githubusercontent.com with audience sts.amazonaws.com; the AWS Budgets budget branchbook-monthly, $90 a month, which e-mails at $45, $72 and $90; the IAM role branchbook-github-deploy, with sessions of at most 1 hour, whose ARN is the stack output DeployRoleArn, copied once into the secret and never printed; and the IAM policy on that role, which allows only the statements AssumeCdkBootstrapRolesOnly and ReadReleaseRecordOnly. Beside it is the CDK bootstrap stack CDKToolkit, qualifier hnb659fds, with its roles, assets bucket and ECR repository. IAM and Budgets are global; no customer data is held here. In af-south-1 (Cape Town), built: a second CDKToolkit, with the five bootstrap roles deploy, lookup, cfn-exec, file-publishing and image-publishing, an assets bucket and an ECR repository, which holds the app image; the stack BranchbookRelease, deployed by the pipeline, holding the SSM parameter /branchbook/release, Standard tier, which records the last commit the pipeline deployed; and the hosted demo's two stacks, both deployed by the administrator by hand. BranchbookApp holds a Route 53 A alias record for branchbook.click, whose hosted zone Route 53 created when the domain was registered, so there is no DNS stack; AWS WAF, attached to the load balancer, which blocks /actuator with 403, comparing the path only after decoding and lowercasing it, so /%61ctuator is blocked too, allows 10 booking and cancel POSTs to /api/v1/appointments per IP address in 5 minutes, and applies the AWS managed rule groups for IP reputation, known bad inputs and common threats, with no sign-in; an internet-facing Application Load Balancer, HTTPS on 443 with an ACM certificate validated through Route 53 and the recommended TLS 1.3 policy, plain HTTP on 80 redirected to HTTPS, and invalid header fields dropped; CloudWatch and SNS: the log group /branchbook/app kept 7 days, and 3 alarms (5xx answers, no healthy task, less than 2 GB of database storage) sent to an SNS topic; one ECS Fargate task, ARM64, 0.5 vCPU, 1 GB, in a public subnet with a public IP and no NAT, reachable only from the load balancer, serving only the health and info management endpoints, with the simulated inbox switched off, the retention purge switched on, which deletes each booking once its appointment is over, and a deployment circuit breaker that rolls back; and AWS End User Messaging SMS, through a protect configuration that blocks SMS to every one of the 245 countries AWS lists except South Africa, and blocks every voice and MMS destination. No configuration set logs delivery events, because they carry the destination number. BranchbookData holds a VPC, 10.40.0.0/16 across af-south-1a and af-south-1b, with a public and an isolated /24 subnet in each and no NAT gateway; Secrets Manager, holding two secrets it generates: the database credentials branchbook/database, which the task reads as DB_USER and DB_PASSWORD, and the SMS daily cap's key branchbook/sms-cap-key, 48 letters and digits, deleted with the stack, which the task reads as BRANCHBOOK_SMS_RECIPIENT_CAP_KEY; and RDS for PostgreSQL 17, Single-AZ on db.t4g.micro in the isolated subnets, with 20 GB of gp3 storage growing to 50, encrypted, 7-day backups, TLS required and a final snapshot on deletion; PostgreSQL's own log is not exported, because it can quote a mobile number. Step A, twice: the administrator runs cdk deploy by hand, for BranchbookAccount in us-east-1, and for BranchbookData and BranchbookApp in af-south-1, which also pushes the image to the bootstrap ECR repository; the pipeline deploys none of these. Step 1: the deploy job in deploy.yml enters the environment aws-demo and signs in through OpenID Connect via AWS STS as the deploy role, with no stored keys. Step 2: the role assumes the af-south-1 bootstrap roles. Step 3: CloudFormation updates BranchbookRelease. Step 4: the job reads /branchbook/release back and fails unless it equals GITHUB_SHA. The main path is a reviewer's request: from the browser over HTTPS to Route 53, AWS WAF, the load balancer, the Fargate task on port 8080, health-checked at /readyz, and RDS on port 5432 over TLS, with no RDS Proxy. A flow from the Fargate task sends each SMS through AWS End User Messaging, to South African numbers only, at most 5 a day to one number (BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP); the task role may call sms-voice:SendTextMessage only through the protect configuration, and the published demo numbers 082 555 0000 to 082 555 0199 stay on the simulated gateway. Legend: Built; Main path; AWS category: compute and containers, database, networking, security, management and integration, storage and cost.</desc>
+  <desc id="desc">What BranchBook has in AWS: the pipeline's release record and the hosted demo at branchbook.click, all built. Outside AWS, on the left: the Administrator, IAM user branchbook-admin, who signs in with aws login and gets short-lived credentials; GitHub, repository KatlehoKomeke/Appointment-Booking-System, with the environment aws-demo (main and v* tags only, no reviewers) holding the secret AWS_DEPLOY_ROLE_ARN, the workflow ci.yml, whose job deploy runs on every push to main and builds the ARM64 image, and aws-connection-check.yml (manual); ci's other jobs, api, web, stack and infra, run with no AWS access; and a reviewer's browser, which needs no sign-in. The AWS account, whose ID is never committed, costs about $82 a month before VAT while the demo runs, inside the $90 budget; the domain costs about $3 a year, and each SMS is charged on top, up to the account's SMS spend limit. In us-east-1 (N. Virginia), built: the stack BranchbookAccount, deployed by hand by the administrator, holds the IAM OIDC provider for token.actions.githubusercontent.com with audience sts.amazonaws.com; the AWS Budgets budget branchbook-monthly, $90 a month, which e-mails at $45, $72 and $90; the IAM role branchbook-github-deploy, with sessions of at most 1 hour, whose ARN is the stack output DeployRoleArn, copied once into the secret and never printed; and the IAM policy on that role, which allows only the statements AssumeCdkBootstrapRolesOnly and ReadReleaseRecordOnly. Beside it is the CDK bootstrap stack CDKToolkit, qualifier hnb659fds, with its roles, assets bucket and ECR repository. IAM and Budgets are global; no customer data is held here. In af-south-1 (Cape Town), built: a second CDKToolkit, with the five bootstrap roles deploy, lookup, cfn-exec, file-publishing and image-publishing, an assets bucket and an ECR repository, which holds the app image; the stack BranchbookRelease, deployed by the pipeline, holding the SSM parameter /branchbook/release, Standard tier, which records the last commit the pipeline deployed; and the hosted demo's two stacks, both deployed by the pipeline on every push to main. BranchbookApp holds a Route 53 A alias record for branchbook.click, whose hosted zone Route 53 created when the domain was registered, so there is no DNS stack; AWS WAF, attached to the load balancer, which blocks /actuator with 403, comparing the path only after decoding and lowercasing it, so /%61ctuator is blocked too, allows 10 booking and cancel POSTs to /api/v1/appointments per IP address in 5 minutes, and applies the AWS managed rule groups for IP reputation, known bad inputs and common threats, with no sign-in; an internet-facing Application Load Balancer, HTTPS on 443 with an ACM certificate validated through Route 53 and the recommended TLS 1.3 policy, plain HTTP on 80 redirected to HTTPS, and invalid header fields dropped; CloudWatch and SNS: the log group /branchbook/app kept 7 days, and 3 alarms (5xx answers, no healthy task, less than 2 GB of database storage) sent to an SNS topic; one ECS Fargate task, ARM64, 0.5 vCPU, 1 GB, in a public subnet with a public IP and no NAT, reachable only from the load balancer, serving only the health and info management endpoints, with the simulated inbox switched off, the retention purge switched on, which deletes each booking once its appointment is over, and a deployment circuit breaker that rolls back; and AWS End User Messaging SMS, through a protect configuration that blocks SMS to every one of the 245 countries AWS lists except South Africa, and blocks every voice and MMS destination. No configuration set logs delivery events, because they carry the destination number. BranchbookData holds a VPC, 10.40.0.0/16 across af-south-1a and af-south-1b, with a public and an isolated /24 subnet in each and no NAT gateway; Secrets Manager, holding two secrets it generates: the database credentials branchbook/database, which the task reads as DB_USER and DB_PASSWORD, and the SMS daily cap's key branchbook/sms-cap-key, 48 letters and digits, deleted with the stack, which the task reads as BRANCHBOOK_SMS_RECIPIENT_CAP_KEY; and RDS for PostgreSQL 17, Single-AZ on db.t4g.micro in the isolated subnets, with 20 GB of gp3 storage growing to 50, encrypted, 7-day backups, TLS required and a final snapshot on deletion; PostgreSQL's own log is not exported, because it can quote a mobile number. Step A: the administrator runs cdk deploy by hand for BranchbookAccount in us-east-1, the one stack the pipeline never deploys. Step 1: the deploy job in ci.yml enters the environment aws-demo and signs in through OpenID Connect via AWS STS as the deploy role, with no stored keys. Step 2: the role assumes the af-south-1 bootstrap roles, and the image built on the ARM runner is pushed to the bootstrap ECR repository. Step 3: CloudFormation updates BranchbookData, then BranchbookApp, and the job smoke-tests branchbook.click. Step 4: CloudFormation updates BranchbookRelease. Step 5: the job reads /branchbook/release back and fails unless it equals GITHUB_SHA. The main path is a reviewer's request: from the browser over HTTPS to Route 53, AWS WAF, the load balancer, the Fargate task on port 8080, health-checked at /readyz, and RDS on port 5432 over TLS, with no RDS Proxy. A flow from the Fargate task sends each SMS through AWS End User Messaging, to South African numbers only, at most 5 a day to one number (BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP); the task role may call sms-voice:SendTextMessage only through the protect configuration, and the published demo numbers 082 555 0000 to 082 555 0199 stay on the simulated gateway. Legend: Built; Main path; AWS category: compute and containers, database, networking, security, management and integration, storage and cost.</desc>
   <!--
     Diagram id: aws-footprint
     Shown in: infra/README.md (What exists today); docs/architecture.md (10.3 In AWS)
@@ -8,8 +8,8 @@
       infra/lib/data-stack.ts (the secrets branchbook/database and branchbook/sms-cap-key);
       infra/lib/app-stack.ts (WAF, the protect configuration, the task's SMS settings and secrets);
       infra/lib/sms-countries.ts; infra/cdk.json;
-      infra/README.md; .github/workflows/deploy.yml; .github/workflows/aws-connection-check.yml;
-      .github/workflows/infra.yml; docs/adr/0006-hosted-demo-on-aws-with-cdk.md;
+      infra/README.md; .github/workflows/ci.yml (jobs api, web, stack, infra and deploy);
+      .github/workflows/aws-connection-check.yml; docs/adr/0006-hosted-demo-on-aws-with-cdk.md;
       docs/adr/0007-continuous-deployment-from-main.md;
       the CDK bootstrap template (infra/node_modules/aws-cdk/lib/api/bootstrap/bootstrap-template.yaml);
       GitHub environment aws-demo:
@@ -18,10 +18,7 @@
         gh api repos/KatlehoKomeke/Appointment-Booking-System/environments/aws-demo/deployment-branch-policies
           -q '.branch_policies[] | [.name, .type]'
         gh api repos/KatlehoKomeke/Appointment-Booking-System/environments/aws-demo/secrets -q '.secrets[].name'
-      the deploy.yml run history, which shows BranchbookAccount was redeployed by hand after 3f842b1:
-        gh api repos/KatlehoKomeke/Appointment-Booking-System/actions/workflows/deploy.yml/runs
-          -q '.workflow_runs[] | [.head_sha[0:7], .conclusion]'
-    Verified at 4d4ba68 (2026-10-27)
+    Verified at 21798b6 (2026-10-27)
     Conventions: docs/assets/diagrams/README.md
     Planned elements carry class="planned" data-milestone; none is left in this diagram.
   -->
@@ -75,7 +72,7 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
       <text class="s" x="24" y="140"><tspan class="s mono">aws login</tspan> · short-lived credentials</text>
     </g>
     <g id="github">
-      <rect class="box-soft" x="24.5" y="152.5" width="215" height="399" rx="12"/>
+      <rect class="box-soft" x="24.5" y="152.5" width="215" height="415" rx="12"/>
       <text class="g" x="40" y="172">GitHub</text>
       <g id="gate-environment-aws-demo">
         <rect class="box" x="32.5" y="180.5" width="199" height="95" rx="8"/>
@@ -86,33 +83,28 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
         <text class="s mono" x="130" y="240" text-anchor="middle">AWS_DEPLOY_ROLE_ARN</text>
         <text class="s" x="44" y="266">no reviewers</text>
       </g>
-      <g id="file-deploy-yml">
-        <path class="box" d="M40.5,332.5 H221.5 L231.5,342.5 V379.5 A8,8 0 0 1 223.5,387.5 H40.5 A8,8 0 0 1 32.5,379.5 V340.5 A8,8 0 0 1 40.5,332.5 Z"/>
+      <g id="file-ci-yml">
+        <path class="box" d="M40.5,332.5 H221.5 L231.5,342.5 V397.5 A8,8 0 0 1 223.5,405.5 H40.5 A8,8 0 0 1 32.5,397.5 V340.5 A8,8 0 0 1 40.5,332.5 Z"/>
         <path class="box" d="M221.5,332.5 V342.5 H231.5 Z"/>
-        <text class="t mono x-file" x="44" y="353">deploy.yml</text>
+        <text class="s" x="44" y="353"><tspan class="t mono x-file">ci.yml</tspan> · job <tspan class="s mono">deploy</tspan></text>
         <text class="s" x="44" y="372">every push to main</text>
+        <text class="s" x="44" y="390">builds the ARM64 image</text>
       </g>
       <g id="file-aws-connection-check-yml">
-        <path class="box" d="M40.5,400.5 H221.5 L231.5,410.5 V447.5 A8,8 0 0 1 223.5,455.5 H40.5 A8,8 0 0 1 32.5,447.5 V408.5 A8,8 0 0 1 40.5,400.5 Z"/>
-        <path class="box" d="M221.5,400.5 V410.5 H231.5 Z"/>
-        <text class="t mono x-file" x="44" y="421">aws-connection-check.yml</text>
-        <text class="s" x="44" y="440">manual</text>
+        <path class="box" d="M40.5,418.5 H221.5 L231.5,428.5 V465.5 A8,8 0 0 1 223.5,473.5 H40.5 A8,8 0 0 1 32.5,465.5 V426.5 A8,8 0 0 1 40.5,418.5 Z"/>
+        <path class="box" d="M221.5,418.5 V428.5 H231.5 Z"/>
+        <text class="t mono x-file" x="44" y="442">aws-connection-check.yml</text>
+        <text class="s" x="44" y="460">manual</text>
       </g>
-      <text class="s" x="40" y="480"><tspan class="s mono">infra.yml</tspan>: tests and synth,</text>
-      <text class="s" x="40" y="498">no AWS access</text>
-      <text class="s mono" x="40" y="522">KatlehoKomeke/</text>
-      <text class="s mono" x="40" y="538">Appointment-Booking-System</text>
+      <text class="s" x="40" y="498"><tspan class="s mono">ci</tspan>'s jobs api, web, stack, infra</text>
+      <text class="s" x="40" y="516">run with no AWS access</text>
+      <text class="s mono" x="40" y="540">KatlehoKomeke/</text>
+      <text class="s mono" x="40" y="556">Appointment-Booking-System</text>
     </g>
     <g id="actor-reviewer-browser">
-      <rect class="box" x="24.5" y="568.5" width="171" height="31" rx="15.5"/>
-      <text class="t" x="110" y="589" text-anchor="middle">Reviewer's browser</text>
-      <text class="s" x="24" y="618">no sign-in</text>
-    </g>
-    <g id="node-administrator-machine">
-      <rect class="box" x="24.5" y="630.5" width="207" height="71" rx="8"/>
-      <text class="t" x="36" y="652">Administrator's machine</text>
-      <text class="s" x="36" y="671"><tspan class="s mono">cdk deploy</tspan> · by hand</text>
-      <text class="s" x="36" y="689">builds the ARM64 image</text>
+      <rect class="box" x="24.5" y="584.5" width="171" height="31" rx="15.5"/>
+      <text class="t" x="110" y="605" text-anchor="middle">Reviewer's browser</text>
+      <text class="s" x="24" y="634">no sign-in</text>
     </g>
   </g>
   <g id="aws-account">
@@ -201,8 +193,8 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
         <rect class="box" x="276.5" y="430.5" width="639" height="221" rx="8"/>
         <path class="pill-built" d="M277.1,458.5 V438.5 A7.4,7.4 0 0 1 284.5,431.1 H907.5 A7.4,7.4 0 0 1 914.9,438.5 V458.5 Z"/>
         <text class="t mono" x="288" y="449">BranchbookApp</text>
-        <rect class="pill-built" x="691" y="434" width="213" height="20" rx="10"/>
-        <text class="pill-built-t" x="797.5" y="448" text-anchor="middle">built · administrator, by hand</text>
+        <rect class="pill-built" x="794" y="434" width="110" height="20" rx="10"/>
+        <text class="pill-built-t" x="849" y="448" text-anchor="middle">built · pipeline</text>
         <g id="tile-route-53">
           <rect class="box" x="288.5" y="464.5" width="170" height="47" rx="6"/>
           <rect class="aws-net" x="292" y="468" width="4" height="40"/>
@@ -250,8 +242,8 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
         <rect class="box" x="276.5" y="657.5" width="639" height="87" rx="8"/>
         <path class="pill-built" d="M277.1,685.5 V665.5 A7.4,7.4 0 0 1 284.5,658.1 H907.5 A7.4,7.4 0 0 1 914.9,665.5 V685.5 Z"/>
         <text class="t mono" x="288" y="676">BranchbookData</text>
-        <rect class="pill-built" x="416" y="661" width="213" height="20" rx="10"/>
-        <text class="pill-built-t" x="522.5" y="675" text-anchor="middle">built · administrator, by hand</text>
+        <rect class="pill-built" x="416" y="661" width="110" height="20" rx="10"/>
+        <text class="pill-built-t" x="471" y="675" text-anchor="middle">built · pipeline</text>
         <g id="tile-vpc">
           <rect class="box" x="288.5" y="691.5" width="200" height="47" rx="6"/>
           <rect class="aws-net" x="292" y="695" width="4" height="40"/>
@@ -289,25 +281,24 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <circle class="badge" cx="404" cy="280" r="10"/>
     <text class="badge-t" x="404" y="284" text-anchor="middle">2</text>
     <text class="l halo-2" x="420" y="284">assumes bootstrap roles</text>
+    <path class="edge" d="M300,396 V430" marker-end="url(#ah)"/>
+    <circle class="badge" cx="300" cy="418" r="10"/>
+    <text class="badge-t" x="300" y="422" text-anchor="middle">3</text>
+    <text class="l" x="316" y="422">CloudFormation: Data, then App</text>
     <path class="edge" d="M528,350 H632" marker-end="url(#ah)"/>
     <circle class="badge" cx="580" cy="350" r="10"/>
-    <text class="badge-t" x="580" y="354" text-anchor="middle">3</text>
+    <text class="badge-t" x="580" y="354" text-anchor="middle">4</text>
     <text class="l halo-2" x="580" y="334" text-anchor="middle">CloudFormation</text>
     <text class="l halo-2" x="580" y="376" text-anchor="middle">update</text>
-    <path class="edge" d="M772,388 V400 Q772,406 766,406 H254 Q248,406 248,400 V366 Q248,360 242,360 H232" marker-end="url(#ah)"/>
-    <circle class="badge" cx="580" cy="406" r="10"/>
-    <text class="badge-t" x="580" y="410" text-anchor="middle">4</text>
-    <text class="l halo-2" x="566" y="422" text-anchor="end">read back: must equal <tspan class="l mono">GITHUB_SHA</tspan></text>
-  </g>
-  <g id="edges-administrator-demo">
-    <path class="edge" d="M232,666 H254 Q260,666 260,660 V618 Q260,612 266,612 H276" marker-end="url(#ah)"/>
-    <path class="edge" d="M254,666 Q260,666 260,672 V694 Q260,700 266,700 H276" marker-end="url(#ah)"/>
-    <circle class="badge" cx="243" cy="666" r="10"/>
-    <text class="badge-t" x="243" y="670" text-anchor="middle">A</text>
+    <path class="edge" d="M772,388 V396 Q772,402 766,402 H305"/>
+    <path class="edge" d="M295,402 H254 Q248,402 248,396 V375 Q248,369 242,369 H232" marker-end="url(#ah)"/>
+    <circle class="badge" cx="580" cy="402" r="10"/>
+    <text class="badge-t" x="580" y="406" text-anchor="middle">5</text>
+    <text class="l halo-2" x="596" y="418">read back: must equal <tspan class="l mono">GITHUB_SHA</tspan></text>
   </g>
   <g id="edges-request">
-    <path class="edge-acc" d="M196,584 H254 Q260,584 260,578 V494 Q260,488 266,488 H288" marker-end="url(#ah-acc)"/>
-    <text class="l halo" x="225" y="577" text-anchor="middle">HTTPS</text>
+    <path class="edge-acc" d="M196,600 H254 Q260,600 260,594 V494 Q260,488 266,488 H288" marker-end="url(#ah-acc)"/>
+    <text class="l halo" x="225" y="593" text-anchor="middle">HTTPS</text>
     <path class="edge-acc" d="M459,488 H474" marker-end="url(#ah-acc)"/>
     <path class="edge-acc" d="M649,488 H664" marker-end="url(#ah-acc)"/>
     <path class="edge-acc" d="M784,512 V527" marker-end="url(#ah-acc)"/>
