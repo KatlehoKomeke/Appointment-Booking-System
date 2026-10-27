@@ -17,6 +17,7 @@ function synth(overrides: Partial<AppStackProps> = {}): { data: Template; app: T
     env,
     vpc: data.vpc,
     database: data.database,
+    smsCapKey: data.smsCapKey,
     domainName: 'branchbook.link',
     hostedZoneId: 'Z0000000PLACEHOLDER',
     ...overrides,
@@ -47,6 +48,16 @@ describe('DataStack', () => {
     data.hasResourceProperties('AWS::SecretsManager::Secret', {
       Name: 'branchbook/database',
       GenerateSecretString: Match.objectLike({ GenerateStringKey: 'password' }),
+    });
+  });
+
+  test('generates the SMS cap key into Secrets Manager, never into the template, and deletes it with the data', () => {
+    data.hasResource('AWS::SecretsManager::Secret', {
+      DeletionPolicy: 'Delete',
+      Properties: Match.objectLike({
+        Name: 'branchbook/sms-cap-key',
+        GenerateSecretString: { ExcludePunctuation: true, PasswordLength: 48 },
+      }),
     });
   });
 
@@ -95,6 +106,18 @@ describe('AppStack', () => {
         }),
       ],
     });
+  });
+
+  test('injects the SMS cap key from the data stack as a secret, never as a plain value', () => {
+    const tasks = Object.values(app.findResources('AWS::ECS::TaskDefinition')) as {
+      Properties: { ContainerDefinitions: { Environment: { Name: string }[]; Secrets: { Name: string; ValueFrom: unknown }[] }[] };
+    }[];
+    expect(tasks).toHaveLength(1);
+    const [container] = tasks[0].Properties.ContainerDefinitions;
+    expect(container.Environment.map((e) => e.Name)).not.toContain('BRANCHBOOK_SMS_RECIPIENT_CAP_KEY');
+    const capKey = container.Secrets.find((s) => s.Name === 'BRANCHBOOK_SMS_RECIPIENT_CAP_KEY');
+    // A reference to the data stack's secret, however CDK renders the cross-stack reference.
+    expect(JSON.stringify(capKey?.ValueFrom)).toContain('SmsCapKey');
   });
 
   test('texts South Africa only: every other SMS country, and every voice and MMS destination, is blocked', () => {

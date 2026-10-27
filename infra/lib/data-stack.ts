@@ -1,6 +1,7 @@
 import { Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib/core';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as rds from 'aws-cdk-lib/aws-rds';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 
 /** The database the application connects to; Flyway creates its schema on first start. */
@@ -29,6 +30,7 @@ export interface DataStackProps extends StackProps {
  *   while the database sits in subnets with no route to or from the internet.
  * - RDS for PostgreSQL 17 on `db.t4g.micro`, Single-AZ, encrypted at rest, with 7-day backups and TLS required. Its
  *   master credentials are generated into Secrets Manager and never appear in the template.
+ * - The key the SMS daily cap fingerprints each number with, generated into Secrets Manager the same way.
  */
 export class DataStack extends Stack {
   /** The network the app stack runs in. */
@@ -36,6 +38,9 @@ export class DataStack extends Stack {
 
   /** The database instance. The app stack opens its port to the task's security group only. */
   public readonly database: rds.DatabaseInstance;
+
+  /** The HMAC key of the SMS daily cap's ledger, which the app stack injects into the task. */
+  public readonly smsCapKey: secretsmanager.Secret;
 
   constructor(scope: Construct, id: string, props: DataStackProps) {
     super(scope, id, props);
@@ -82,6 +87,16 @@ export class DataStack extends Stack {
       // PostgreSQL's own log is not exported: a constraint violation's DETAIL line quotes the values, a mobile
       // number among them, and no log may hold personal data (BR-19).
       autoMinorVersionUpgrade: true,
+    });
+
+    // The app counts the SMS sent to each number in a ledger in this database, under an HMAC-SHA256 fingerprint of
+    // the number keyed with this secret, so the ledger holds no number. The key lives here, with the ledger it keys:
+    // a new task, or a redeployed app stack, keeps counting against the same fingerprints. 48 letters and digits.
+    this.smsCapKey = new secretsmanager.Secret(this, 'SmsCapKey', {
+      secretName: 'branchbook/sms-cap-key',
+      description: 'BranchBook: the HMAC key that fingerprints each number in the SMS daily cap ledger',
+      generateSecretString: { passwordLength: 48, excludePunctuation: true },
+      removalPolicy: RemovalPolicy.DESTROY,
     });
   }
 }
