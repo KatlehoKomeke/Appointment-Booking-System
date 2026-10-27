@@ -18,7 +18,7 @@ and [ADR-0007](../docs/adr/0007-continuous-deployment-from-main.md).
 *Status: Built: four stacks deployed. The pipeline deploys the release record; the administrator deploys the rest by
 hand, the hosted demo first on 2026-10-26.*
 
-![BranchBook in AWS, all built: the administrator's BranchbookAccount in us-east-1 (GitHub OIDC provider, a narrow deploy role, a $90 budget), the pipeline's release record in Cape Town, and the hosted demo there, deployed by hand, where a reviewer's request runs through Route 53, WAF and a load balancer to one Fargate task and RDS PostgreSQL 17.](../docs/assets/diagrams/aws-footprint.svg)
+![BranchBook in AWS, all built: the administrator's account stack in us-east-1 (OIDC provider, narrow deploy role, $90 budget), the pipeline's release record in Cape Town, and the hand-deployed demo there, where Route 53, WAF and a load balancer front one Fargate task that uses RDS and texts only South African numbers through AWS End User Messaging.](../docs/assets/diagrams/aws-footprint.svg)
 
 **A.** The administrator runs `cdk deploy` by hand from their own machine: `BranchbookAccount` in `us-east-1`, and
 `BranchbookData` and `BranchbookApp` in `af-south-1`, which also pushes the ARM64 image to the bootstrap ECR
@@ -36,7 +36,7 @@ repository. The pipeline deploys none of these.
 | [`BranchbookAccount`](lib/account-stack.ts)<br>`us-east-1` | Administrator, by hand | The GitHub OIDC provider, the role `branchbook-github-deploy`, the budget `branchbook-monthly` and the output `DeployRoleArn` |
 | [`BranchbookRelease`](lib/release-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` | The SSM parameter `/branchbook/release`: the last commit the pipeline deployed |
 | [`BranchbookData`](lib/data-stack.ts)<br>`af-south-1` | Administrator, by hand | The hosted demo's VPC and its RDS for PostgreSQL 17 database ([The hosted demo](#the-hosted-demo)) |
-| [`BranchbookApp`](lib/app-stack.ts)<br>`af-south-1` | Administrator, by hand | The hosted demo's certificate, WAF, load balancer, Fargate task, logs, alarms and DNS record |
+| [`BranchbookApp`](lib/app-stack.ts)<br>`af-south-1` | Administrator, by hand | The hosted demo's certificate, WAF, load balancer, Fargate task, SMS protect configuration, logs, alarms and DNS record |
 | `CDKToolkit`<br>both Regions | Administrator, once per Region | The `cdk bootstrap` stack, qualifier `hnb659fds`: the deploy, file-publishing, image-publishing, lookup and cfn-exec roles, an assets bucket and an ECR repository |
 
 - **Cost.** `BranchbookAccount` and `BranchbookRelease` cost nothing to run; the bootstrap storage costs cents. The
@@ -204,23 +204,27 @@ Both stacks are in `af-south-1`:
   Secrets Manager as `branchbook/database`. Deleting the stack leaves a final snapshot; deletion protection is off.
   PostgreSQL's own log is not exported, because a constraint error's `DETAIL` line can quote a mobile number (BR-19).
 - **[`BranchbookApp`](lib/app-stack.ts):** an ACM certificate for `branchbook.click`, validated through Route 53; AWS
-  WAF; an internet-facing Application Load Balancer; one Fargate task; application logs in `/branchbook/app`, kept 7
-  days; three CloudWatch alarms; and the Route 53 A alias that points the domain at the load balancer.
+  WAF; an internet-facing Application Load Balancer; one Fargate task; an AWS End User Messaging SMS protect
+  configuration that lets the task text South Africa only ([Real SMS](#real-sms)); application logs in
+  `/branchbook/app`, kept 7 days; three CloudWatch alarms; and the Route 53 A alias that points the domain at the load
+  balancer.
 
 A reviewer's request takes this path:
 
 1. The browser resolves `branchbook.click` through Route 53, whose alias names the load balancer. DNS answers the
    name; it is not in the data path.
-2. AWS WAF, attached to the load balancer, applies its rules in order: it blocks `/actuator` (403); allows 30 booking
-   `POST`s to `/api/v1/appointments` per IP in 5 minutes; then applies AWS's managed rule groups
-   `AWSManagedRulesAmazonIpReputationList`, `AWSManagedRulesKnownBadInputsRuleSet` and `AWSManagedRulesCommonRuleSet`.
-   It asks for no sign-in.
+2. AWS WAF, attached to the load balancer, applies its rules in order: it blocks `/actuator` (403); allows 10
+   `POST`s to `/api/v1/appointments` and the paths under it, bookings and cancellations together, per IP in 5
+   minutes; then applies AWS's managed rule groups `AWSManagedRulesAmazonIpReputationList`,
+   `AWSManagedRulesKnownBadInputsRuleSet` and `AWSManagedRulesCommonRuleSet`. Both path rules decode and lowercase
+   the path before comparing it (`URL_DECODE`, `LOWERCASE`), so `/%61ctuator` and `/ACTUATOR` are blocked too. It
+   asks for no sign-in.
 3. The load balancer, in the public subnets, ends HTTPS on port 443 with ELB's recommended TLS 1.3 policy, drops
    invalid header fields and health-checks `/readyz`. Plain HTTP on port 80 is answered with a redirect to HTTPS, and
    HSTS keeps browsers there.
 4. The Fargate task (ARM64, 0.5 vCPU, 1 GB), which admits traffic only from the load balancer, serves the request on
-   port 8080. It runs in a public subnet with a public IP, so it reaches ECR and Secrets Manager without a NAT
-   gateway.
+   port 8080. It runs in a public subnet with a public IP, so it reaches ECR, Secrets Manager and AWS End User
+   Messaging without a NAT gateway.
 5. The task talks to RDS on port 5432 over TLS, directly, with no RDS Proxy; the database admits only the task.
 
 The task is configured by environment variables; there are no `prod` or `demo` Spring profiles:
@@ -232,16 +236,24 @@ The task is configured by environment variables; there are no `prod` or `demo` S
 | `PUBLIC_BASE_URL` | `https://branchbook.click`, the confirmation SMS's `/manage` link |
 | `BRANCHBOOK_INBOX_ENABLED` | `false`: the simulated inbox is off, so `/api/v1/messages` answers 404 and the `/messages` page says it is switched off on this deployment. Each booker still sees their own SMS and its status on the confirmation page |
 | `BRANCHBOOK_RETENTION_ENABLED` | `true`: an hourly job deletes every booking 48 hours after it was made, with its messages and idempotency keys. Live since 058e6fd |
-| `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` | `true`: only the published demo numbers, 082 555 0000 to 082 555 0199, may book; any other number gets `422 DEMO_NUMBER_REQUIRED`. Live since 058e6fd |
+| `BRANCHBOOK_SMS_GATEWAY` | `aws`: each SMS goes through AWS End User Messaging SMS ([Real SMS](#real-sms)). The published demo numbers, 082 555 0000 to 082 555 0199, stay on the simulated gateway |
+| `BRANCHBOOK_SMS_AWS_REGION` | `af-south-1`, the stack's own Region |
+| `BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID` | The ID of the stack's protect configuration, which every send names |
+| `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` | `5`: the most SMS one number is sent in a day, whatever the bookings |
+| `BRANCHBOOK_SMS_AWS_DRY_RUN` | `false`. A deploy run with `BRANCHBOOK_SMS_AWS_DRY_RUN=true` sets it to `true`, and AWS then only checks each send and texts no one |
+| `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE` | `health,info`: the task serves no `/actuator/prometheus`, so its meters stay private even if a request slipped past WAF's block |
 | `SERVER_FORWARD_HEADERS_STRATEGY` | `native`: the app trusts the load balancer's `X-Forwarded-*` headers, so it sees each request as HTTPS |
+
+Any South African mobile number may book: the demo-numbers-only rule (`BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY`) is
+off, because the demo now texts the number it is given.
 
 **No sign-in.** Anyone with the address can try the demo: a sign-in prompt in front of a demo is a poor experience
 for everyone who opens it, reviewers included
-([ADR-0006, Notes](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). What keeps real personal data out is
-the demo-number check and the 48-hour deletion above, live since 058e6fd, and the simulated gateway, which sends
-nothing. The task logs both at start-up and every hour, so a deployment that lost a switch shows it. The inbox is off because, with no sign-in, it would list every booking's reference to every visitor,
-and a demo number's last four digits are public, so anyone could open anyone's booking and see the name typed into
-it.
+([ADR-0006, Notes](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). What limits what a visitor can do is
+the 48-hour deletion above, live since 058e6fd, the SMS controls under [Real SMS](#real-sms), and WAF's limit on
+bookings and cancellations. The inbox is off because, with no sign-in, it would list every booking's reference to
+every visitor, and a demo number's last four digits are public, so anyone could open a booking made with one and see
+the name typed into it.
 
 A new version starts and passes its health check before the old one stops (minimum 100, maximum 200 percent), and
 the deployment circuit breaker rolls back a version that never becomes healthy. The three alarms publish to an SNS
@@ -249,10 +261,52 @@ topic: the app answering 5xx to 5 or more requests in 5 minutes, no healthy task
 with less than 2 GB free. They are e-mailed only if `BRANCHBOOK_DEMO_ALERT_EMAIL` was set at deploy time.
 
 **Cost.** About $82 a month before VAT while it runs (ADR-0006's estimate), inside the $90 budget; the domain costs
-about $3 a year.
+about $3 a year. Each SMS is charged on top, up to the account's SMS spend limit ([Real SMS](#real-sms)).
 
 **Teardown date: 2026-11-30**, the end of the review window. Extend it here, with the reason, if the review runs
 longer; until then the budget's alerts at $45, $72 and $90 are the backstop.
+
+### Real SMS
+
+*Status: Built. The project owner decided on 2026-10-27 that the hosted demo texts for real.*
+
+**What is texted, and to whom.** Each booking's confirmation SMS, and a cancellation SMS when an appointment is
+cancelled, go to the number the booking was made with, through AWS End User Messaging SMS in `af-south-1`. They go
+on AWS's shared route, with no origination identity (no sender ID or number of our own). The published demo numbers,
+082 555 0000 to 082 555 0199, always stay on the simulated gateway, so a reader who tries the README's examples
+never texts a stranger; 082 555 0000 still fails, as it does locally.
+
+**The controls,** all in [lib/app-stack.ts](lib/app-stack.ts) and [lib/sms-countries.ts](lib/sms-countries.ts):
+
+- **South Africa only.** The stack's protect configuration blocks SMS to every one of the 245 countries AWS lists
+  except South Africa (`ZA`), and every voice and MMS destination; left alone, it would allow them all. The lists
+  are AWS's own answer for `af-south-1` on 2026-10-27, so no code AWS does not know can fail a deploy; refresh them
+  from the same call, named in `sms-countries.ts`, if AWS adds a country.
+- **One way to send.** The task role may call `sms-voice:SendTextMessage` on that protect configuration and nothing
+  else. A send on the shared route, with no origination identity, names only the protect configuration, so the task
+  can send through this one alone.
+- **Five a day to one number** (`BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP=5`), whatever the bookings.
+- **Ten bookings and cancellations per address in 5 minutes,** WAF's lowest limit, because each sends a real SMS.
+- **No delivery events are logged.** No configuration set records them, because they carry the destination number,
+  and no log may hold personal data ([BR-19](../docs/domain-rules.md#br-19)). So `SENT` means AWS accepted the
+  message; nothing tells the app whether the handset received it.
+- **A dry run first, if wanted.** Deploying with `BRANCHBOOK_SMS_AWS_DRY_RUN=true` in the environment sets the task's
+  setting of that name, and AWS only checks each send, which proves the task's permission before anyone is texted
+  ([Deploying and updating it](#deploying-and-updating-it)). Keep it brief: while it is on, the app records every
+  send as `SENT` although nothing arrives, so redeploy without it after one test booking.
+
+Retention stays on and the inbox stays off, as in the table above.
+
+**The administrator's steps in AWS.** A new account starts in the SMS sandbox:
+
+1. **In the sandbox,** only verified destination numbers, at most 10, receive messages, and the spend limit is 1 USD a
+   month. To try it, add your own number as a verified destination number in the AWS End User Messaging SMS console,
+   in `af-south-1`, and enter the code AWS texts to it.
+2. **To text anyone else,** open an AWS Support case for production access in `af-south-1`, and ask in it for a
+   higher monthly spend limit. AWS reviews the request.
+
+Until production access is granted, a text to an unverified number ends `FAILED`: the confirmation page says "Not
+delivered", and the booking still stands.
 
 ### Deploying and updating it
 
@@ -267,6 +321,8 @@ BRANCHBOOK_DEMO_ALERT_EMAIL=<your address> \
 - **`BRANCHBOOK_HOSTED_DEMO=true` is required.** The two stacks are in the CDK app only when it is set. No password
   or other secret is supplied at deploy time.
 - **`BRANCHBOOK_DEMO_ALERT_EMAIL` is optional.** Without it the alarms still exist, on a topic with no subscriber.
+- **`BRANCHBOOK_SMS_AWS_DRY_RUN=true` is optional.** It deploys a task that asks AWS to check each send without sending
+  it. Deploy again without it to text for real.
 - **The image is built here.** `cdk deploy` builds the repository's [Dockerfile](../Dockerfile) for `linux/arm64` on
   the administrator's machine and pushes it to the `af-south-1` bootstrap ECR repository.
 - **To update,** run the same command from the commit you want live, with the same address: leaving it out removes
@@ -283,12 +339,15 @@ AWS_PROFILE=branchbook-admin BRANCHBOOK_HOSTED_DEMO=true \
   npx cdk destroy BranchbookApp BranchbookData
 ```
 
-The variable must be set, because the stacks are in the app only when it is. Three things outlive the stacks:
+The variable must be set, because the stacks are in the app only when it is. The protect configuration goes with
+`BranchbookApp`. Four things outlive the stacks:
 
 - **The database's final snapshot.** Delete it by hand, under Snapshots in the RDS console.
 - **The log group `/branchbook/app`,** which CloudFormation keeps. Delete it in the CloudWatch console.
 - **The domain and its hosted zone,** which no stack owns. The domain renews each year unless auto-renew is turned
   off under Registered domains in Route 53; the hosted zone stays until it is deleted by hand.
+- **Any verified destination numbers,** which belong to the account, not a stack. Delete them in the AWS End User
+  Messaging SMS console.
 
 **Open points** for a pipeline deploy, which nothing needs today:
 
@@ -450,10 +509,11 @@ bootstrap goes last.
 | `lib/account-stack.ts` | `AccountStack`: the GitHub OIDC trust, the deploy role and the budget |
 | `lib/release-stack.ts` | `ReleaseStack`: records the deployed commit in `/branchbook/release` |
 | `lib/data-stack.ts` | `DataStack`: the hosted demo's VPC and database |
-| `lib/app-stack.ts` | `AppStack`: the hosted demo's certificate, WAF, load balancer, Fargate task, alarms and DNS record |
+| `lib/app-stack.ts` | `AppStack`: the hosted demo's certificate, WAF, load balancer, Fargate task, SMS protect configuration, alarms and DNS record |
+| `lib/sms-countries.ts` | The countries AWS lists for a protect configuration; the hosted demo blocks every one but South Africa |
 | `test/account-stack.test.ts` | Unit tests that check the connection's security properties |
 | `test/release-stack.test.ts` | Unit tests for the release record the pipeline verifies |
-| `test/hosted-demo.test.ts` | Unit tests for the hosted demo's database, network, WAF and task |
+| `test/hosted-demo.test.ts` | Unit tests for the hosted demo's database, network, WAF, task and SMS permission |
 | `cdk.json` | Non-sensitive configuration (repository name and public IDs, environment, budget, the demo's domain and hosted zone ID) and CDK feature flags |
 
 Next: [docs/delivery.md](../docs/delivery.md) for how a commit gets here; [SECURITY.md](../SECURITY.md) for secrets

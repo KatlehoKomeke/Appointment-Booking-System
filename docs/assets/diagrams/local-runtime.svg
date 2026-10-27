@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
   <title id="title">From source to a running stack</title>
-  <desc id="desc">How make up turns this repository into a running stack: the build on the left, the running stack on the right, and the image's other uses below. Build, from the Dockerfile. No tests run in the image build; CI runs them. The .dockerignore allow-list lets only api/.mvn/, api/mvnw, api/pom.xml, api/src/ and web/ into the build, and they feed two stages. Stage web runs on the builder's own platform ($BUILDPLATFORM) on Node.js 24 and Alpine: npm ci with a cache at /root/.npm, then npm run build into dist/. dist/ flows into stage api, also on $BUILDPLATFORM, on the Eclipse Temurin 25 JDK and Alpine: it copies dist/ into src/main/resources/static/, runs ./mvnw -DskipTests package with a cache at /root/.m2, and extracts the jar into layers with jarmode tools. The layers flow into stage runtime, on the Eclipse Temurin 25 JRE and Alpine, which stacks four layers from least to most often changed: dependencies, spring-boot-loader, snapshot-dependencies and application. It runs as USER 10001, with TZ=UTC and a HEALTHCHECK on /readyz. The main path leads from runtime to the image branchbook:local, the highlighted node. Step 1: make up builds branchbook:local. Run, with make up: the main path continues from the image into the Docker Compose project branchbook. Service db runs PostgreSQL 17 on Alpine, with port 5432 on the compose network only, the volume db-data, and a terse error log that keeps personal data out. Step 2: db starts. A health check runs pg_isready every 2 s. Step 3: pg_isready reports db healthy. A gate, depends_on with condition service_healthy, holds service app until then. Service app runs the image branchbook:local as user 10001, with stop_grace_period 30s. Step 4: app starts; Flyway applies V1 to V4 and Hibernate validates the schema. It serves the React app at / and /assets/*, with the SPA routes forwarded to index.html; the API at /api/v1/branches, /api/v1/branches/{code}, /api/v1/branches/{code}/availability, /api/v1/appointments, /api/v1/appointments/{reference}, /v3/api-docs and /swagger-ui.html; and the probes /readyz (readiness, which includes the database), /livez, /actuator/health and /actuator/info. A health check, the image's HEALTHCHECK, runs wget on /readyz every 5 s after a start period of 90 s. Step 5: /readyz answers UP and the container is healthy. The main path ends at app reaching db over JDBC at db:5432; if HikariCP finds no free connection within 3 s, the API answers 503 TRY_AGAIN. A browser reaches app only through the port 127.0.0.1:${APP_PORT:-8080}. Step 6: docker compose up --wait returns and make up prints the URL. The same image elsewhere: the stack job in ci.yml builds the same image from this Dockerfile, starts it with compose up --wait, runs smoke.sh and checks the logs for credentials. A flow, cdk deploy by hand, leads to the hosted demo's ECS Fargate task on ARM64, built. Developing without the image, built: make dev-api runs the API on port 8080 against a throwaway PostgreSQL 17 from Testcontainers, and make dev-web runs Vite on port 5173, proxying /api, /actuator, /readyz and /livez to port 8080. Legend: Built; Planned, with milestone; Main path; Planned flow; Health check.</desc>
+  <desc id="desc">How make up turns this repository into a running stack: the build on the left, the running stack on the right, and the image's other uses below. Build, from the Dockerfile. No tests run in the image build; CI runs them. The .dockerignore allow-list lets only api/.mvn/, api/mvnw, api/pom.xml, api/src/ and web/ into the build, and they feed two stages. Stage web runs on the builder's own platform ($BUILDPLATFORM) on Node.js 24 and Alpine: npm ci with a cache at /root/.npm, then npm run build into dist/. dist/ flows into stage api, also on $BUILDPLATFORM, on the Eclipse Temurin 25 JDK and Alpine: it copies dist/ into src/main/resources/static/, runs ./mvnw -DskipTests package with a cache at /root/.m2, and extracts the jar into layers with jarmode tools. The layers flow into stage runtime, on the Eclipse Temurin 25 JRE and Alpine, which stacks four layers from least to most often changed: dependencies, spring-boot-loader, snapshot-dependencies and application. It runs as USER 10001, with TZ=UTC and a HEALTHCHECK on /readyz. The main path leads from runtime to the image branchbook:local, the highlighted node. Step 1: make up builds branchbook:local. Run, with make up: the main path continues from the image into the Docker Compose project branchbook. Service db runs PostgreSQL 17 on Alpine, with port 5432 on the compose network only, the volume db-data, and a terse error log that keeps personal data out. Step 2: db starts. A health check runs pg_isready every 2 s. Step 3: pg_isready reports db healthy. A gate, depends_on with condition service_healthy, holds service app until then. Service app runs the image branchbook:local as user 10001, with stop_grace_period 30s. Step 4: app starts; Flyway applies V1 to V4 and Hibernate validates the schema. It serves the React app at / and /assets/*, with the SPA routes forwarded to index.html; the API at /api/v1/branches, /api/v1/branches/{code}, /api/v1/branches/{code}/availability, /api/v1/appointments, /api/v1/appointments/{reference}, /api/v1/appointments/{reference}/cancel, /api/v1/messages and /api/v1/messages/{id}/retry (the simulated inbox, which compose switches on), /v3/api-docs and /swagger-ui.html; and, through Spring Boot Actuator, the probes /readyz (readiness, which includes the database) and /livez, /actuator/health, /actuator/info, and /actuator/prometheus, which serves Spring Boot's meters and the app's two, appointments_booked_total and outbox_pending. A health check, the image's HEALTHCHECK, runs wget on /readyz every 5 s after a start period of 90 s. Step 5: /readyz answers UP and the container is healthy. The main path ends at app reaching db over JDBC at db:5432; if HikariCP finds no free connection within 3 s, the API answers 503 TRY_AGAIN. A browser reaches app only through the port 127.0.0.1:${APP_PORT:-8080}. Step 6: docker compose up --wait returns and make up prints the URL. The same image elsewhere: the stack job in ci.yml builds the same image from this Dockerfile, starts it with compose up --wait, runs smoke.sh and checks the logs for credentials. A flow, cdk deploy by hand, leads to the hosted demo's ECS Fargate task on ARM64, built. Developing without the image, built: make dev-api runs the API on port 8080 against a throwaway PostgreSQL 17 from Testcontainers, and make dev-web runs Vite on port 5173, proxying /api, /actuator, /readyz and /livez to port 8080. Legend: Built; Main path; Health check.</desc>
   <!--
     Diagram id: local-runtime
     Shown in: docs/architecture.md (10.1 Locally: the image and the stack)
@@ -9,13 +9,16 @@
       api/src/main/java/za/co/fynbos/branchbook/shared/web/SpaForwardingController.java;
       api/src/main/java/za/co/fynbos/branchbook/catalogue/api/BranchController.java;
       api/src/main/java/za/co/fynbos/branchbook/scheduling/api/AvailabilityController.java;
-      api/src/main/java/za/co/fynbos/branchbook/booking/api/AppointmentController.java;
+      api/src/main/java/za/co/fynbos/branchbook/booking/api/AppointmentController.java (cancel);
+      api/src/main/java/za/co/fynbos/branchbook/notification/api/InboxController.java (retry);
+      api/src/main/java/za/co/fynbos/branchbook/booking/api/BookingOutcomeMeter.java;
+      api/src/main/java/za/co/fynbos/branchbook/notification/application/OutboxPendingGauge.java;
       api/src/main/java/za/co/fynbos/branchbook/shared/problem/ProblemCode.java (TRY_AGAIN);
       api/src/test/java/za/co/fynbos/branchbook/TestBranchBookApplication.java;
       api/src/test/java/za/co/fynbos/branchbook/support/TestcontainersConfiguration.java;
       web/vite.config.ts; .github/workflows/ci.yml (job stack); scripts/smoke.sh;
       docs/adr/0006-hosted-demo-on-aws-with-cdk.md (the planned Fargate task)
-    Verified at 152b96f (2026-10-26)
+    Verified at feat/real-sms (2026-10-27)
     Conventions: docs/assets/diagrams/README.md
     Planned elements carry class="planned" data-milestone (this diagram has none: the Fargate task is built)
   -->
@@ -128,7 +131,7 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <path class="edge" d="M776.5,57 V86" marker-end="url(#ah)"/>
   </g>
   <g id="compose-project-branchbook">
-    <rect class="box-soft" x="360.5" y="96.5" width="575" height="460" rx="12"/>
+    <rect class="box-soft" x="360.5" y="96.5" width="575" height="468" rx="12"/>
     <text class="g" x="376" y="118">Docker Compose project <tspan class="mono">branchbook</tspan></text>
   </g>
   <g id="port-app">
@@ -139,59 +142,60 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <path class="edge" d="M776.5,107 V132" marker-end="url(#ah)"/>
   </g>
   <g id="service-app">
-    <rect class="box" x="376.5" y="132.5" width="543" height="214" rx="8"/>
-    <text class="t" x="388" y="156">app<tspan class="s" font-weight="400"> · image </tspan><tspan class="s mono" font-weight="400">branchbook:local</tspan></text>
+    <rect class="box" x="376.5" y="132.5" width="543" height="227" rx="8"/>
+    <text class="t" x="388" y="156">app<tspan class="s" font-weight="400"> · image </tspan><tspan class="s mono" font-weight="400">branchbook:local</tspan><tspan class="s" font-weight="400"> · user </tspan><tspan class="s mono" font-weight="400">10001</tspan><tspan class="s" font-weight="400"> · </tspan><tspan class="s mono" font-weight="400">stop_grace_period 30s</tspan></text>
     <circle class="badge" cx="900" cy="152" r="10"/>
     <text class="badge-t" x="900" y="156" text-anchor="middle">4</text>
-    <text class="s" x="388" y="175">user <tspan class="s mono">10001</tspan> · <tspan class="s mono">stop_grace_period 30s</tspan></text>
-    <rect class="box-soft" x="388.5" y="186.5" width="519" height="28" rx="4"/>
-    <text class="g" x="400" y="205">React app</text>
-    <text class="s" x="484" y="205"><tspan class="s mono">/</tspan> and <tspan class="s mono">/assets/*</tspan>; SPA routes forward to <tspan class="s mono">index.html</tspan></text>
-    <rect class="box-soft" x="388.5" y="222.5" width="519" height="60" rx="4"/>
-    <text class="g" x="400" y="241">API</text>
-    <text class="s mono" x="484" y="241">/api/v1/branches, …/{code}, …/{code}/availability</text>
-    <text class="s mono" x="484" y="257">/api/v1/appointments, …/{reference}</text>
-    <text class="s mono" x="484" y="273">/v3/api-docs, /swagger-ui.html</text>
-    <rect class="box-soft" x="388.5" y="290.5" width="519" height="44" rx="4"/>
-    <text class="g" x="400" y="309">Probes</text>
-    <text class="s" x="484" y="309"><tspan class="s mono">/readyz</tspan> (readiness + db), <tspan class="s mono">/livez</tspan></text>
-    <text class="s mono" x="484" y="325">/actuator/health, /actuator/info</text>
-    <circle class="badge" cx="884" cy="312.5" r="10"/>
-    <text class="badge-t" x="884" y="316.5" text-anchor="middle">5</text>
+    <rect class="box-soft" x="388.5" y="167.5" width="519" height="28" rx="4"/>
+    <text class="g" x="400" y="186">React app</text>
+    <text class="s" x="484" y="186"><tspan class="s mono">/</tspan> and <tspan class="s mono">/assets/*</tspan>; SPA routes forward to <tspan class="s mono">index.html</tspan></text>
+    <rect class="box-soft" x="388.5" y="203.5" width="519" height="92" rx="4"/>
+    <text class="g" x="400" y="222">API</text>
+    <text class="s mono" x="484" y="222">/api/v1/branches, …/{code}, …/{code}/availability</text>
+    <text class="s mono" x="484" y="238">/api/v1/appointments, …/{reference}</text>
+    <text class="s mono" x="484" y="254">/api/v1/appointments/{reference}/cancel</text>
+    <text class="s mono" x="484" y="270">/api/v1/messages, …/{id}/retry</text>
+    <text class="s mono" x="484" y="286">/v3/api-docs, /swagger-ui.html</text>
+    <rect class="box-soft" x="388.5" y="303.5" width="519" height="44" rx="4"/>
+    <text class="g" x="400" y="322">Actuator</text>
+    <text class="s" x="484" y="322"><tspan class="s mono">/readyz</tspan> (readiness + db), <tspan class="s mono">/livez</tspan>, <tspan class="s mono">/actuator/health</tspan></text>
+    <text class="s" x="484" y="338"><tspan class="s mono">/actuator/info, …/prometheus</tspan> (two app meters)</text>
+    <circle class="badge" cx="884" cy="325.5" r="10"/>
+    <text class="badge-t" x="884" y="329.5" text-anchor="middle">5</text>
   </g>
   <g id="probe-app-healthcheck">
-    <path class="probe" d="M400,347 V358 A6,6 0 0 0 406,364 H434 A6,6 0 0 0 440,358 V348" marker-end="url(#ah-dash)"/>
-    <text class="l mono halo-2" x="452" y="362">HEALTHCHECK wget /readyz</text>
-    <text class="l halo-2" x="452" y="378">every 5 s, start period 90 s</text>
+    <path class="probe" d="M400,360 V371 A6,6 0 0 0 406,377 H434 A6,6 0 0 0 440,371 V361" marker-end="url(#ah-dash)"/>
+    <text class="l mono halo-2" x="452" y="375">HEALTHCHECK wget /readyz</text>
+    <text class="l halo-2" x="452" y="391">every 5 s, start period 90 s</text>
   </g>
   <g id="edge-app-db">
-    <path class="edge-acc" d="M700,347 V430" marker-end="url(#ah-acc)"/>
-    <text class="l mono halo-2" x="688" y="400" text-anchor="end">JDBC db:5432</text>
-    <text class="l halo-2" x="688" y="416" text-anchor="end">HikariCP waits 3 s, then 503 <tspan class="l mono">TRY_AGAIN</tspan></text>
+    <path class="edge-acc" d="M700,360 V443" marker-end="url(#ah-acc)"/>
+    <text class="l mono halo-2" x="688" y="413" text-anchor="end">JDBC db:5432</text>
+    <text class="l halo-2" x="688" y="429" text-anchor="end">HikariCP waits 3 s, then 503 <tspan class="l mono">TRY_AGAIN</tspan></text>
   </g>
   <g id="gate-depends-on">
-    <path class="edge" d="M800,431 V388"/>
-    <path class="edge" d="M800,374 L807,381 L800,388 L793,381 Z"/>
-    <path class="edge" d="M800,374 V348" marker-end="url(#ah)"/>
-    <text class="l mono halo-2" x="815" y="377">depends_on:</text>
-    <text class="l mono halo-2" x="815" y="393">service_healthy</text>
+    <path class="edge" d="M800,444 V401"/>
+    <path class="edge" d="M800,387 L807,394 L800,401 L793,394 Z"/>
+    <path class="edge" d="M800,387 V361" marker-end="url(#ah)"/>
+    <text class="l mono halo-2" x="815" y="390">depends_on:</text>
+    <text class="l mono halo-2" x="815" y="406">service_healthy</text>
   </g>
   <g id="service-db">
-    <path class="box" d="M560.5,436 V532 A139.5,6 0 0 0 839.5,532 V436"/>
-    <ellipse class="box" cx="700" cy="436" rx="139.5" ry="6"/>
-    <text class="t" x="572" y="462">db<tspan class="s" font-weight="400"> · PostgreSQL 17 · Alpine</tspan></text>
-    <circle class="badge" cx="820" cy="458" r="10"/>
-    <text class="badge-t" x="820" y="462" text-anchor="middle">2</text>
-    <text class="s" x="572" y="481">port 5432, compose network only</text>
-    <text class="s" x="572" y="499">volume <tspan class="s mono">db-data</tspan></text>
-    <text class="s" x="572" y="517">terse log keeps personal data out</text>
+    <path class="box" d="M560.5,449 V545 A139.5,6 0 0 0 839.5,545 V449"/>
+    <ellipse class="box" cx="700" cy="449" rx="139.5" ry="6"/>
+    <text class="t" x="572" y="475">db<tspan class="s" font-weight="400"> · PostgreSQL 17 · Alpine</tspan></text>
+    <circle class="badge" cx="820" cy="471" r="10"/>
+    <text class="badge-t" x="820" y="475" text-anchor="middle">2</text>
+    <text class="s" x="572" y="494">port 5432, compose network only</text>
+    <text class="s" x="572" y="512">volume <tspan class="s mono">db-data</tspan></text>
+    <text class="s" x="572" y="530">terse log keeps personal data out</text>
   </g>
   <g id="probe-db-pg-isready">
-    <path class="probe" d="M560,466 H536 A6,6 0 0 0 530,472 V494 A6,6 0 0 0 536,500 H559" marker-end="url(#ah-dash)"/>
-    <circle class="badge" cx="530" cy="483" r="10"/>
-    <text class="badge-t" x="530" y="487" text-anchor="middle">3</text>
-    <text class="l mono halo-2" x="512" y="479" text-anchor="end">pg_isready</text>
-    <text class="l halo-2" x="512" y="495" text-anchor="end">every 2 s</text>
+    <path class="probe" d="M560,479 H536 A6,6 0 0 0 530,485 V507 A6,6 0 0 0 536,513 H559" marker-end="url(#ah-dash)"/>
+    <circle class="badge" cx="530" cy="496" r="10"/>
+    <text class="badge-t" x="530" y="500" text-anchor="middle">3</text>
+    <text class="l mono halo-2" x="512" y="492" text-anchor="end">pg_isready</text>
+    <text class="l halo-2" x="512" y="508" text-anchor="end">every 2 s</text>
   </g>
   <g id="image-branchbook-local">
     <rect class="box-ok" x="404.5" y="594.5" width="183" height="43" rx="8"/>
@@ -201,7 +205,7 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
   </g>
   <g id="edges-image">
     <path class="edge-acc" d="M174,587 V610 A6,6 0 0 0 180,616 H404" marker-end="url(#ah-acc)"/>
-    <path class="edge-acc" d="M496,594 V557" marker-end="url(#ah-acc)"/>
+    <path class="edge-acc" d="M496,594 V565" marker-end="url(#ah-acc)"/>
     <text class="l mono halo" x="508" y="580">make up</text>
   </g>
   <g id="lane-same-image-elsewhere">
@@ -231,13 +235,9 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
   <g id="legend">
     <rect class="box" x="24.5" y="765.5" width="23" height="13" rx="3"/>
     <text class="tp" x="56" y="776" font-size="12">Built</text>
-    <rect class="box-dash" x="100.5" y="765.5" width="23" height="13" rx="3"/>
-    <text class="tp" x="132" y="776" font-size="12">Planned, with milestone</text>
-    <path class="edge-acc" d="M292,771.5 H316"/>
-    <text class="tp" x="324" y="776" font-size="12">Main path</text>
-    <path class="edge-dash" d="M400,771.5 H424"/>
-    <text class="tp" x="432" y="776" font-size="12">Planned flow</text>
-    <path class="probe" d="M524,771.5 H548"/>
-    <text class="tp" x="556" y="776" font-size="12">Health check</text>
+    <path class="edge-acc" d="M112,771.5 H136"/>
+    <text class="tp" x="144" y="776" font-size="12">Main path</text>
+    <path class="probe" d="M232,771.5 H256"/>
+    <text class="tp" x="264" y="776" font-size="12">Health check</text>
   </g>
 </svg>

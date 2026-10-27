@@ -29,14 +29,18 @@ learning from a `409` that a number has a booking, and blocking someone's lookup
 - Customers who bank with Fynbos sign in through the bank's identity provider, and a lookup is bound to the verified
   customer rather than to a reference and four digits.
 - Per-recipient and per-prefix SMS caps, CAPTCHA on booking, premium-rate prefixes blocked, and alerts on SMS spend.
-  The schema and the contract already carry `RECIPIENT_DAILY_CAP`, which no v1 rule produces
+  The per-recipient cap exists: where `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` is above 0 (5 on the hosted demo, off by
+  default), a sixth SMS to one number in 24 hours is written `FAILED` with `RECIPIENT_DAILY_CAP` and never sent
   ([architecture.md, section 5](architecture.md#5-the-simulated-confirmation)).
 
 ## A real SMS provider
 
-**Today.** The dispatcher sends through the `MessageGateway` port, and its only adapter, the simulated gateway,
-sends nothing: it takes 150 ms and refuses every number ending in `0000`. `SENT` means the gateway accepted the
-message ([ADR-0003](adr/0003-transactional-outbox-for-confirmations.md)).
+**Today.** The dispatcher sends through the `MessageGateway` port. Locally, and for the published demo numbers
+everywhere, the simulated gateway sends nothing: it takes 150 ms and refuses every number ending in `0000`. On the
+hosted demo, the AWS adapter sends every other South African number through AWS End User Messaging, at most five
+a day to one number ([infra/README.md](../infra/README.md#real-sms)). `SENT` means the gateway accepted the message,
+not that the phone received it: no delivery receipt is read
+([ADR-0003](adr/0003-transactional-outbox-for-confirmations.md)).
 
 **In production:**
 
@@ -109,10 +113,12 @@ by hand, from whatever commit is checked out. `deploy` does not wait for `ci`, a
 ## Observability
 
 **Today.** On the hosted demo, application logs go to CloudWatch for 7 days, every line carrying the request's
-correlation id, and three alarms watch for 5xx answers, no healthy task and low database storage. Only `health` and
-`info` are exposed, and WAF blocks `/actuator`. There are no custom metrics (Tier 2), no tracing and no outbox alarm:
-the outbox is read through the simulated inbox where it is switched on, or the SQL in [runbook.md](runbook.md)
-([ADR-0003, Notes](adr/0003-transactional-outbox-for-confirmations.md#notes)).
+correlation id, and three alarms watch for 5xx answers, no healthy task and low database storage. M6 added two
+meters on `/actuator/prometheus`, `appointments_booked_total{outcome}` and `outbox_pending`, which are open under
+`make up` ([runbook.md](runbook.md#read-the-metrics)). On the hosted demo no one reads them: WAF blocks `/actuator`,
+and the task serves only `health` and `info` (`MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info`). There is no
+tracing and no outbox alarm: the outbox is read through the simulated inbox where it is switched on, or the SQL in
+[runbook.md](runbook.md) ([ADR-0003, Notes](adr/0003-transactional-outbox-for-confirmations.md#notes)).
 
 **In production:**
 
@@ -151,11 +157,12 @@ The hosted demo is open on purpose ([ADR-0006, Notes](adr/0006-hosted-demo-on-aw
 | On the demo | Why | In production |
 |---|---|---|
 | No sign-in | A sign-in prompt in front of a demo is a poor experience for everyone who opens it | Customers verified by OTP or the bank's identity provider |
-| Only the demo numbers 082 555 0000 to 082 555 0199 may book (live since 058e6fd) | Keeps real numbers out when no one signs in | Any South African mobile number, proved by OTP before the booking counts |
+| Any South African mobile number may book, unverified (since 2026-10-27) | The demo texts the number it is given, so a visitor can see the real SMS | Any South African mobile number, proved by OTP before the booking counts |
 | Every booking deleted 48 hours after it is made (live since 058e6fd) | Nothing typed in stays | The retention schedule above |
 | The simulated inbox is off | With no sign-in it would list every booking's reference, and a demo number's last four digits are public | No inbox: the customer's phone is the inbox. It stays a local tool, off unless a deployment switches it on (`branchbook.inbox.enabled`) |
-| The simulated gateway sends nothing | No real message reaches anyone | A real provider, with delivery receipts |
-| WAF allows 30 booking `POST`s per address in 5 minutes | Slows a script when no one signs in | Kept, beside per-recipient caps and CAPTCHA |
+| Real SMS through AWS End User Messaging on AWS's shared route, to South Africa only, at most five a day to one number; the demo numbers stay on the simulated gateway (since 2026-10-27) | A visitor sees the real message, and the README's examples never text a stranger | The bank's own origination identity, delivery receipts recorded without the number, and per-prefix caps |
+| No delivery events logged | They carry the destination number ([BR-19](domain-rules.md#br-19)), so `SENT` means only that AWS accepted the message | Receipts matched on `provider_message_id`, as under [A real SMS provider](#a-real-sms-provider) |
+| WAF allows 10 booking and cancel `POST`s per address in 5 minutes | Each sends a real SMS, and no one signs in | Kept, beside the caps above and CAPTCHA |
 | Deployed by hand, to be torn down on 2026-11-30 | An optional extra for the review window | Deployed by the pipeline, and kept running |
 
 Next: [SECURITY.md](../SECURITY.md) for the controls in place; [porting.md](porting.md) for the same design on
