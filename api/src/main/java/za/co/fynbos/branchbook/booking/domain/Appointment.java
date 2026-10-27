@@ -26,8 +26,9 @@ import org.jspecify.annotations.Nullable;
  * double-booked and no mobile number is in two places at once, whatever code writes the row (BR-8,
  * BR-9; see {@code V2__schema.sql}). The booking transaction creates an appointment with {@link
  * #confirm}, which computes the end from the service's duration, so a caller can never choose it
- * (BR-2). The customer's only change to it afterwards is {@link #cancel}, before it starts (BR-14);
- * its {@code version} makes two concurrent cancels of one appointment write once.
+ * (BR-2). The customer's only change to it afterwards is {@link #cancel}, before it starts (BR-14),
+ * after which the cancel deletes it; its {@code version} makes two concurrent cancels of one
+ * appointment delete it once.
  */
 @Entity
 @Table(name = "appointments")
@@ -182,9 +183,11 @@ public class Appointment {
    * change commits, because the database's seat rules count only active appointments.
    *
    * <p>An appointment that is already cancelled is left alone and says so, even after its start, so
-   * a customer who cancels twice, or in two tabs, gets the same answer and no second message.
-   * Otherwise only {@link #canCancel} decides: at or after the start, the appointment is left as it
-   * was. Nothing here writes to the database; the caller's flush does, guarded by the version.
+   * it is never cancelled twice and never owes a second message. The cancel transaction deletes the
+   * appointment it cancels, so only one cancelled before cancels deleted their bookings (V6), or by
+   * hand, is ever found cancelled. Otherwise only {@link #canCancel} decides: at or after the
+   * start, the appointment is left as it was. Nothing here writes to the database; the caller
+   * deletes the row, guarded by the version.
    *
    * @param now the current instant, which becomes the cancellation time
    * @return {@link CancelOutcome#CANCELLED} if this call cancelled it, {@link
@@ -303,6 +306,16 @@ public class Appointment {
    */
   public @Nullable Instant cancelledAt() {
     return cancelledAt;
+  }
+
+  /**
+   * Returns the version the appointment was loaded at, which a version-checked lock or delete
+   * compares with the row's.
+   *
+   * @return the version, or {@code null} for a new appointment not yet inserted
+   */
+  public @Nullable Integer version() {
+    return version;
   }
 
   /**

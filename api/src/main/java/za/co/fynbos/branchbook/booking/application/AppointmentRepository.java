@@ -30,16 +30,27 @@ public interface AppointmentRepository {
   void insert(Appointment appointment);
 
   /**
-   * Writes the changes made to an appointment loaded in this transaction, and flushes them at once:
-   * {@code UPDATE ... WHERE id = ? AND version = ?}. So a change another transaction committed
-   * since the appointment was loaded is reported by this call, while the caller can still act on
-   * it, not at commit (BR-14).
+   * Locks the row of an appointment loaded in this transaction, so the cancel can delete it: {@code
+   * SELECT ... WHERE id = ? AND version = ? FOR UPDATE}, waiting at most the session's {@code
+   * lock_timeout} for a transaction that holds it. From then on the appointment is no longer
+   * managed, so a change made to it in memory, such as its cancellation, is never written: the
+   * cancel deletes the row instead (BR-14).
    *
-   * @param appointment the appointment, loaded in this transaction and then changed
-   * @throws org.springframework.dao.OptimisticLockingFailureException if another transaction
-   *     changed the appointment after it was loaded
+   * @param appointment the appointment, loaded in this transaction
+   * @throws org.springframework.dao.OptimisticLockingFailureException if the row is gone, or was
+   *     changed, since the appointment was loaded: another cancel or the retention purge deleted it
    */
-  void update(Appointment appointment);
+  void lockForDeletion(Appointment appointment);
+
+  /**
+   * Deletes an appointment locked with {@link #lockForDeletion}, with its version checked: {@code
+   * DELETE ... WHERE id = ? AND version = ?}. Its confirmations must have gone first; the foreign
+   * keys then keep its cancellation SMS and its idempotency keys, with no appointment (V6).
+   *
+   * @param appointment the appointment
+   * @throws org.springframework.dao.OptimisticLockingFailureException if no row was deleted
+   */
+  void delete(Appointment appointment);
 
   /**
    * Finds an appointment by id.
@@ -113,7 +124,7 @@ public interface AppointmentRepository {
 
   /**
    * Deletes appointments, in the caller's transaction, once their messages and idempotency keys
-   * have gone; while either remains, the foreign keys refuse the delete.
+   * have gone, so a confirmation never outlives its appointment.
    *
    * @param ids the appointments' ids; may be empty
    * @return how many were deleted

@@ -32,15 +32,22 @@ import za.co.fynbos.branchbook.shared.correlation.CorrelationIds;
  * of the batch carries on. An appointment never depends on its messages: delivery changes only the
  * message.
  *
+ * <p>A cancellation outlives its appointment, which the cancel deleted, only until it is final
+ * (BR-14). So where a confirmation would be marked SENT, FAILED with {@code DELIVERY_FAILED}, or
+ * FAILED with {@code DISPATCH_ERROR}, a cancellation is deleted instead, in that same transaction,
+ * and the line {@code outbox.deleted} names it by id. A cancellation still PENDING stays, with the
+ * customer's number and its text, until then.
+ *
  * <p>Before it sends a confirmation, it asks booking's {@link AppointmentDirectory} whether the
  * appointment is cancelled, and if so marks the message FAILED with {@code
- * SUPERSEDED_BY_CANCELLATION} instead (BR-24). The cancel transaction already supersedes every
- * PENDING or FAILED confirmation, so this only catches one reset by hand afterwards. The question
- * is a plain read: the dispatcher locks only its message's row, never the appointment's, while a
- * cancel locks the appointment and then waits for the message, so the two can never deadlock. It is
- * asked before the gateway is called, so a question that fails is a failed claim, not a failed
- * send: the transaction rolls back, the message stays PENDING and untouched, and the tick ends, as
- * it does when the claim itself fails; the next tick asks again.
+ * SUPERSEDED_BY_CANCELLATION} instead (BR-24). The cancel transaction deletes every confirmation
+ * with its appointment, so this only catches the confirmation of an appointment cancelled before
+ * cancels deleted their bookings, or by hand. The question is a plain read: the dispatcher locks
+ * only its message's row, never the appointment's, while a cancel locks the appointment and then
+ * waits for the message, so the two can never deadlock. It is asked before the gateway is called,
+ * so a question that fails is a failed claim, not a failed send: the transaction rolls back, the
+ * message stays PENDING and untouched, and the tick ends, as it does when the claim itself fails;
+ * the next tick asks again.
  *
  * <p>Log lines carry the message's own correlation id, so they sit beside the booking that wrote
  * it, and name the message by id; never the recipient, the body or the reference.
@@ -140,16 +147,26 @@ public class NotificationDispatcher {
       int attempts = message.attempts() + 1;
       switch (send(message)) {
         case Accepted accepted -> {
-          messages.markSent(message.id(), attempts, accepted.providerMessageId(), now);
+          if (keptOnceFinal(message)) {
+            messages.markSent(message.id(), attempts, accepted.providerMessageId(), now);
+          }
           log.info(
               "outbox.sent messageId={} channel={} attempts={}",
               message.id(),
               message.channel(),
               attempts);
+          if (!keptOnceFinal(message)) {
+            deleteFinal(message);
+          }
         }
         case Refused refused when attempts >= MAX_ATTEMPTS -> {
-          messages.markFailed(message.id(), attempts, "DELIVERY_FAILED", refused.errorCode());
+          if (keptOnceFinal(message)) {
+            messages.markFailed(message.id(), attempts, "DELIVERY_FAILED", refused.errorCode());
+          }
           log.warn("outbox.failed messageId={} attempts={}", message.id(), attempts);
+          if (!keptOnceFinal(message)) {
+            deleteFinal(message);
+          }
         }
         case Refused refused -> {
           Duration wait = backoffAfter(attempts);
@@ -163,6 +180,20 @@ public class NotificationDispatcher {
       }
     }
     return true;
+  }
+
+  /**
+   * Tells whether a message stays in the outbox once it is final: a confirmation does, with its
+   * appointment; a cancellation does not, as its appointment is already gone (BR-14).
+   */
+  private static boolean keptOnceFinal(NotificationMessage message) {
+    return message.kind() != NotificationKind.CANCELLATION;
+  }
+
+  /** Deletes a final cancellation in the caller's transaction, naming it by id only. */
+  private void deleteFinal(NotificationMessage message) {
+    messages.delete(message.id());
+    log.info("outbox.deleted messageId={} kind={}", message.id(), message.kind());
   }
 
   /** A gateway that throws is treated as one that refused, so the message is tried again. */
@@ -192,8 +223,9 @@ public class NotificationDispatcher {
   }
 
   /**
-   * Sets a message whose outcome could not be recorded FAILED, so it is never sent again. Its log
-   * lines carry the message's own correlation id, like the dispatcher's others.
+   * Sets a message whose outcome could not be recorded FAILED, so it is never sent again; a
+   * cancellation, which would then be final, is deleted instead (BR-14). Its log lines carry the
+   * message's own correlation id, like the dispatcher's others.
    *
    * @return false if that too fails, which ends the tick
    */
@@ -201,7 +233,13 @@ public class NotificationDispatcher {
     try (var _ = MDC.putCloseable(CorrelationIds.MDC_KEY, message.correlationId())) {
       try {
         transaction.executeWithoutResult(
-            status -> messages.markDispatchError(message.id(), MARK_FAILED));
+            status -> {
+              if (keptOnceFinal(message)) {
+                messages.markDispatchError(message.id(), MARK_FAILED);
+              } else if (messages.deleteIfPending(message.id())) {
+                log.info("outbox.deleted messageId={} kind={}", message.id(), message.kind());
+              }
+            });
         log.error(
             "outbox.dispatch_error messageId={} cause={}",
             message.id(),

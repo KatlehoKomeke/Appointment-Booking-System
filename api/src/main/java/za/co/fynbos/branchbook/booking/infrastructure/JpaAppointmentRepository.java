@@ -8,9 +8,11 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.UUID;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 import za.co.fynbos.branchbook.booking.application.AppointmentRepository;
@@ -20,8 +22,9 @@ import za.co.fynbos.branchbook.booking.domain.AppointmentStatus;
 import za.co.fynbos.branchbook.booking.domain.MobileNumber;
 
 /**
- * Stores appointments: inserts, and the cancel's version-checked update, through JPA, the only
- * entity; the booking transaction's questions as plain SQL.
+ * Stores appointments: inserts and reads through JPA, the only entity; the booking transaction's
+ * questions, and the cancel's version-checked lock and delete, as plain SQL. The cancel detaches
+ * the appointment it locks, so JPA never writes the cancelled state the cancel deletes.
  *
  * <p>Every query that depends on time binds the instant from the caller and never calls the
  * database's {@code now()} (BR-20). Active means {@link AppointmentStatus#ACTIVE_SQL}, so
@@ -90,11 +93,32 @@ class JpaAppointmentRepository implements AppointmentRepository {
   }
 
   @Override
-  public void update(Appointment appointment) {
-    // The appointment is managed, so Hibernate already tracks its changes; the flush writes them
-    // now
-    // with the version check. A cancel frees a seat, so it can break no exclusion constraint.
-    entityManager.flush();
+  public void lockForDeletion(Appointment appointment) {
+    int version = loadedVersion(appointment);
+    // Detached first, so the cancelled state set in memory is never flushed: the row is deleted.
+    entityManager.detach(appointment);
+    boolean locked =
+        jdbc.sql("SELECT id FROM appointments WHERE id = :id AND version = :version FOR UPDATE")
+            .param("id", appointment.id())
+            .param("version", version)
+            .query(UUID.class)
+            .optional()
+            .isPresent();
+    if (!locked) {
+      throw new OptimisticLockingFailureException("The appointment was deleted or changed");
+    }
+  }
+
+  @Override
+  public void delete(Appointment appointment) {
+    int deleted =
+        jdbc.sql("DELETE FROM appointments WHERE id = :id AND version = :version")
+            .param("id", appointment.id())
+            .param("version", loadedVersion(appointment))
+            .update();
+    if (deleted != 1) {
+      throw new OptimisticLockingFailureException("The appointment was deleted or changed");
+    }
   }
 
   @Override
@@ -182,6 +206,10 @@ class JpaAppointmentRepository implements AppointmentRepository {
       return 0;
     }
     return jdbc.sql("DELETE FROM appointments WHERE id IN (:ids)").param("ids", ids).update();
+  }
+
+  private static int loadedVersion(Appointment appointment) {
+    return Objects.requireNonNull(appointment.version(), "A loaded appointment has a version");
   }
 
   private static OffsetDateTime utc(Instant instant) {

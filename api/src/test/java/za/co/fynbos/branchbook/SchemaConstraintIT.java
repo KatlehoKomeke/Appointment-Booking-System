@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.fail;
 
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -167,6 +169,43 @@ class SchemaConstraintIT {
             String.class);
 
     assertThat(predicates).hasSize(4).allSatisfy(p -> assertThat(statusesIn(p)).isEqualTo(active));
+  }
+
+  /**
+   * BR-14, V6: deleting an appointment keeps its cancellation SMS and its completed idempotency
+   * key, each with no appointment, in the same statement; a key still in progress, which has no
+   * appointment yet, is untouched.
+   */
+  @Test
+  void deletingAnAppointmentDetachesItsCancellationAndItsKey() throws SQLException {
+    try (Connection connection = dataSource.getConnection()) {
+      connection.setAutoCommit(false);
+      try (Statement statement = connection.createStatement()) {
+        statement.execute(bookedAppointment().insert());
+        statement.execute(message().with("id", TEST_ID).with("kind", "'CANCELLATION'").insert());
+        statement.execute(
+            idempotencyKey()
+                .with("key", TEST_ID)
+                .with("appointment_id", APPOINTMENT_ID)
+                .with("response_status", "201")
+                .insert());
+        statement.execute(idempotencyKey().insert());
+
+        assertThat(statement.executeUpdate("DELETE FROM appointments WHERE id = " + APPOINTMENT_ID))
+            .isOne();
+
+        assertThat(rows(statement, "SELECT kind, appointment_id FROM notification_messages"))
+            .containsExactly("CANCELLATION null");
+        assertThat(
+                rows(
+                    statement,
+                    "SELECT response_status, appointment_id FROM idempotency_keys"
+                        + " ORDER BY response_status NULLS LAST"))
+            .containsExactly("201 null", "null null");
+      } finally {
+        connection.rollback();
+      }
+    }
   }
 
   /** Primary keys, unique, check, foreign key and exclusion constraints: every one has a case. */
@@ -458,10 +497,6 @@ class SchemaConstraintIT {
                 .with("appointment_id", APPOINTMENT_ID)
                 .with("response_status", "200")
                 .insert()),
-        check(
-            "idempotency_keys_completed_consistent",
-            "a status without an appointment",
-            idempotencyKey().with("response_status", "201")),
         new Violation(
             "idempotency_keys_completed_consistent",
             CHECK,
@@ -532,7 +567,18 @@ class SchemaConstraintIT {
         messageCheck(
             "notification_messages_sent_at_consistent",
             "a sent time on a pending message",
-            message().with("sent_at", "'2026-10-26 08:01Z'")));
+            message().with("sent_at", "'2026-10-26 08:01Z'")),
+        check(
+            "notification_messages_detached_cancellation_only",
+            "a confirmation with no appointment",
+            message().with("appointment_id", "NULL")),
+        new Violation(
+            "notification_messages_detached_cancellation_only",
+            CHECK,
+            "deleting an appointment that still has its confirmation",
+            bookedAppointment().insert(),
+            message().insert(),
+            "DELETE FROM appointments WHERE id = " + APPOINTMENT_ID));
   }
 
   static Stream<Acceptance> acceptances() {
@@ -566,6 +612,12 @@ class SchemaConstraintIT {
                 .with("cancelled_at", "'2026-10-26 10:00+02'")
                 .insert(),
             appointment("APT-BBBB-BBBB").with("customer_mobile", SECOND_MOBILE).insert()),
+        new Acceptance(
+            "a completed key outlives the appointment it booked",
+            idempotencyKey().with("response_status", "201").insert()),
+        new Acceptance(
+            "a cancellation outlives its appointment",
+            message().with("appointment_id", "NULL").with("kind", "'CANCELLATION'").insert()),
         new Acceptance(
             "a completed appointment frees its seat",
             appointment("APT-AAAA-AAAA")
@@ -662,6 +714,17 @@ class SchemaConstraintIT {
         connection.rollback();
       }
     }
+  }
+
+  /** Each row of a two-column query as "first second", with SQL NULL as "null". */
+  private static List<String> rows(Statement statement, String sql) throws SQLException {
+    List<String> rows = new ArrayList<>();
+    try (ResultSet result = statement.executeQuery(sql)) {
+      while (result.next()) {
+        rows.add(result.getString(1) + " " + result.getString(2));
+      }
+    }
+    return rows;
   }
 
   private static Set<String> statusesIn(String predicate) {

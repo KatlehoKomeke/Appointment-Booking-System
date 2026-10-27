@@ -15,7 +15,7 @@ export interface paths {
         put?: never;
         /**
          * Book an appointment
-         * @description Books the slot, or answers why not. The confirmation SMS is written in the same transaction and shows as PENDING in notifications. Retrying with the same Idempotency-Key and the same details returns the same appointment.
+         * @description Books the slot, or answers why not. The confirmation SMS is written in the same transaction and shows as PENDING in notifications. Retrying with the same Idempotency-Key and the same details returns the same appointment, until it is cancelled; from then on the key is refused, and never books again.
          */
         post: operations["bookAppointment"];
         delete?: never;
@@ -55,7 +55,7 @@ export interface paths {
         put?: never;
         /**
          * Cancel an appointment
-         * @description Needs the reference and the last four digits, exactly as opening the appointment does, and counts wrong digits towards the same limit. Cancelling frees the seat at once and queues a cancellation SMS in the same transaction; a confirmation still PENDING or FAILED is marked FAILED with SUPERSEDED_BY_CANCELLATION and is not sent from then on. Cancelling again, or from two tabs at once, returns the same 200 and writes nothing more. Only possible before the appointment starts.
+         * @description Needs the reference and the last four digits, exactly as opening the appointment does, and counts wrong digits towards the same limit. Only possible before the appointment starts. In one transaction, the cancel deletes every confirmation SMS of the appointment, whatever its status (one being sent is waited for, so it is delivered before its cancellation or never), queues the cancellation SMS, and deletes the appointment, which frees the seat. The cancellation SMS is kept, with no appointment, until it is sent or has failed for good, and then deleted. The response is the appointment as the cancel left it, with only that SMS. From then on the reference is unknown: opening or cancelling it again, including from a second tab at the same moment, is a 404 that counts as a wrong try.
          */
         post: operations["cancelAppointment"];
         delete?: never;
@@ -155,7 +155,7 @@ export interface paths {
         put?: never;
         /**
          * Retry a failed simulated message
-         * @description Resets a FAILED message whose failureReason is DELIVERY_FAILED or DISPATCH_ERROR to PENDING with no attempts, due now. Any other message, and the confirmation of an appointment that is cancelled or has started, is returned unchanged with retryable false. Waits up to 2 seconds for a send of the message in flight to finish first, and keeps the message locked until it commits. Where branchbook.inbox.redact-references is true, every appointment reference, in the reference field and in the text, shows as APT-****-****. Switched off unless branchbook.inbox.enabled is true; then the path is a 404.
+         * @description Resets a FAILED message whose failureReason is DELIVERY_FAILED or DISPATCH_ERROR to PENDING with no attempts, due now. Any other message, and the confirmation of an appointment that is cancelled or has started, is returned unchanged with retryable false. A cancellation is deleted once it is sent or has failed for good, so its retry is then a 404. Waits up to 2 seconds for a send of the message in flight to finish first, and keeps the message locked until it commits. Where branchbook.inbox.redact-references is true, every appointment reference, in the reference field and in the text, shows as APT-****-****. Switched off unless branchbook.inbox.enabled is true; then the path is a 404.
          */
         post: operations["retryMessage"];
         delete?: never;
@@ -365,7 +365,7 @@ export interface components {
             /** @example 082 *** **** */
             recipientMasked: string;
             /**
-             * @description The appointment's reference, or APT-****-**** where the deployment hides references (branchbook.inbox.redact-references)
+             * @description The appointment's reference, or APT-****-**** where the deployment hides references (branchbook.inbox.redact-references), and for a cancellation whose booking the cancel has already deleted
              * @example APT-7K3M-9Q2X
              */
             reference: string;
@@ -535,7 +535,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description SERVICE_NOT_OFFERED_AT_BRANCH; DATE_OUTSIDE_BOOKING_WINDOW, SLOT_ON_CLOSED_DAY, SLOT_OUTSIDE_HOURS, SLOT_OFF_GRID, SLOT_WITHIN_LEAD_TIME: the start is not a slot; MOBILE_NUMBER_REQUIRED: not a South African mobile; DEMO_NUMBER_REQUIRED: a demo that takes only its published demo numbers was sent another; IDEMPOTENCY_KEY_REUSED: the key booked different details */
+            /** @description SERVICE_NOT_OFFERED_AT_BRANCH; DATE_OUTSIDE_BOOKING_WINDOW, SLOT_ON_CLOSED_DAY, SLOT_OUTSIDE_HOURS, SLOT_OFF_GRID, SLOT_WITHIN_LEAD_TIME: the start is not a slot; MOBILE_NUMBER_REQUIRED: not a South African mobile; DEMO_NUMBER_REQUIRED: a demo that takes only its published demo numbers was sent another; IDEMPOTENCY_KEY_REUSED: the key booked different details, or the booking it made has since been cancelled */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -585,7 +585,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description APPOINTMENT_NOT_FOUND: the reference and the digits match no appointment */
+            /** @description APPOINTMENT_NOT_FOUND: the reference and the digits match no appointment, including one cancelled and so deleted */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -628,7 +628,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Cancelled now, or already cancelled */
+            /** @description Cancelled and deleted: status CANCELLED, canCancel false, cancelledAt, and notifications holding only the cancellation SMS */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -646,7 +646,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description APPOINTMENT_NOT_FOUND: the reference and the digits match no appointment */
+            /** @description APPOINTMENT_NOT_FOUND: the reference and the digits match no appointment, including one already cancelled and so deleted, earlier or by a cancel from another tab at the same moment */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -675,7 +675,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description TRY_AGAIN: the appointment or its messages stayed locked for 2 seconds, another change of the appointment won the race twice, or the database is unavailable; the appointment is left as it was */
+            /** @description TRY_AGAIN: the appointment or its messages stayed locked for 2 seconds, such as a confirmation still being sent, or the database is unavailable; the appointment is left as it was */
             503: {
                 headers: {
                     /** @description Seconds to wait before trying again */
@@ -884,7 +884,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
-            /** @description MESSAGE_NOT_FOUND: no message has that id */
+            /** @description MESSAGE_NOT_FOUND: no message has that id, or it was a cancellation, deleted once final */
             404: {
                 headers: {
                     [name: string]: unknown;

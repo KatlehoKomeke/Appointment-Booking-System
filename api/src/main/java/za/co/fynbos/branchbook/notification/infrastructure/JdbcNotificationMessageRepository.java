@@ -54,13 +54,9 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
   private static final String LOCK_BY_ID =
       "SELECT " + COLUMNS + " FROM notification_messages WHERE id = :id FOR UPDATE";
 
-  private static final String SUPERSEDE_CONFIRMATIONS =
-      """
-      UPDATE notification_messages
-      SET status = 'FAILED', failure_reason = 'SUPERSEDED_BY_CANCELLATION'
-      WHERE appointment_id = :appointmentId AND kind = 'CONFIRMATION'
-        AND status IN ('PENDING', 'FAILED')
-        AND failure_reason IS DISTINCT FROM 'RECIPIENT_DAILY_CAP'""";
+  private static final String DELETE_CONFIRMATIONS =
+      "DELETE FROM notification_messages"
+          + " WHERE appointment_id = :appointmentId AND kind = 'CONFIRMATION'";
 
   /** Served by ix_notification_messages_recipient, so it reads one number's recent rows only. */
   private static final String COUNT_TOWARDS_DAILY_CAP =
@@ -198,8 +194,8 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
   }
 
   @Override
-  public int supersedeConfirmations(UUID appointmentId) {
-    return jdbc.sql(SUPERSEDE_CONFIRMATIONS).param("appointmentId", appointmentId).update();
+  public int deleteConfirmations(UUID appointmentId) {
+    return jdbc.sql(DELETE_CONFIRMATIONS).param("appointmentId", appointmentId).update();
   }
 
   @Override
@@ -232,6 +228,19 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
         .param("lastError", lastError)
         .param("id", id)
         .update();
+  }
+
+  @Override
+  public void delete(UUID id) {
+    jdbc.sql("DELETE FROM notification_messages WHERE id = :id").param("id", id).update();
+  }
+
+  @Override
+  public boolean deleteIfPending(UUID id) {
+    return jdbc.sql("DELETE FROM notification_messages WHERE id = :id AND status = 'PENDING'")
+            .param("id", id)
+            .update()
+        == 1;
   }
 
   @Override

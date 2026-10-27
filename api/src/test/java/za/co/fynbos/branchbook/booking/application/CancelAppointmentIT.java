@@ -11,11 +11,10 @@ import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
-import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -40,11 +39,13 @@ import za.co.fynbos.branchbook.support.MutableClock;
 
 /**
  * BR-13, BR-14, BR-16, BR-24, BR-25: {@code POST /api/v1/appointments/{reference}/cancel} through
- * the whole application on a real database. A cancel frees the seat, changes the appointment and
- * queues its cancellation SMS in one transaction, supersedes a PENDING or FAILED confirmation,
- * answers a repeat without writing anything, refuses once the appointment has started, and is
- * guarded and counted exactly as a lookup is. The clock stands at 08:00 on Monday 26 October 2026
- * in Johannesburg unless a test moves it; the numbers are synthetic.
+ * the whole application on a real database. A cancel deletes the booking at once: in one
+ * transaction it deletes every confirmation, queues the cancellation SMS and deletes the
+ * appointment, which frees the seat and leaves the SMS and the idempotency key with no appointment.
+ * From then on the reference is unknown, so a lookup or a repeat cancel is a counted 404. A cancel
+ * is refused once the appointment has started, and is guarded and counted exactly as a lookup is.
+ * The clock stands at 08:00 on Monday 26 October 2026 in Johannesburg unless a test moves it; the
+ * numbers are synthetic.
  */
 @IntegrationTest
 @ExtendWith(DatabaseReset.class)
@@ -83,86 +84,96 @@ class CancelAppointmentIT {
     MvcTestResult rebooked = book(mvc, body("POL", "FICA", startsAt, "082 555 0112"));
 
     assertThat(rebooked).hasStatus(HttpStatus.CREATED);
-    assertThat(
-            jdbc.queryForList(
-                "SELECT status || ' ' || seat_no FROM appointments ORDER BY created_at, status",
-                String.class))
-        .containsExactlyInAnyOrder("CANCELLED 1", "CONFIRMED 1");
+    assertThat(jdbc.queryForList("SELECT status || ' ' || seat_no FROM appointments", String.class))
+        .as("the cancelled appointment is gone; only the new one holds the seat")
+        .containsExactly("CONFIRMED 1");
   }
 
   /**
-   * BR-14, BR-16, BR-24: the response is the cancelled appointment as a lookup now shows it: no
-   * longer cancellable, its confirmation superseded and its cancellation SMS PENDING, word for
-   * word. The change is stamped with the clock and increments the version once.
+   * BR-14, BR-16, BR-24: the response is the appointment as the cancel left it, exactly: the
+   * booking as it was, now CANCELLED, no longer cancellable, stamped with the clock, and with only
+   * its cancellation SMS, PENDING, word for word. The confirmation is not listed: it is deleted.
+   * After the commit the appointment is gone, the SMS is kept with no appointment under the
+   * cancel's correlation id, and the idempotency key is kept with no appointment until it expires.
    */
   @Test
-  void cancelReturnsTheCancelledAppointmentWithItsSupersededConfirmationAndPendingCancellation()
-      throws Exception {
-    String reference = reference(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0113")));
+  void cancelReturnsTheCancelledAppointmentWithOnlyItsCancellationAndDeletesIt() throws Exception {
+    MvcTestResult booked = book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0113"));
+    String reference = reference(booked);
     clock.advance(Duration.ofMinutes(10));
 
     MvcTestResult cancelled = cancel(mvc, reference, "0113");
 
     assertThat(cancelled).hasStatus(HttpStatus.OK).hasContentType(MediaType.APPLICATION_JSON);
-    String sms =
+    Map<String, Object> sms =
+        jdbc.queryForMap(
+            "SELECT id, kind, status, appointment_id, correlation_id FROM notification_messages");
+    assertThat(sms)
+        .containsEntry("kind", "CANCELLATION")
+        .containsEntry("status", "PENDING")
+        .containsEntry("appointment_id", null)
+        .as("FR-25: the cancellation is logged under the cancel request's correlation id")
+        .containsEntry("correlation_id", "test-cancel");
+    Map<String, Object> cancellation = new LinkedHashMap<>();
+    cancellation.put("id", sms.get("id").toString());
+    cancellation.put("channel", "SMS");
+    cancellation.put("kind", "CANCELLATION");
+    cancellation.put("status", "PENDING");
+    cancellation.put("attempts", 0);
+    cancellation.put("sentAt", null);
+    cancellation.put("failureReason", null);
+    cancellation.put("recipientMasked", "082 *** 0113");
+    cancellation.put(
+        "body",
         "Appt cancelled: FICA update, Sandton Summit, Tue 27 Oct 09:30 SAST. Ref "
             + reference
-            + ". Rebook: http://localhost:8080/book";
-    assertThat(cancelled)
-        .bodyJson()
-        .isLenientlyEqualTo(
-            """
-            {
-              "reference": "%s", "status": "CANCELLED", "canCancel": false,
-              "cancelledAt": "2026-10-26T08:10:00+02:00",
-              "startsAt": "2026-10-27T09:30:00+02:00",
-              "customer": {"mobileMasked": "082 *** 0113"},
-              "notifications": [
-                {"kind": "CONFIRMATION", "channel": "SMS", "status": "FAILED",
-                 "failureReason": "SUPERSEDED_BY_CANCELLATION", "attempts": 0, "sentAt": null},
-                {"kind": "CANCELLATION", "channel": "SMS", "status": "PENDING",
-                 "failureReason": null, "attempts": 0, "sentAt": null,
-                 "recipientMasked": "082 *** 0113", "body": "%s"}
-              ]
-            }"""
-                .formatted(reference, sms));
-    assertThat(cancelled)
-        .bodyJson()
-        .extractingPath("$.notifications[*].kind")
-        .asArray()
-        .containsExactly("CONFIRMATION", "CANCELLATION");
-    assertThat(lookup(mvc, reference, "0113"))
-        .bodyJson()
-        .isStrictlyEqualTo(cancelled.getResponse().getContentAsString());
-    Map<String, Object> row =
-        jdbc.queryForMap("SELECT status, cancelled_at, updated_at, version FROM appointments");
-    assertThat(row).containsEntry("status", "CANCELLED").containsEntry("version", 1);
-    assertThat(instant(row, "cancelled_at")).isEqualTo(clock.instant());
-    assertThat(instant(row, "updated_at")).isEqualTo(clock.instant());
+            + ". Rebook: http://localhost:8080/book");
+    String expected =
+        JsonPath.parse(booked.getResponse().getContentAsString(StandardCharsets.UTF_8))
+            .set("$.status", "CANCELLED")
+            .set("$.canCancel", false)
+            .set("$.cancelledAt", "2026-10-26T08:10:00+02:00")
+            .set("$.notifications", List.of(cancellation))
+            .jsonString();
+    assertThat(cancelled).bodyJson().isStrictlyEqualTo(expected);
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM appointments", Integer.class))
+        .as("the appointment is deleted")
+        .isZero();
     assertThat(
-            jdbc.queryForObject(
-                "SELECT correlation_id FROM notification_messages WHERE kind = 'CANCELLATION'",
-                String.class))
-        .as("FR-25: the cancellation is logged under the cancel request's correlation id")
-        .isEqualTo("test-cancel");
+            jdbc.queryForMap(
+                "SELECT response_status, appointment_id, expires_at > created_at AS live"
+                    + " FROM idempotency_keys"))
+        .as("BR-12: the key is kept, with no appointment, until it expires")
+        .containsEntry("response_status", 201)
+        .containsEntry("appointment_id", null)
+        .containsEntry("live", true);
   }
 
-  /** BR-14: cancelling again answers as the first time did, and writes nothing. */
+  /**
+   * BR-13, BR-14: once cancelled, the reference is unknown. Opening it, or cancelling it again, is
+   * the same 404 an unknown reference gets, and counts as a wrong try: five of them block the
+   * reference. Nothing is written again.
+   */
   @Test
-  void repeatCancelIsA200NoOpThatQueuesNothing() throws Exception {
+  void lookupAndRepeatCancelAfterACancelReturn404AndAreCounted() throws Exception {
     String reference = reference(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0114")));
-    MvcTestResult first = cancel(mvc, reference, "0114");
-    Instant cancelledAt = clock.instant();
+    assertThat(cancel(mvc, reference, "0114")).hasStatus(HttpStatus.OK);
     clock.advance(Duration.ofMinutes(1));
 
-    MvcTestResult again = cancel(mvc, reference, "0114");
+    List<MvcTestResult> unknown = new ArrayList<>();
+    unknown.add(lookup(mvc, reference, "0114"));
+    unknown.add(cancel(mvc, reference, "0114"));
+    unknown.add(lookup(mvc, reference, "0114"));
+    unknown.add(cancel(mvc, reference, "0114"));
+    unknown.add(cancel(mvc, reference, "0114"));
 
-    assertThat(again).hasStatus(HttpStatus.OK);
-    assertThat(again).bodyJson().isStrictlyEqualTo(first.getResponse().getContentAsString());
-    assertThat(cancellations()).isOne();
-    Map<String, Object> row = jdbc.queryForMap("SELECT updated_at, version FROM appointments");
-    assertThat(row).containsEntry("version", 1);
-    assertThat(instant(row, "updated_at")).isEqualTo(cancelledAt);
+    for (MvcTestResult result : unknown) {
+      assertThatAppointmentNotFound(result, reference);
+    }
+    assertThat(lookup(mvc, reference, "0114"))
+        .as("all five counted, so the reference is now blocked")
+        .hasStatus(HttpStatus.TOO_MANY_REQUESTS);
+    assertThat(cancellations()).as("no second cancellation").isOne();
   }
 
   /**
@@ -269,19 +280,19 @@ class CancelAppointmentIT {
   }
 
   /**
-   * BR-14: two cancels of one appointment at once both answer 200 CANCELLED, and only one of them
-   * writes. The first is held at its UPDATE, with the row locked, until the second is seen waiting
-   * for that lock; the second's version check then fails, it reads the appointment again, finds it
-   * cancelled and writes nothing.
+   * BR-14: of two cancels of one appointment at once, one answers 200 and the other 404, counted.
+   * The first is held as it inserts its SMS, with the appointment's row locked and its confirmation
+   * deleted, until the second has loaded the appointment and is seen waiting for that lock; once
+   * the first commits, the second finds the row gone, and writes nothing.
    */
   @Test
-  void twoConcurrentCancelsBothReturn200AndQueueOneCancellation() throws Exception {
+  void twoConcurrentCancelsGiveOne200AndOne404ThatIsCounted() throws Exception {
     String reference = reference(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0118")));
     MvcTestResult first;
     MvcTestResult second;
     try (BookingPause pause =
         BookingPause.before(
-            "UPDATE", "appointments", "NEW.status = 'CANCELLED'", dataSource, jdbc)) {
+            "INSERT", "notification_messages", "NEW.kind = 'CANCELLATION'", dataSource, jdbc)) {
       CompletableFuture<MvcTestResult> firstCancel =
           CompletableFuture.supplyAsync(() -> cancel(mvc, reference, "0118"));
       pause.awaitWaiting(1, 0);
@@ -295,21 +306,25 @@ class CancelAppointmentIT {
     }
 
     assertThat(first).hasStatus(HttpStatus.OK);
-    assertThat(second).hasStatus(HttpStatus.OK);
-    assertThat(second).bodyJson().isStrictlyEqualTo(first.getResponse().getContentAsString());
-    assertThat(second).bodyJson().extractingPath("$.status").isEqualTo("CANCELLED");
+    assertThat(first).bodyJson().extractingPath("$.status").isEqualTo("CANCELLED");
+    assertThatAppointmentNotFound(second, reference);
     assertThat(cancellations()).isOne();
-    assertThat(jdbc.queryForObject("SELECT version FROM appointments", Integer.class))
-        .as("written once")
-        .isOne();
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM appointments", Integer.class)).isZero();
+    for (int miss = 1; miss <= 4; miss++) {
+      assertThat(lookup(mvc, reference, "0118")).hasStatus(HttpStatus.NOT_FOUND);
+    }
+    assertThat(lookup(mvc, reference, "0118"))
+        .as("the second cancel's 404 counted, so four more block the reference")
+        .hasStatus(HttpStatus.TOO_MANY_REQUESTS);
   }
 
   /**
-   * BR-24: the cancel supersedes a confirmation still PENDING and one that FAILED, and leaves one
-   * that was SENT alone: that customer was told, and is now told of the cancellation.
+   * BR-24: the cancel deletes its appointment's confirmation whatever its status: still PENDING,
+   * FAILED, or SENT. Nothing of the booking is left but its cancellation SMS, PENDING with no
+   * appointment.
    */
   @Test
-  void cancellationSupersedesPendingAndFailedConfirmationsAndLeavesASentOneAlone() {
+  void cancelDeletesTheConfirmationWhetherPendingFailedOrSent() {
     String sent = reference(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0119")));
     assertThat(dispatcher.runOnce(clock.instant())).isOne();
     String failed =
@@ -328,102 +343,75 @@ class CancelAppointmentIT {
     assertThat(cancel(mvc, failed, "0000")).hasStatus(HttpStatus.OK);
     assertThat(cancel(mvc, pending, "0120")).hasStatus(HttpStatus.OK);
 
-    assertThat(confirmationOf(sent)).isEqualTo("SENT null");
-    assertThat(confirmationOf(failed)).isEqualTo("FAILED SUPERSEDED_BY_CANCELLATION");
-    assertThat(confirmationOf(pending)).isEqualTo("FAILED SUPERSEDED_BY_CANCELLATION");
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM appointments", Integer.class)).isZero();
     assertThat(
             jdbc.queryForList(
-                "SELECT status FROM notification_messages WHERE kind = 'CANCELLATION'",
+                "SELECT kind || ' ' || status || ' ' || coalesce(appointment_id::text, 'none')"
+                    + " FROM notification_messages",
                 String.class))
-        .containsExactly("PENDING", "PENDING", "PENDING");
+        .containsExactly(
+            "CANCELLATION PENDING none", "CANCELLATION PENDING none", "CANCELLATION PENDING none");
   }
 
   /**
-   * BR-16, ADR-0003: the cancellation and its message become visible together or not at all. The
-   * cancel is held as it inserts its SMS, after it has flushed the appointment's UPDATE and
-   * superseded the confirmation: from outside, nothing has changed, though the row is locked. Once
-   * it commits, all three are there, written by one transaction.
+   * BR-14, BR-16, ADR-0003: the delete and the cancellation become visible together or not at all.
+   * The cancel is held inside its delete of the appointment, as the foreign key detaches the
+   * idempotency key, after it has deleted the confirmation and written its SMS: from outside,
+   * nothing has changed, though the appointment's row is locked. Once it commits, the appointment
+   * and its confirmation are gone and the SMS and the key are kept, all written by one transaction.
    */
   @Test
-  void statusChangeAndCancellationCommitTogether() throws Exception {
+  void deleteAndCancellationCommitTogether() throws Exception {
     String reference = reference(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0121")));
     try (BookingPause pause =
         BookingPause.before(
-            "INSERT", "notification_messages", "NEW.kind = 'CANCELLATION'", dataSource, jdbc)) {
+            "UPDATE", "idempotency_keys", "NEW.appointment_id IS NULL", dataSource, jdbc)) {
       CompletableFuture<MvcTestResult> cancelling =
           CompletableFuture.supplyAsync(() -> cancel(mvc, reference, "0121"));
       pause.awaitWaiting(1, 0);
 
       assertThat(jdbc.queryForObject("SELECT status FROM appointments", String.class))
-          .as("the appointment is not cancelled yet")
+          .as("the appointment is still there")
           .isEqualTo("CONFIRMED");
       assertThat(confirmationOf(reference))
-          .as("nor its confirmation superseded")
+          .as("and so is its confirmation")
           .isEqualTo("PENDING null");
-      assertThat(cancellations()).as("nor its cancellation queued").isZero();
+      assertThat(cancellations()).as("its cancellation is not queued yet").isZero();
+      assertThat(
+              jdbc.queryForObject(
+                  "SELECT count(*) FROM idempotency_keys WHERE appointment_id IS NOT NULL",
+                  Integer.class))
+          .as("nor its key detached")
+          .isOne();
       assertThat(appointmentRowIsLocked())
-          .as("the version-checked UPDATE ran, and holds the row, before the SMS is written")
+          .as("the version-checked lock was taken before anything was written")
           .isTrue();
 
       pause.release();
       assertThat(cancelling.get(10, TimeUnit.SECONDS)).hasStatus(HttpStatus.OK);
     }
 
-    assertThat(jdbc.queryForObject("SELECT status FROM appointments", String.class))
-        .isEqualTo("CANCELLED");
-    assertThat(confirmationOf(reference)).isEqualTo("FAILED SUPERSEDED_BY_CANCELLATION");
-    assertThat(cancellations()).isOne();
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM appointments", Integer.class)).isZero();
+    assertThat(
+            jdbc.queryForList(
+                "SELECT kind || ' ' || coalesce(appointment_id::text, 'none')"
+                    + " FROM notification_messages",
+                String.class))
+        .containsExactly("CANCELLATION none");
     assertThat(
             jdbc.queryForObject(
-                "SELECT count(DISTINCT x) FROM (SELECT xmin::text AS x FROM appointments"
-                    + " UNION ALL SELECT xmin::text FROM notification_messages"
-                    + " WHERE kind = 'CANCELLATION' OR failure_reason IS NOT NULL) AS writers",
+                "SELECT count(DISTINCT x) FROM (SELECT xmin::text AS x FROM notification_messages"
+                    + " UNION ALL SELECT xmin::text FROM idempotency_keys) AS writers",
                 Integer.class))
         .as("written by one transaction")
         .isOne();
   }
 
   /**
-   * The retention purge deletes the appointment while the cancel is held before its UPDATE, after
-   * it has loaded the appointment and matched the digits. The UPDATE finds nothing to change, and
-   * the re-run finds no appointment: 404 APPOINTMENT_NOT_FOUND, never 500. The digits matched, so
-   * the 404 is not counted: four more misses at the reference leave a fifth still a 404, not a 429.
-   */
-  @Test
-  void cancelWhoseAppointmentThePurgeDeletesBeforeItsUpdateReturns404AndIsNotCounted()
-      throws Exception {
-    String reference = reference(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0122")));
-    MvcTestResult cancelled;
-    try (BookingPause pause =
-        BookingPause.beforeFirstStatement("UPDATE", "appointments", dataSource, jdbc)) {
-      CompletableFuture<MvcTestResult> cancelling =
-          CompletableFuture.supplyAsync(() -> cancel(mvc, reference, "0122"));
-      pause.awaitWaiting(1, 0);
-
-      assertThat(retention.purge(clock.instant().plus(Duration.ofHours(48))))
-          .as("the purge takes the appointment, its message and its key without waiting")
-          .isEqualTo(new Purged(1, 1, 1));
-
-      pause.release();
-      cancelled = cancelling.get(10, TimeUnit.SECONDS);
-    }
-
-    assertThatAppointmentNotFound(cancelled, reference);
-    assertThat(jdbc.queryForObject("SELECT count(*) FROM notification_messages", Integer.class))
-        .as("no cancellation queued for an appointment that is gone")
-        .isZero();
-    for (int miss = 1; miss <= 4; miss++) {
-      assertThat(lookup(mvc, reference, "0122")).hasStatus(HttpStatus.NOT_FOUND);
-    }
-    assertThat(lookup(mvc, reference, "0122"))
-        .as("the cancel's 404 counted towards no block")
-        .hasStatus(HttpStatus.NOT_FOUND);
-  }
-
-  /**
    * A cancel that waits on the appointment's row while the purge holds it answers 404 once the
-   * purge commits. The purge is held at its key delete by another transaction, after it has locked
-   * the appointment and deleted its message; the cancel's UPDATE then waits on the purge's lock.
+   * purge commits, counted like any unknown reference. The purge is held at its key delete by
+   * another transaction, after it has locked the appointment and deleted its message; the cancel,
+   * which has loaded the appointment and matched its digits, then waits on the purge's lock.
    */
   @Test
   void cancelWaitingOnTheRowThePurgeHoldsReturns404OnceThePurgeCommits() throws Exception {
@@ -458,6 +446,15 @@ class CancelAppointmentIT {
 
     assertThat(purged).isEqualTo(new Purged(1, 1, 1));
     assertThatAppointmentNotFound(cancelled, reference);
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM notification_messages", Integer.class))
+        .as("no cancellation queued for an appointment that is gone")
+        .isZero();
+    for (int miss = 1; miss <= 4; miss++) {
+      assertThat(lookup(mvc, reference, "0123")).hasStatus(HttpStatus.NOT_FOUND);
+    }
+    assertThat(lookup(mvc, reference, "0123"))
+        .as("the cancel's 404 counted towards the block")
+        .hasStatus(HttpStatus.TOO_MANY_REQUESTS);
   }
 
   private static void assertThatAppointmentNotFound(MvcTestResult result, String reference)
@@ -502,14 +499,6 @@ class CancelAppointmentIT {
             + " WHERE a.reference = ? AND m.kind = 'CONFIRMATION'",
         String.class,
         reference);
-  }
-
-  private static Instant instant(Map<String, Object> row, String column) {
-    Object value = row.get(column);
-    if (value instanceof OffsetDateTime offset) {
-      return offset.toInstant();
-    }
-    return ((Timestamp) value).toInstant();
   }
 
   private static String reference(MvcTestResult booked) {

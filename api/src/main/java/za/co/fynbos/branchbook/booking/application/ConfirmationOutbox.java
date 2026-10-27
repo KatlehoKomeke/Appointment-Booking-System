@@ -20,12 +20,18 @@ public interface ConfirmationOutbox {
   void enqueueConfirmation(Confirmation confirmation);
 
   /**
-   * Supersedes the appointment's confirmation if it is still PENDING or FAILED, so it is not sent
-   * from then on, then writes the cancellation SMS as a PENDING message, or a FAILED one where the
-   * number has reached the daily cap, inside the caller's transaction (BR-16, BR-24). A
-   * confirmation is therefore delivered before its cancellation, or never.
+   * Replaces the appointment's confirmations with its cancellation SMS, inside the caller's
+   * transaction, just before the cancel deletes the appointment (BR-14, BR-16, BR-24). It deletes
+   * every confirmation, whatever its status, keeping no copy; one the dispatcher is sending is
+   * waited for first, so a confirmation is delivered before its cancellation, or never. It then
+   * writes the cancellation as a PENDING message against the appointment, which the appointment's
+   * delete detaches and the dispatcher deletes once it is final. Where the number has reached the
+   * daily cap, counted before the confirmations go, the cancellation is final at once, never sent,
+   * so it is not stored at all.
    *
    * @param cancellation what the message must say and where it goes
+   * @return the cancellation SMS as the cancel's response shows it: PENDING, or FAILED with {@code
+   *     RECIPIENT_DAILY_CAP} where the cap stopped it
    */
-  void enqueueCancellation(Cancellation cancellation);
+  NotificationSummary enqueueCancellation(Cancellation cancellation);
 }

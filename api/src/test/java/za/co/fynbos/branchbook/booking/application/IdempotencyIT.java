@@ -3,6 +3,7 @@ package za.co.fynbos.branchbook.booking.application;
 import static org.assertj.core.api.Assertions.assertThat;
 import static za.co.fynbos.branchbook.support.Bookings.body;
 import static za.co.fynbos.branchbook.support.Bookings.book;
+import static za.co.fynbos.branchbook.support.Bookings.cancel;
 
 import java.util.Map;
 import java.util.UUID;
@@ -13,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
@@ -111,6 +113,46 @@ class IdempotencyIT {
     assertThat(reused).hasStatus(HttpStatus.UNPROCESSABLE_CONTENT);
     assertThat(reused).bodyJson().extractingPath("$.code").isEqualTo("IDEMPOTENCY_KEY_REUSED");
     assertThat(count("appointments")).isOne();
+  }
+
+  /**
+   * BR-12, BR-14: once the booking a key made is cancelled, and so deleted, a retry of it with the
+   * same details is refused with a fixed detail, and never books again; with other details it is
+   * refused as any reused key is. The key outlives its appointment for its 24 hours.
+   */
+  @Test
+  void sameKeyAfterItsBookingIsCancelledReturns422AndNeverBooksAgain() {
+    String key = UUID.randomUUID().toString();
+    Map<String, Object> details = body("SAN", "FICA", STARTS_AT, "082 555 0175");
+    String reference = reference(book(mvc, key, details));
+    assertThat(cancel(mvc, reference, "0175")).hasStatus(HttpStatus.OK);
+
+    MvcTestResult replayed = book(mvc, key, details);
+    MvcTestResult reused =
+        book(mvc, key, body("SAN", "FICA", "2026-10-27T10:15:00+02:00", "082 555 0175"));
+
+    assertThat(replayed)
+        .hasStatus(HttpStatus.UNPROCESSABLE_CONTENT)
+        .hasContentType(MediaType.APPLICATION_PROBLEM_JSON);
+    assertThat(replayed)
+        .bodyJson()
+        .isLenientlyEqualTo(
+            """
+            {"status": 422, "code": "IDEMPOTENCY_KEY_REUSED", "correlationId": "test-booking"}""");
+    assertThat(replayed)
+        .bodyJson()
+        .extractingPath("$.detail")
+        .isEqualTo(
+            "The booking this Idempotency-Key made has been cancelled. Send a new key to book"
+                + " again.");
+    assertThat(reused).hasStatus(HttpStatus.UNPROCESSABLE_CONTENT);
+    assertThat(reused)
+        .bodyJson()
+        .extractingPath("$.detail")
+        .asString()
+        .startsWith("This Idempotency-Key was already used with different details.");
+    assertThat(count("appointments")).as("never booked again").isZero();
+    assertThat(count("idempotency_keys")).isOne();
   }
 
   /** A refused booking rolls its key back, so the client can retry the key with new details. */

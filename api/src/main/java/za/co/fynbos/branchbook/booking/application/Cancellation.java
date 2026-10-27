@@ -14,8 +14,8 @@ import za.co.fynbos.branchbook.catalogue.domain.ServiceType;
  * so the outbox needs no other module's data. It names the same service, branch and time as the
  * confirmation did, so the customer can tell which appointment it means.
  *
- * @param appointmentId the appointment the message belongs to, whose PENDING or FAILED confirmation
- *     it supersedes
+ * @param appointmentId the appointment the message belongs to until the cancel deletes it, whose
+ *     confirmations it replaces
  * @param reference the appointment's reference
  * @param recipient the customer's mobile number
  * @param startsAt when the appointment would have started

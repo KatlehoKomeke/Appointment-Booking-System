@@ -3,6 +3,7 @@ package za.co.fynbos.branchbook.notification.api;
 import static org.assertj.core.api.Assertions.assertThat;
 import static za.co.fynbos.branchbook.support.Bookings.body;
 import static za.co.fynbos.branchbook.support.Bookings.book;
+import static za.co.fynbos.branchbook.support.Bookings.cancel;
 
 import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
@@ -15,6 +16,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.web.servlet.assertj.MockMvcTester;
 import org.springframework.test.web.servlet.assertj.MvcTestResult;
+import za.co.fynbos.branchbook.notification.application.NotificationDispatcher;
 import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
 import za.co.fynbos.branchbook.support.MutableClock;
@@ -32,6 +34,8 @@ class InboxApiIT {
   @Autowired private MockMvcTester mvc;
 
   @Autowired private MutableClock clock;
+
+  @Autowired private NotificationDispatcher dispatcher;
 
   @Test
   void listsTheNewestMessagesWithTheirReferencesAndRedactedRecipients() throws Exception {
@@ -63,6 +67,43 @@ class InboxApiIT {
         .doesNotContain("0184")
         .doesNotContain("555");
     assertThat(inbox.getResponse().getHeader("Cache-Control")).contains("no-store");
+  }
+
+  /**
+   * BR-14: a cancellation outlives its deleted appointment until it is final. Meanwhile the inbox
+   * lists it with APT-****-****, as there is no appointment left to name, its recipient redacted
+   * and its times at the offset every branch keeps; once it is sent, it is deleted and leaves the
+   * inbox.
+   */
+  @Test
+  void listsACancellationWhoseBookingIsDeletedWithAMaskedReferenceUntilItIsSent() throws Exception {
+    String reference =
+        reference(book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0182")));
+    clock.advance(Duration.ofMinutes(2));
+    assertThat(cancel(mvc, reference, "0182")).hasStatusOk();
+
+    MvcTestResult inbox = mvc.get().uri("/api/v1/messages").exchange();
+
+    assertThat(inbox).hasStatusOk();
+    assertThat(inbox)
+        .bodyJson()
+        .isLenientlyEqualTo(
+            """
+            {"messages": [
+              {"reference": "APT-****-****", "kind": "CANCELLATION", "channel": "SMS",
+               "recipientMasked": "082 *** ****", "subject": null, "status": "PENDING",
+               "failureReason": null, "retryable": false, "attempts": 0,
+               "nextAttemptAt": "2026-10-26T08:02:00+02:00", "lastError": null,
+               "createdAt": "2026-10-26T08:02:00+02:00", "sentAt": null}
+            ]}""");
+    assertThat(string(inbox, "$.messages[0].body")).startsWith("Appt cancelled: FICA update");
+    assertThat(ResponseText.withoutIdentifiers(inbox.getResponse().getContentAsString()))
+        .doesNotContain("0182");
+    assertThat(dispatcher.runOnce(clock.instant())).isOne();
+    assertThat(mvc.get().uri("/api/v1/messages"))
+        .bodyJson()
+        .extractingPath("$.messages")
+        .isEqualTo(List.of());
   }
 
   @Test

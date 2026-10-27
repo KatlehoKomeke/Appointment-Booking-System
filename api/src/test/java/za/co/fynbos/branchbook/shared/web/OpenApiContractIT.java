@@ -200,15 +200,9 @@ class OpenApiContractIT {
     String cancelled = body(Bookings.cancel(mvc, booked(mvc, "BEL", "082 555 0198"), "0198"));
     check(document, "Appointment", cancelled, "$", mismatches);
     check(document, "Notification", cancelled, "$.notifications[0]", mismatches);
-    check(document, "Notification", cancelled, "$.notifications[1]", mismatches);
-    List<String> confirmations =
-        JsonPath.read(cancelled, "$.notifications[?(@.kind == 'CONFIRMATION')].id");
-    check(
-        document,
-        "InboxMessage",
-        body(Bookings.retry(mvc, confirmations.getFirst())),
-        "$",
-        mismatches);
+    // The cancel deleted the booking, so its cancellation SMS is retried with no appointment.
+    String cancellation = JsonPath.read(cancelled, "$.notifications[0].id");
+    check(document, "InboxMessage", body(Bookings.retry(mvc, cancellation)), "$", mismatches);
     String started = booked(mvc, "UMH", "082 555 0199");
     clock.setInstant(Instant.parse("2026-10-27T08:00:00Z"));
     MvcTestResult tooLate = Bookings.cancel(mvc, started, "0199");

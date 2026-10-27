@@ -111,7 +111,8 @@ class AppointmentController {
       description =
           "Books the slot, or answers why not. The confirmation SMS is written in the same"
               + " transaction and shows as PENDING in notifications. Retrying with the same"
-              + " Idempotency-Key and the same details returns the same appointment.")
+              + " Idempotency-Key and the same details returns the same appointment, until it is"
+              + " cancelled; from then on the key is refused, and never books again.")
   @ApiResponse(
       responseCode = "201",
       description = "Booked, or replayed",
@@ -158,7 +159,8 @@ class AppointmentController {
               + " SLOT_OUTSIDE_HOURS, SLOT_OFF_GRID, SLOT_WITHIN_LEAD_TIME: the start is not a"
               + " slot; MOBILE_NUMBER_REQUIRED: not a South African mobile; DEMO_NUMBER_REQUIRED:"
               + " a demo that takes only its published demo numbers was sent another;"
-              + " IDEMPOTENCY_KEY_REUSED: the key booked different details",
+              + " IDEMPOTENCY_KEY_REUSED: the key booked different details, or the booking it made"
+              + " has since been cancelled",
       content =
           @Content(
               mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
@@ -216,7 +218,9 @@ class AppointmentController {
               schema = @Schema(ref = OpenApiConfig.PROBLEM)))
   @ApiResponse(
       responseCode = "404",
-      description = "APPOINTMENT_NOT_FOUND: the reference and the digits match no appointment",
+      description =
+          "APPOINTMENT_NOT_FOUND: the reference and the digits match no appointment, including"
+              + " one cancelled and so deleted",
       content =
           @Content(
               mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
@@ -254,25 +258,33 @@ class AppointmentController {
   }
 
   /**
-   * Cancels an appointment with its reference and the last four digits of the mobile number. A
-   * repeat is answered as the first was, without writing anything.
+   * Cancels an appointment with its reference and the last four digits of the mobile number, and
+   * deletes it at once, keeping only its cancellation SMS until it is final. A repeat finds no
+   * appointment: {@code 404}, counted.
    *
    * @param reference the reference; case and hyphens do not matter
    * @param mobileLast4 the last four digits of the mobile number used to book
-   * @return the appointment, cancelled, as a lookup now shows it
+   * @return the appointment as the cancel left it, just before deleting it
    */
   @Operation(
       operationId = "cancelAppointment",
       summary = "Cancel an appointment",
       description =
           "Needs the reference and the last four digits, exactly as opening the appointment does,"
-              + " and counts wrong digits towards the same limit. Cancelling frees the seat at once"
-              + " and queues a cancellation SMS in the same transaction; a confirmation still PENDING"
-              + " or FAILED is marked FAILED with SUPERSEDED_BY_CANCELLATION and is not sent from"
-              + " then on. Cancelling"
-              + " again, or from two tabs at once, returns the same 200 and writes nothing more."
-              + " Only possible before the appointment starts.")
-  @ApiResponse(responseCode = "200", description = "Cancelled now, or already cancelled")
+              + " and counts wrong digits towards the same limit. Only possible before the"
+              + " appointment starts. In one transaction, the cancel deletes every confirmation SMS"
+              + " of the appointment, whatever its status (one being sent is waited for, so it is"
+              + " delivered before its cancellation or never), queues the cancellation SMS, and"
+              + " deletes the appointment, which frees the seat. The cancellation SMS is kept, with"
+              + " no appointment, until it is sent or has failed for good, and then deleted. The"
+              + " response is the appointment as the cancel left it, with only that SMS. From then"
+              + " on the reference is unknown: opening or cancelling it again, including from a"
+              + " second tab at the same moment, is a 404 that counts as a wrong try.")
+  @ApiResponse(
+      responseCode = "200",
+      description =
+          "Cancelled and deleted: status CANCELLED, canCancel false, cancelledAt, and"
+              + " notifications holding only the cancellation SMS")
   @ApiResponse(
       responseCode = "400",
       description = "VALIDATION_FAILED: X-Mobile-Last4 is missing or not four digits",
@@ -282,7 +294,10 @@ class AppointmentController {
               schema = @Schema(ref = OpenApiConfig.PROBLEM)))
   @ApiResponse(
       responseCode = "404",
-      description = "APPOINTMENT_NOT_FOUND: the reference and the digits match no appointment",
+      description =
+          "APPOINTMENT_NOT_FOUND: the reference and the digits match no appointment, including"
+              + " one already cancelled and so deleted, earlier or by a cancel from another tab at"
+              + " the same moment",
       content =
           @Content(
               mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,
@@ -315,9 +330,9 @@ class AppointmentController {
   @ApiResponse(
       responseCode = "503",
       description =
-          "TRY_AGAIN: the appointment or its messages stayed locked for 2 seconds, another change"
-              + " of the appointment won the race twice, or the database is unavailable; the"
-              + " appointment is left as it was",
+          "TRY_AGAIN: the appointment or its messages stayed locked for 2 seconds, such as a"
+              + " confirmation still being sent, or the database is unavailable; the appointment is"
+              + " left as it was",
       headers =
           @Header(
               name = "Retry-After",

@@ -17,8 +17,13 @@ import za.co.fynbos.branchbook.notification.domain.NotificationStatus;
  * redacted to {@code 082 *** ****}, because the inbox is an operator view of every booking's
  * messages and no caller of it has proved any number.
  *
+ * <p>A cancellation whose appointment the cancel has deleted shows {@code APT-****-****} as its
+ * reference, as there is no appointment left to name, and its times in South Africa's one time
+ * zone, which every branch keeps; it leaves the inbox once it is final and deleted (BR-14).
+ *
  * @param id the message's id
- * @param reference the appointment's reference
+ * @param reference the appointment's reference, or {@code APT-****-****} for a cancellation whose
+ *     appointment is gone
  * @param kind {@code CONFIRMATION} or {@code CANCELLATION}
  * @param channel {@code SMS}, or {@code EMAIL} if the e-mail channel is added
  * @param recipientRedacted where it goes, with every digit after the prefix hidden
@@ -67,19 +72,27 @@ public record InboxMessage(
   private static final String HIDDEN_ADDRESS = "***";
 
   /**
+   * The zone of a message with no appointment left: every branch is in it, and the cancellation SMS
+   * names its time in it as SAST.
+   */
+  static final ZoneId DETACHED_ZONE = ZoneId.of("Africa/Johannesburg");
+
+  /**
    * Shows a stored message in the inbox: with its appointment's reference, the recipient redacted,
    * and whether a retry could send it, by the same rule the retry itself applies.
    *
    * @param message the message as stored
-   * @param appointment what booking says about the message's appointment
+   * @param appointment what booking says about the message's appointment, or {@code null} for a
+   *     cancellation whose appointment the cancel has deleted
    * @param now the current instant, which decides whether a confirmation's appointment has started
    * @return the inbox entry
    */
-  static InboxMessage of(NotificationMessage message, AppointmentLabel appointment, Instant now) {
+  static InboxMessage of(
+      NotificationMessage message, @Nullable AppointmentLabel appointment, Instant now) {
     boolean pending = message.status() == NotificationStatus.PENDING;
     return new InboxMessage(
         message.id(),
-        appointment.reference(),
+        appointment == null ? AppointmentReference.REDACTED : appointment.reference(),
         message.kind().name(),
         message.channel().name(),
         message.channel() == NotificationChannel.SMS
@@ -95,7 +108,7 @@ public record InboxMessage(
         message.lastError(),
         message.createdAt(),
         message.sentAt(),
-        appointment.zone());
+        appointment == null ? DETACHED_ZONE : appointment.zone());
   }
 
   /**

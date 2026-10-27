@@ -36,13 +36,20 @@ A message is in one of three states:
     `0000`, such as 082 555 0000, so this is how a failed delivery is shown.
   - `DISPATCH_ERROR` with `lastError` `MARK_FAILED`: the gateway was called, but the outcome could not be recorded,
     so the message was set FAILED rather than risk sending it again and again. It may have been delivered once.
-  - `SUPERSEDED_BY_CANCELLATION`: a confirmation that was still PENDING or FAILED when the customer cancelled. The
-    cancellation SMS replaces it, and it is not sent from then on ([BR-24](domain-rules.md#br-24)). Its `lastError`
-    is kept: if it is `MARK_FAILED`, the confirmation was handed to the gateway once before the cancel and may have
-    been delivered.
+  - `SUPERSEDED_BY_CANCELLATION`: a confirmation the dispatcher found, when it claimed it, to belong to a cancelled
+    appointment, so it was not sent ([BR-24](domain-rules.md#br-24)). A cancel deletes its booking's confirmations
+    with the booking, so only an appointment cancelled before cancels deleted bookings (V6), or set CANCELLED by
+    hand, can leave one.
   - `RECIPIENT_DAILY_CAP`: the number had already been written as many SMS in the last 24 hours as
-    `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` allows, so this one was written FAILED and never sent. The booking or the
-    cancel went through. It is never retried; the number gets SMS again once its older messages are a day old.
+    `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` allows, counting those still stored, so this one was written FAILED and never
+    sent. The booking or the cancel went through. It is never retried; the number gets SMS again once its older
+    messages are a day old. A cancellation the cap stops is never stored at all: the cancel's response shows it
+    FAILED with this reason.
+
+A cancellation SMS is never kept in a final state. A cancel deletes the booking at once, so the cancellation has no
+appointment and shows `APT-****-****` as its reference in the inbox; once it is SENT, or FAILED for good, the
+dispatcher deletes it in the same transaction and logs `outbox.deleted messageId=... kind=CANCELLATION`. So the
+inbox shows a cancellation only while it is PENDING ([BR-14](domain-rules.md#br-14)).
 
 `retryable` is true exactly when a retry would send the message again: FAILED with `DELIVERY_FAILED` or
 `DISPATCH_ERROR`, and, for a confirmation, an appointment that is neither cancelled nor started.
@@ -119,7 +126,8 @@ curl -s -X POST 'localhost:8080/api/v1/messages/00000000-0000-0000-0000-00000000
 It answers with the message as the inbox shows it. A message a retry could send comes back PENDING, with no
 attempts, due now; the dispatcher picks it up within 2 seconds. Any other message comes back unchanged with
 `retryable` false: one that is PENDING or SENT, a superseded or capped one, and the confirmation of an appointment
-that has been cancelled or has already started. An unknown id is `404 MESSAGE_NOT_FOUND`. If the dispatcher is
+that has been cancelled or has already started. An unknown id is `404 MESSAGE_NOT_FOUND`, and so is a cancellation
+once it has been sent or has failed for good, because it is then deleted: there is nothing left to replay. If the dispatcher is
 sending that message at that moment, the retry waits up to 2 seconds for it to finish, then decides; a send that
 takes longer makes the retry `503 TRY_AGAIN`, with the message left as it was, and the retry can simply be sent
 again.
@@ -144,6 +152,42 @@ the message up within 2 seconds. Should a confirmation of a cancelled appointmen
 means, the dispatcher marks it `SUPERSEDED_BY_CANCELLATION` instead of sending it. A message to 082 555 0000 will
 fail again, by design.
 
+## What a cancel leaves behind
+
+A cancel deletes the booking in its own transaction, the moment the customer cancels
+([BR-14](domain-rules.md#br-14)): the appointment and every confirmation SMS of it, whatever its status. No cancelled
+booking stays in the database, and no cancellation SMS stays once it is final. Two things outlive the booking for a
+while, each with no appointment:
+
+- its cancellation SMS, PENDING, which holds the number and the text until the dispatcher sends it or gives up on
+  it, within about 35 seconds while the dispatcher runs, and then deletes it;
+- its idempotency key, which holds no personal data, until the hourly key purge removes it 24 hours after the
+  booking, so a retry of that booking is `422 IDEMPOTENCY_KEY_REUSED` rather than a new booking.
+
+The log line `cancel.deleted appointmentId=...` marks each cancel. To check that nothing else is left:
+
+```sql
+SELECT count(*) FROM appointments WHERE status = 'CANCELLED';
+SELECT count(*) FROM notification_messages WHERE appointment_id IS NULL AND status <> 'PENDING';
+SELECT count(*) FROM notification_messages WHERE appointment_id IS NULL AND created_at < now() - interval '5 minutes';
+```
+
+The first is 0, except for a booking cancelled before V6 or set CANCELLED by hand. Such a booking can be deleted as
+a cancel would have, its messages first; its keys are kept, with no appointment, until they expire:
+
+```sql
+BEGIN;
+DELETE FROM notification_messages
+WHERE appointment_id IN (SELECT id FROM appointments WHERE status = 'CANCELLED');
+DELETE FROM appointments WHERE status = 'CANCELLED';
+COMMIT;
+```
+
+The second is always 0. The third is 0 while the dispatcher runs: a
+cancellation still waiting after five minutes means the dispatcher has stopped, and the retention purge does not
+reach a message with no appointment, so start the dispatcher again rather than deleting the row, or the customer is
+never told.
+
 <a id="did-the-48-hour-purge-run"></a>
 
 ## Did the retention purge run?
@@ -158,8 +202,8 @@ retention.purged appointments=12 messages=12 keys=3
 
 `appointments=0 messages=0 keys=0` means no appointment had ended since the last run. No such line at all means the job is not running:
 `branchbook.retention.enabled` is not true in that deployment. `keys` is usually lower than `appointments`: the
-hourly key purge has normally removed a key, 24 hours after its booking, by the time the appointment is over. A purged booking is gone for
-its customer too: a lookup or a cancel of it is `404 APPOINTMENT_NOT_FOUND`, even when the purge deletes it while
+hourly key purge has normally removed a key, 24 hours after its booking, by the time the appointment is over. A cancelled booking is never
+counted here: the cancel deleted it at once. A purged booking is gone for its customer too: a lookup or a cancel of it is `404 APPOINTMENT_NOT_FOUND`, even when the purge deletes it while
 the cancel runs, never a `500` ([errors.md](errors.md)).
 
 A WARN line means a batch of up to 500 appointments could not be deleted and was rolled back:

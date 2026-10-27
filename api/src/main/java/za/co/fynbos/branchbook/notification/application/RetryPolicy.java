@@ -2,6 +2,7 @@ package za.co.fynbos.branchbook.notification.application;
 
 import java.time.Instant;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import za.co.fynbos.branchbook.booking.application.AppointmentLabel;
 import za.co.fynbos.branchbook.notification.domain.NotificationKind;
 import za.co.fynbos.branchbook.notification.domain.NotificationMessage;
@@ -28,16 +29,18 @@ final class RetryPolicy {
    * Tells whether a retry may send a message again.
    *
    * @param message the message as stored
-   * @param appointment what booking says about the message's appointment
+   * @param appointment what booking says about the message's appointment, or {@code null} where it
+   *     has none, as for a cancellation whose appointment the cancel deleted
    * @param now the current instant, from the application's clock
    * @return {@code true} if a retry would reset the message to PENDING
    */
-  static boolean allows(NotificationMessage message, AppointmentLabel appointment, Instant now) {
+  static boolean allows(
+      NotificationMessage message, @Nullable AppointmentLabel appointment, Instant now) {
     boolean curable =
         message.status() == NotificationStatus.FAILED && CURABLE.contains(message.failureReason());
     if (!curable || message.kind() != NotificationKind.CONFIRMATION) {
       return curable;
     }
-    return !appointment.cancelled() && now.isBefore(appointment.startsAt());
+    return appointment != null && !appointment.cancelled() && now.isBefore(appointment.startsAt());
   }
 }

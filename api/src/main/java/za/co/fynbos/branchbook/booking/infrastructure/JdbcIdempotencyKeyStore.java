@@ -23,7 +23,9 @@ import za.co.fynbos.branchbook.booking.domain.IdempotencyKey;
  * a key whose {@link #KEY_TTL} has run out, so a key is honoured for exactly that long whether or
  * not the hourly purge has removed it yet. When another transaction holds the same key uncommitted,
  * the insert waits for it, bounded by the session's {@code lock_timeout}; once it has committed,
- * the key's row says what it booked, and once it has rolled back, the key is free.
+ * the key's row says what it booked, and once it has rolled back, the key is free. A completed key
+ * whose appointment a cancel has deleted keeps {@code response_status} 201 with no appointment
+ * (V6), which says the booking it made was cancelled.
  */
 @Repository
 class JdbcIdempotencyKeyStore implements IdempotencyKeyStore {
@@ -65,23 +67,29 @@ class JdbcIdempotencyKeyStore implements IdempotencyKeyStore {
         translated(
             () ->
                 jdbc.sql(
-                        "SELECT request_hash, appointment_id FROM idempotency_keys WHERE key = :key")
+                        """
+                        SELECT request_hash, appointment_id, response_status FROM idempotency_keys
+                        WHERE key = :key""")
                     .param("key", key.value())
                     .query(
                         (rs, row) ->
                             new Used(
                                 rs.getString("request_hash"),
-                                rs.getObject("appointment_id", UUID.class)))
+                                rs.getObject("appointment_id", UUID.class),
+                                rs.getObject("response_status") != null))
                     .optional());
     // The key is in force here: an expired one was taken over above. ON CONFLICT DO UPDATE locks
     // the conflicting row even when its WHERE is false, so the purge cannot remove it before this
     // read, and only a completed row is ever committed. The check below is a guard for what should
     // never happen; the re-run would resolve it.
-    if (used.isEmpty() || used.get().appointmentId() == null) {
+    if (used.isEmpty() || !used.get().completed()) {
       throw new TransactionConflictException("40001");
     }
+    if (!used.get().requestHash().equals(requestHash)) {
+      return new Reused();
+    }
     UUID appointmentId = used.get().appointmentId();
-    return used.get().requestHash().equals(requestHash) ? new Replay(appointmentId) : new Reused();
+    return appointmentId == null ? new Cancelled() : new Replay(appointmentId);
   }
 
   @Override
@@ -122,6 +130,8 @@ class JdbcIdempotencyKeyStore implements IdempotencyKeyStore {
     return OffsetDateTime.ofInstant(instant, ZoneOffset.UTC);
   }
 
-  /** What a key was used for. */
-  private record Used(String requestHash, @Nullable UUID appointmentId) {}
+  /**
+   * What a key was used for: a completed key with no appointment booked one that a cancel deleted.
+   */
+  private record Used(String requestHash, @Nullable UUID appointmentId, boolean completed) {}
 }

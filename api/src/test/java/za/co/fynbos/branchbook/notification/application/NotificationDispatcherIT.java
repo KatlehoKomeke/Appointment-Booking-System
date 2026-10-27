@@ -26,6 +26,8 @@ import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -41,8 +43,9 @@ import za.co.fynbos.branchbook.support.MutableClock;
 /**
  * BR-17, FR-15, NFR-13: the dispatcher delivers PENDING messages through the gateway, one
  * transaction each. BR-24, FR-18: it never delivers a confirmation after its appointment's
- * cancellation, and a retry waits for a send in flight. Its own loop is off in the tests, so each
- * test calls {@link NotificationDispatcher#runOnce} with the instant it wants: no test sleeps. The
+ * cancellation, and a retry waits for a send in flight. BR-14: a cancellation, which outlives its
+ * deleted appointment, is deleted once it is final. Its own loop is off in the tests, so each test
+ * calls {@link NotificationDispatcher#runOnce} with the instant it wants: no test sleeps. The
  * numbers are synthetic; the simulated gateway refuses those ending 0000.
  */
 @IntegrationTest
@@ -286,33 +289,43 @@ class NotificationDispatcherIT {
   }
 
   /**
-   * BR-24: once an appointment is cancelled, the next tick sends only its cancellation. The cancel
-   * already marked the PENDING confirmation superseded, so the tick never even claims it.
+   * BR-24, BR-14: once an appointment is cancelled, the next tick sends only its cancellation: the
+   * cancel deleted the PENDING confirmation, so there is nothing else to claim. Once SENT, the
+   * cancellation is deleted in the same transaction, and the log names it by id only.
    */
   @Test
-  void pendingConfirmationIsSupersededByCancellation() {
+  @ExtendWith(OutputCaptureExtension.class)
+  void cancelDeletesThePendingConfirmationAndTheSentCancellationIsDeleted(CapturedOutput output) {
     String reference =
         reference(book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0103")));
     assertThat(cancel(mvc, reference, "0103")).hasStatus(HttpStatus.OK);
+    UUID cancellation = messageId("CANCELLATION");
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM notification_messages", Integer.class))
+        .as("only the cancellation is left")
+        .isOne();
     ConcurrentLinkedQueue<UUID> sent = new ConcurrentLinkedQueue<>();
 
     int handled = dispatcherWith(recordingInto(sent)).runOnce(clock.instant());
 
     assertThat(handled).as("the cancellation, and nothing else").isOne();
-    assertThat(sent).containsExactly(messageId("CANCELLATION"));
-    assertThat(statusOf("CONFIRMATION")).isEqualTo("FAILED SUPERSEDED_BY_CANCELLATION");
-    assertThat(statusOf("CANCELLATION")).isEqualTo("SENT null");
+    assertThat(sent).containsExactly(cancellation);
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM notification_messages", Integer.class))
+        .as("BR-14: a sent cancellation is not kept")
+        .isZero();
+    assertThat(output.getOut())
+        .contains("outbox.deleted messageId=" + cancellation + " kind=CANCELLATION");
   }
 
   /**
    * BR-24: a confirmation already in the gateway when the cancel arrives is delivered before its
    * cancellation, never after it. The cancel waits for the message's row lock; once the send is
-   * marked SENT, it leaves that message alone and queues the cancellation behind it.
+   * marked SENT, it deletes that message anyway and queues the cancellation behind it.
    */
   @Test
   void confirmationInFlightWhenTheCancelArrivesIsSentBeforeTheCancellation() throws Exception {
     String reference =
         reference(book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0104")));
+    UUID confirmation = messageId("CONFIRMATION");
     ConcurrentLinkedQueue<UUID> sent = new ConcurrentLinkedQueue<>();
     CountDownLatch holding = new CountDownLatch(1);
     CountDownLatch letGo = new CountDownLatch(1);
@@ -339,31 +352,88 @@ class NotificationDispatcherIT {
 
     assertThat(tick.get(5, TimeUnit.SECONDS)).isPositive();
     assertThat(cancelling.get(5, TimeUnit.SECONDS)).hasStatus(HttpStatus.OK);
+    assertThat(jdbc.queryForList("SELECT kind FROM notification_messages", String.class))
+        .as("the confirmation the cancel waited for is deleted once it was sent")
+        .containsExactly("CANCELLATION");
+    UUID cancellation = messageId("CANCELLATION");
     holder.runOnce(now);
-    assertThat(statusOf("CONFIRMATION")).isEqualTo("SENT null");
-    assertThat(statusOf("CANCELLATION")).isEqualTo("SENT null");
-    assertThat(sent).containsExactly(messageId("CONFIRMATION"), messageId("CANCELLATION"));
+    assertThat(sent).containsExactly(confirmation, cancellation);
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM notification_messages", Integer.class))
+        .isZero();
   }
 
   /**
-   * BR-24, defence in depth: a confirmation of a cancelled appointment set PENDING again by hand,
-   * as a careless replay would, is marked superseded when the dispatcher claims it, and never
-   * reaches the gateway.
+   * BR-14, BR-17: a cancellation whose fifth attempt is refused is final, so it is deleted rather
+   * than kept FAILED; until then it waits PENDING, with no appointment, like any other message.
+   */
+  @Test
+  void cancellationIsDeletedAfterItsFifthFailedAttempt() {
+    String reference =
+        reference(book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0000")));
+    assertThat(cancel(mvc, reference, "0000")).hasStatus(HttpStatus.OK);
+    Instant start = clock.instant();
+
+    for (int second : new int[] {0, 2, 6, 14}) {
+      assertThat(dispatcher.runOnce(start.plusSeconds(second))).isOne();
+    }
+    assertThat(onlyMessage())
+        .containsEntry("status", "PENDING")
+        .containsEntry("attempts", 4)
+        .containsEntry("last_error", "SIMULATED_FAILURE");
+    assertThat(dispatcher.runOnce(start.plusSeconds(30))).isOne();
+
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM notification_messages", Integer.class))
+        .as("a cancellation that failed for good is not kept")
+        .isZero();
+  }
+
+  /**
+   * BR-14, BR-17: a cancellation whose outcome cannot be recorded, here because the gateway threw
+   * an Error, would be marked FAILED with DISPATCH_ERROR in a transaction of its own; being final
+   * then, it is deleted there instead, and the rest of the batch carries on.
+   */
+  @Test
+  void cancellationWhoseOutcomeCannotBeRecordedIsDeleted() {
+    String reference =
+        reference(book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0185")));
+    assertThat(cancel(mvc, reference, "0185")).hasStatus(HttpStatus.OK);
+    book(mvc, body("BEL", "CARD", "2026-10-28T10:00:00+02:00", "082 555 0184"));
+    UUID cancellation = messageId("CANCELLATION");
+    MessageGateway failsOnTheCancellation =
+        message -> {
+          if (message.id().equals(cancellation)) {
+            throw new LinkageError("test: a class the provider client needs is missing");
+          }
+          return new MessageGateway.Accepted("sim-" + message.id());
+        };
+
+    int handled = dispatcherWith(failsOnTheCancellation).runOnce(clock.instant());
+
+    assertThat(handled).isEqualTo(2);
+    assertThat(
+            jdbc.queryForList(
+                "SELECT kind || ' ' || status FROM notification_messages", String.class))
+        .as("the cancellation is deleted, and the other booking's confirmation is sent")
+        .containsExactly("CONFIRMATION SENT");
+  }
+
+  /**
+   * BR-24, defence in depth: the confirmation of an appointment cancelled without a cancel, as one
+   * cancelled before cancels deleted their bookings was left, or by hand, is marked superseded when
+   * the dispatcher claims it, and never reaches the gateway.
    */
   @Test
   void confirmationOfACancelledAppointmentResetByHandIsSupersededAtTheClaimNotSent() {
-    String reference =
-        reference(book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0105")));
-    assertThat(cancel(mvc, reference, "0105")).hasStatus(HttpStatus.OK);
+    book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0105"));
     jdbc.update(
-        "UPDATE notification_messages SET status = 'PENDING', failure_reason = NULL"
-            + " WHERE kind = 'CONFIRMATION'");
+        "UPDATE appointments SET status = 'CANCELLED', cancelled_at = updated_at,"
+            + " version = version + 1");
     ConcurrentLinkedQueue<UUID> sent = new ConcurrentLinkedQueue<>();
 
     int handled = dispatcherWith(recordingInto(sent)).runOnce(clock.instant());
 
-    assertThat(handled).isEqualTo(2);
-    assertThat(sent).containsExactly(messageId("CANCELLATION"));
+    assertThat(handled).isOne();
+    assertThat(sent).isEmpty();
     assertThat(statusOf("CONFIRMATION")).isEqualTo("FAILED SUPERSEDED_BY_CANCELLATION");
     assertThat(
             jdbc.queryForObject(

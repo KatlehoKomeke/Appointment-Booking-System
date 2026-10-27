@@ -27,7 +27,9 @@ paths:
     post:
       description: "Books the slot, or answers why not. The confirmation SMS is written\
         \ in the same transaction and shows as PENDING in notifications. Retrying\
-        \ with the same Idempotency-Key and the same details returns the same appointment."
+        \ with the same Idempotency-Key and the same details returns the same appointment,\
+        \ until it is cancelled; from then on the key is refused, and never books\
+        \ again."
       operationId: bookAppointment
       parameters:
       - description: A UUID that identifies this booking; send it again on a retry
@@ -98,7 +100,7 @@ paths:
             \ the start is not a slot; MOBILE_NUMBER_REQUIRED: not a South African\
             \ mobile; DEMO_NUMBER_REQUIRED: a demo that takes only its published demo\
             \ numbers was sent another; IDEMPOTENCY_KEY_REUSED: the key booked different\
-            \ details"
+            \ details, or the booking it made has since been cancelled"
       summary: Book an appointment
       tags:
       - Appointments
@@ -146,7 +148,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
           description: "APPOINTMENT_NOT_FOUND: the reference and the digits match\
-            \ no appointment"
+            \ no appointment, including one cancelled and so deleted"
         "429":
           content:
             application/problem+json:
@@ -168,12 +170,16 @@ paths:
   /api/v1/appointments/{reference}/cancel:
     post:
       description: "Needs the reference and the last four digits, exactly as opening\
-        \ the appointment does, and counts wrong digits towards the same limit. Cancelling\
-        \ frees the seat at once and queues a cancellation SMS in the same transaction;\
-        \ a confirmation still PENDING or FAILED is marked FAILED with SUPERSEDED_BY_CANCELLATION\
-        \ and is not sent from then on. Cancelling again, or from two tabs at once,\
-        \ returns the same 200 and writes nothing more. Only possible before the appointment\
-        \ starts."
+        \ the appointment does, and counts wrong digits towards the same limit. Only\
+        \ possible before the appointment starts. In one transaction, the cancel deletes\
+        \ every confirmation SMS of the appointment, whatever its status (one being\
+        \ sent is waited for, so it is delivered before its cancellation or never),\
+        \ queues the cancellation SMS, and deletes the appointment, which frees the\
+        \ seat. The cancellation SMS is kept, with no appointment, until it is sent\
+        \ or has failed for good, and then deleted. The response is the appointment\
+        \ as the cancel left it, with only that SMS. From then on the reference is\
+        \ unknown: opening or cancelling it again, including from a second tab at\
+        \ the same moment, is a 404 that counts as a wrong try."
       operationId: cancelAppointment
       parameters:
       - description: The reference; case and hyphens do not matter
@@ -197,7 +203,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Appointment"
-          description: "Cancelled now, or already cancelled"
+          description: "Cancelled and deleted: status CANCELLED, canCancel false,\
+            \ cancelledAt, and notifications holding only the cancellation SMS"
         "400":
           content:
             application/problem+json:
@@ -210,7 +217,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
           description: "APPOINTMENT_NOT_FOUND: the reference and the digits match\
-            \ no appointment"
+            \ no appointment, including one already cancelled and so deleted, earlier\
+            \ or by a cancel from another tab at the same moment"
         "409":
           content:
             application/problem+json:
@@ -239,8 +247,8 @@ paths:
               schema:
                 $ref: "#/components/schemas/Problem"
           description: "TRY_AGAIN: the appointment or its messages stayed locked for\
-            \ 2 seconds, another change of the appointment won the race twice, or\
-            \ the database is unavailable; the appointment is left as it was"
+            \ 2 seconds, such as a confirmation still being sent, or the database\
+            \ is unavailable; the appointment is left as it was"
           headers:
             Retry-After:
               description: Seconds to wait before trying again
@@ -404,12 +412,13 @@ paths:
       description: "Resets a FAILED message whose failureReason is DELIVERY_FAILED\
         \ or DISPATCH_ERROR to PENDING with no attempts, due now. Any other message,\
         \ and the confirmation of an appointment that is cancelled or has started,\
-        \ is returned unchanged with retryable false. Waits up to 2 seconds for a\
-        \ send of the message in flight to finish first, and keeps the message locked\
-        \ until it commits. Where branchbook.inbox.redact-references is true, every\
-        \ appointment reference, in the reference field and in the text, shows as\
-        \ APT-****-****. Switched off unless branchbook.inbox.enabled is true; then\
-        \ the path is a 404."
+        \ is returned unchanged with retryable false. A cancellation is deleted once\
+        \ it is sent or has failed for good, so its retry is then a 404. Waits up\
+        \ to 2 seconds for a send of the message in flight to finish first, and keeps\
+        \ the message locked until it commits. Where branchbook.inbox.redact-references\
+        \ is true, every appointment reference, in the reference field and in the\
+        \ text, shows as APT-****-****. Switched off unless branchbook.inbox.enabled\
+        \ is true; then the path is a 404."
       operationId: retryMessage
       parameters:
       - description: "The message's id, from the inbox"
@@ -439,7 +448,8 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
-          description: "MESSAGE_NOT_FOUND: no message has that id"
+          description: "MESSAGE_NOT_FOUND: no message has that id, or it was a cancellation,\
+            \ deleted once final"
         "503":
           content:
             application/problem+json:
@@ -864,7 +874,8 @@ components:
         reference:
           type: string
           description: "The appointment's reference, or APT-****-**** where the deployment\
-            \ hides references (branchbook.inbox.redact-references)"
+            \ hides references (branchbook.inbox.redact-references), and for a cancellation\
+            \ whose booking the cancel has already deleted"
           example: APT-7K3M-9Q2X
         retryable:
           type: boolean

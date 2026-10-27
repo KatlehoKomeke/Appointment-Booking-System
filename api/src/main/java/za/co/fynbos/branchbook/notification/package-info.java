@@ -15,11 +15,12 @@
  * the read of an appointment's messages, and the simulated inbox ({@code api}), which names each
  * message's appointment through booking's {@code AppointmentDirectory}; from M5, the dispatcher
  * that delivers PENDING messages through the simulated SMS gateway, with retries and a final FAILED
- * (BR-17); and from M6, the cancellation SMS, which supersedes a confirmation still PENDING or
- * FAILED so none is delivered after its cancellation (BR-24), the retry of a failed message from
- * the inbox (FR-18), and the {@code outbox_pending} gauge the dispatcher refreshes on every tick
- * (FR-30). Since then: the real gateway, AWS End User Messaging SMS, where {@code
- * branchbook.sms.gateway} is {@code aws}, with the published demo block always simulated, and the
- * per-recipient daily cap (BR-17).
+ * (BR-17); and from M6, the cancellation SMS, the retry of a failed message from the inbox (FR-18),
+ * and the {@code outbox_pending} gauge the dispatcher refreshes on every tick (FR-30). Since then:
+ * the real gateway, AWS End User Messaging SMS, where {@code branchbook.sms.gateway} is {@code
+ * aws}, with the published demo block always simulated; the per-recipient daily cap (BR-17); and a
+ * cancel that deletes the booking (V6): the cancellation SMS replaces every confirmation, so none
+ * is delivered after it (BR-24), and is the only message that outlives its appointment, until the
+ * dispatcher deletes it once it is final (BR-14).
  */
 package za.co.fynbos.branchbook.notification;

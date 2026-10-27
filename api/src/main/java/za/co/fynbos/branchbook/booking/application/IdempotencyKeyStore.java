@@ -11,7 +11,9 @@ import za.co.fynbos.branchbook.booking.domain.IdempotencyKey;
  *
  * <p>The key is the first row the booking transaction writes. A second request with the same key
  * waits on that row until the first commits or rolls back, then replays its result or starts
- * afresh. A failed booking rolls its key row back with it, so only successes are remembered.
+ * afresh. A failed booking rolls its key row back with it, so only successes are remembered. A
+ * cancel deletes the appointment a key booked but keeps the key, with no appointment, until it
+ * expires, so a retry of that booking is refused rather than booked again (BR-12, BR-14).
  */
 public interface IdempotencyKeyStore {
 
@@ -22,7 +24,8 @@ public interface IdempotencyKeyStore {
    * @param requestHash the hash of the booking's details, after normalisation
    * @param now the current instant, from which the key's expiry is counted
    * @return {@link New} if the key is now this request's, including a key whose 24 hours have run
-   *     out; {@link Replay} if it already booked an appointment with the same details; or {@link
+   *     out; {@link Replay} if it already booked an appointment with the same details; {@link
+   *     Cancelled} if it did, and that appointment has since been cancelled and deleted; or {@link
    *     Reused} if it booked one with other details
    */
   Reservation reserve(IdempotencyKey key, String requestHash, Instant now);
@@ -55,7 +58,7 @@ public interface IdempotencyKeyStore {
   int deleteForAppointments(Collection<UUID> appointmentIds);
 
   /** What {@link #reserve} found. */
-  sealed interface Reservation permits New, Replay, Reused {}
+  sealed interface Reservation permits New, Replay, Cancelled, Reused {}
 
   /** The key was free and now belongs to this request. */
   record New() implements Reservation {}
@@ -66,6 +69,12 @@ public interface IdempotencyKeyStore {
    * @param appointmentId the appointment it booked
    */
   record Replay(UUID appointmentId) implements Reservation {}
+
+  /**
+   * The key already booked an appointment with the same details, and a cancel has since deleted
+   * that appointment, so there is nothing to replay and the booking must not be made again.
+   */
+  record Cancelled() implements Reservation {}
 
   /** The key already booked an appointment with different details. */
   record Reused() implements Reservation {}

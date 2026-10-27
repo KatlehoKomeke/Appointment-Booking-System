@@ -11,12 +11,13 @@
  * application.BookAppointmentHandler}; docs/architecture.md, section 4), opening it again with its
  * reference and the last four digits of the number, behind a limit on wrong tries ({@code
  * application.LookupAppointmentHandler}), cancelling it the same way before it starts, in one
- * transaction that also supersedes a confirmation still PENDING or FAILED and writes the
- * cancellation SMS ({@code application.CancelAppointmentHandler}, Tier 2), the read that tells
- * scheduling which seats active appointments hold ({@code infrastructure}, implementing
- * scheduling's port), and the retention purge that deletes bookings once their appointment has
- * ended for the hosted demo ({@code application.RetentionPurge}, run hourly by {@code
- * infrastructure.RetentionPurgeJob} only while {@code branchbook.retention.enabled} is true).
+ * transaction that deletes its confirmations, writes the cancellation SMS and deletes the
+ * appointment itself, keeping only that SMS until it is final ({@code
+ * application.CancelAppointmentHandler}, Tier 2; V6), the read that tells scheduling which seats
+ * active appointments hold ({@code infrastructure}, implementing scheduling's port), and the
+ * retention purge that deletes bookings once their appointment has ended for the hosted demo
+ * ({@code application.RetentionPurge}, run hourly by {@code infrastructure.RetentionPurgeJob} only
+ * while {@code branchbook.retention.enabled} is true).
  *
  * <p>From M6: every booking request is counted by its outcome, the {@code
  * appointments_booked_total} metric ({@code api.BookingOutcomeMeter}, {@code

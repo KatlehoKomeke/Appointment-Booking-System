@@ -1,6 +1,5 @@
 package za.co.fynbos.branchbook.booking.application;
 
-import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -8,7 +7,6 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -38,14 +36,11 @@ import za.co.fynbos.branchbook.catalogue.domain.Branch;
 import za.co.fynbos.branchbook.catalogue.domain.Province;
 import za.co.fynbos.branchbook.catalogue.domain.ServiceType;
 import za.co.fynbos.branchbook.shared.config.BookingProperties;
-import za.co.fynbos.branchbook.shared.problem.ProblemCode;
-import za.co.fynbos.branchbook.shared.problem.ProblemException;
 
 /**
- * BR-14, at the handler: the one re-run after a version conflict. Two concurrent cancels are proven
- * on the database by {@code CancelAppointmentIT}; a second conflict cannot happen there, because
- * cancel is the only API writer of an appointment, so the repository is a stub that makes every
- * flush fail. The values are synthetic.
+ * BR-14, at the handler: the order of the cancel's steps, and what a lost version check answers.
+ * Both are proven on the database by {@code CancelAppointmentIT}; here the repository and the
+ * outbox are stubs, so the order is exact and the conflict certain. The values are synthetic.
  */
 class CancelAppointmentHandlerTest {
 
@@ -63,14 +58,15 @@ class CancelAppointmentHandlerTest {
 
   private final AppointmentViews views = mock(AppointmentViews.class);
 
+  private final LookupAttemptLimiter limiter =
+      new LookupAttemptLimiter(
+          new BookingProperties(
+              Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false));
+
   private final CancelAppointmentHandler handler =
       new CancelAppointmentHandler(
           transactions,
-          new AppointmentAccess(
-              appointments,
-              new LookupAttemptLimiter(
-                  new BookingProperties(
-                      Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false))),
+          new AppointmentAccess(appointments, limiter),
           appointments,
           catalogue,
           outbox,
@@ -78,9 +74,9 @@ class CancelAppointmentHandlerTest {
           Clock.fixed(NOW, ZoneOffset.UTC));
 
   /**
-   * The response is rendered inside the cancel's transaction, before it commits, and nothing is
-   * read after it, so the retention purge cannot delete the appointment between the commit and the
-   * read and turn a done cancel into a 500.
+   * The row is locked, version-checked, before anything is written; the response is rendered from
+   * the appointment in memory and its one cancellation SMS, before the delete; and nothing is read
+   * after the commit, which would find the appointment gone.
    */
   @Test
   void responseIsRenderedInsideTheTransactionBeforeItCommits() {
@@ -88,40 +84,45 @@ class CancelAppointmentHandlerTest {
     when(appointments.findByReference(any())).thenAnswer(call -> Optional.of(confirmed()));
     when(catalogue.branch(any())).thenReturn(branch());
     when(catalogue.service(any())).thenReturn(service());
+    NotificationSummary sms = cancellationSms();
+    when(outbox.enqueueCancellation(any())).thenReturn(sms);
 
     handler.cancel(REFERENCE, "0101");
 
     InOrder order = inOrder(appointments, outbox, views, transactions);
-    order.verify(appointments).update(any());
+    order.verify(appointments).lockForDeletion(any());
     order.verify(outbox).enqueueCancellation(any());
-    order.verify(views).of(any(), eq(NOW));
+    order.verify(views).of(any(), eq(NOW), eq(List.of(sms)));
+    order.verify(appointments).delete(any());
     order.verify(transactions).commit(any());
     verify(views, never()).byId(any(), any());
+    verify(views, never()).of(any(), any());
   }
 
   /**
-   * A version conflict on the re-run as well is {@code 503 TRY_AGAIN} with {@code Retry-After: 2},
-   * never a third attempt, and nothing is queued.
+   * A cancel that loses the version check, to another cancel or to the purge, is {@code 404
+   * APPOINTMENT_NOT_FOUND} that counts as a wrong try, exactly as for an unknown reference, and
+   * writes nothing: four of them and a fifth wrong try block the reference.
    */
   @Test
-  void secondVersionConflictReturns503TryAgain() {
+  void versionConflictReturns404CountedAndWritesNothing() {
     when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
     when(appointments.findByReference(any())).thenAnswer(call -> Optional.of(confirmed()));
-    when(catalogue.branch(any())).thenReturn(branch());
-    when(catalogue.service(any())).thenReturn(service());
-    doThrow(new OptimisticLockingFailureException("test: changed by another transaction"))
+    doThrow(new OptimisticLockingFailureException("test: deleted by another transaction"))
         .when(appointments)
-        .update(any());
+        .lockForDeletion(any());
 
-    assertThatExceptionOfType(ProblemException.class)
-        .isThrownBy(() -> handler.cancel(REFERENCE, "0101"))
-        .satisfies(
-            refused -> {
-              assertThat(refused.code()).isEqualTo(ProblemCode.TRY_AGAIN);
-              assertThat(refused.retryAfter()).contains(Duration.ofSeconds(2));
-            });
-    verify(appointments, times(2)).update(any());
+    for (int lost = 1; lost <= 5; lost++) {
+      assertThatExceptionOfType(AppointmentNotFoundException.class)
+          .isThrownBy(() -> handler.cancel(REFERENCE, "0101"));
+    }
+
+    assertThatExceptionOfType(LookupRateLimitedException.class)
+        .as("each lost cancel counted as a wrong try")
+        .isThrownBy(() -> handler.cancel(REFERENCE, "0101"));
     verifyNoInteractions(outbox);
+    verify(appointments, never()).delete(any());
+    verify(transactions, never()).commit(any());
   }
 
   /** A fresh copy each time, as each transaction loads its own. */
@@ -138,6 +139,19 @@ class CancelAppointmentHandlerTest {
             CustomerName.parse("Mokoena").orElseThrow(),
             MobileNumber.parse("082 555 0101").orElseThrow()),
         NOW);
+  }
+
+  private static NotificationSummary cancellationSms() {
+    return new NotificationSummary(
+        UUID.randomUUID(),
+        "SMS",
+        "CANCELLATION",
+        "PENDING",
+        0,
+        null,
+        null,
+        "082 *** 0101",
+        "Appt cancelled: FICA update, Test Branch, Tue 27 Oct 08:00 SAST. Ref " + REFERENCE);
   }
 
   private static Branch branch() {

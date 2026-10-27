@@ -8,8 +8,8 @@
  *
  * <p>The ports to other modules are declared here and implemented there, so dependencies run
  * towards booking: {@link za.co.fynbos.branchbook.booking.application.ConfirmationOutbox} writes
- * the confirmation inside the booking transaction, and the cancellation, superseding a confirmation
- * still PENDING or FAILED, inside the cancel transaction; {@link
+ * the confirmation inside the booking transaction, and the cancellation, in place of every
+ * confirmation, inside the cancel transaction that then deletes the appointment; {@link
  * za.co.fynbos.branchbook.booking.application.AppointmentNotifications} reads an appointment's
  * messages back, and {@link za.co.fynbos.branchbook.booking.application.NotificationEraser} deletes
  * them when the appointment itself is deleted. All three are implemented by the notification
