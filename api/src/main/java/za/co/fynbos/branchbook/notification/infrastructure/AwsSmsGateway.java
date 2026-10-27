@@ -1,6 +1,7 @@
 package za.co.fynbos.branchbook.notification.infrastructure;
 
 import java.time.Duration;
+import java.util.EnumSet;
 import org.jspecify.annotations.Nullable;
 import software.amazon.awssdk.awscore.retry.AwsRetryStrategy;
 import software.amazon.awssdk.core.exception.SdkClientException;
@@ -16,6 +17,7 @@ import software.amazon.awssdk.services.pinpointsmsvoicev2.model.MessageType;
 import software.amazon.awssdk.services.pinpointsmsvoicev2.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.pinpointsmsvoicev2.model.SendTextMessageRequest;
 import software.amazon.awssdk.services.pinpointsmsvoicev2.model.ServiceQuotaExceededException;
+import software.amazon.awssdk.services.pinpointsmsvoicev2.model.ServiceQuotaExceededExceptionReason;
 import software.amazon.awssdk.services.pinpointsmsvoicev2.model.ThrottlingException;
 import software.amazon.awssdk.services.pinpointsmsvoicev2.model.ValidationException;
 import za.co.fynbos.branchbook.notification.application.MessageGateway;
@@ -30,9 +32,11 @@ import za.co.fynbos.branchbook.notification.application.SmsProperties;
  *
  * <p>One client is built at start-up and closed on shutdown. Its credentials come from the SDK's
  * default provider chain, which in the hosted demo is the ECS task role, so no key is ever
- * configured. It does not retry: a refusal goes back to the dispatcher, whose backoff and fifth
- * failed attempt apply as they do to the simulated gateway, and a call that hangs gives up after
- * {@link #CALL_TIMEOUT}, so the dispatcher's thread and its row lock are never held for long.
+ * configured. It does not retry: a refusal goes back to the dispatcher, and a call that hangs gives
+ * up after {@link #CALL_TIMEOUT}, so the dispatcher's thread and its row lock are never held for
+ * long. A refusal that sending again cannot cure, such as a number the SMS sandbox has not
+ * verified, is permanent, so the dispatcher marks the message FAILED at once; any other gets the
+ * dispatcher's backoff and fifth failed attempt, as the simulated gateway's refusal does.
  *
  * <p>A refusal is recorded as a fixed code built from the exception's type and, where AWS gives
  * one, its typed reason, such as {@code AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED}. An
@@ -55,6 +59,19 @@ final class AwsSmsGateway implements MessageGateway, AutoCloseable {
 
   /** The longest provider id {@code notification_messages.provider_message_id} stores. */
   private static final int MAX_PROVIDER_ID = 64;
+
+  /**
+   * The quota reasons that say a monthly spend limit is used up, which lasts until the month ends
+   * or the limit is raised, so a refusal for one of them is permanent. Never changed. An {@link
+   * EnumSet} answers false when asked about a missing reason, where {@code Set.of} would throw.
+   */
+  private static final EnumSet<ServiceQuotaExceededExceptionReason> MONTHLY_SPEND_LIMITS =
+      EnumSet.of(
+          ServiceQuotaExceededExceptionReason.MONTHLY_SPEND_LIMIT_REACHED_FOR_TEXT,
+          ServiceQuotaExceededExceptionReason.MONTHLY_SPEND_LIMIT_REACHED_FOR_MEDIA,
+          ServiceQuotaExceededExceptionReason.MONTHLY_SPEND_LIMIT_REACHED_FOR_VOICE,
+          ServiceQuotaExceededExceptionReason.MONTHLY_SPEND_LIMIT_REACHED_FOR_RCS,
+          ServiceQuotaExceededExceptionReason.MONTHLY_SPEND_LIMIT_REACHED_FOR_NOTIFY);
 
   private final PinpointSmsVoiceV2Client client;
   private final SmsProperties.Aws settings;
@@ -111,7 +128,7 @@ final class AwsSmsGateway implements MessageGateway, AutoCloseable {
       String messageId = client.sendTextMessage(request(message)).messageId();
       return new Accepted(providerId(messageId, message));
     } catch (SdkException failure) {
-      return new Refused(codeFor(failure));
+      return new Refused(codeFor(failure), isPermanent(failure));
     }
   }
 
@@ -177,6 +194,29 @@ final class AwsSmsGateway implements MessageGateway, AutoCloseable {
       case ResourceNotFoundException _ -> "AWS_RESOURCE_NOT_FOUND";
       case SdkClientException _ -> "AWS_UNREACHABLE";
       default -> "AWS_ERROR";
+    };
+  }
+
+  /**
+   * Tells whether AWS would refuse the same message again however often it were sent, so the
+   * dispatcher should mark it FAILED at once rather than spend four more attempts on it: any
+   * conflict, such as a number the sandbox has not verified or one that has opted out; access
+   * denied; any request AWS finds invalid; a setting that names something that does not exist; and
+   * a monthly spend limit reached. Throttling, AWS's own failure, the network, any other quota and
+   * any other error may pass next time.
+   *
+   * @param failure what the SDK threw
+   * @return true if sending the message again cannot succeed
+   */
+  static boolean isPermanent(SdkException failure) {
+    return switch (failure) {
+      case ConflictException _,
+          AccessDeniedException _,
+          ValidationException _,
+          ResourceNotFoundException _ ->
+          true;
+      case ServiceQuotaExceededException quota -> MONTHLY_SPEND_LIMITS.contains(quota.reason());
+      default -> false;
     };
   }
 

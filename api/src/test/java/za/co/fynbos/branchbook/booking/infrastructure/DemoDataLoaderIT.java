@@ -176,6 +176,34 @@ class DemoDataLoaderIT {
   }
 
   /**
+   * Where the deployment sends real SMS ({@code branchbook.sms.gateway=aws}), the fixtures are not
+   * booked, whatever their numbers: a booking made at start-up must never text anyone. The loader
+   * is built from the setting's text, as the application builds it, and says why in one INFO line.
+   */
+  @Test
+  void booksNothingWhereRealSmsIsSent(CapturedOutput output) {
+    DemoDataLoader hosted =
+        new DemoDataLoader(
+            booking,
+            calendars,
+            bookedIntervals,
+            jdbcClient,
+            clock,
+            rules,
+            new DemoDataProperties(true),
+            " AWS ");
+
+    assertThat(hosted.loadIfEmpty()).isZero();
+
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM appointments", Integer.class)).isZero();
+    assertThat(output.getAll().lines().filter(line -> line.contains("demo_data.")))
+        .singleElement()
+        .asString()
+        .contains("INFO")
+        .contains("demo_data.skipped reason=real_sms_gateway");
+  }
+
+  /**
    * A fixture the database refuses is logged as a warning by branch and service, never by number or
    * name, and the other two are still booked; nothing is thrown. A test-only trigger refuses the
    * second fixture's insert.

@@ -344,7 +344,7 @@ start-up. The load runs on a virtual thread of its own, `demo-data`, so it never
 cannot be booked is logged as a warning naming its branch and service only (`demo_data.no_free_slot`,
 `demo_data.fixture_refused` or `demo_data.fixture_failed`); the application
 carries on. A restart books nothing more while any appointment exists. While
-`branchbook.booking.demo-numbers-only` is on, the loader books nothing and logs one INFO line,
+`branchbook.booking.demo-numbers-only` is on, or `branchbook.sms.gateway` is `aws`, so a fixture could never be sent a real SMS, the loader books nothing and logs one INFO line,
 `demo_data.skipped reason=demo_numbers_only`, before it reads the database. Its `+27 60 000` numbers are outside the
 demo block, and it books through the booking handler, past the API's demo-number check, so it checks the setting
 itself rather than store numbers that deployment promised not to take. `DemoDataLoaderIT` drives the loader

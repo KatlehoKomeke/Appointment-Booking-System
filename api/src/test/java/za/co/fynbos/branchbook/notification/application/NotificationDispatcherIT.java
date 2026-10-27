@@ -42,7 +42,8 @@ import za.co.fynbos.branchbook.support.MutableClock;
 
 /**
  * BR-17, FR-15, NFR-13: the dispatcher delivers PENDING messages through the gateway, one
- * transaction each. BR-24, FR-18: it never delivers a confirmation after its appointment's
+ * transaction each, backing off after a retryable refusal and failing a message at once on a
+ * permanent one. BR-24, FR-18: it never delivers a confirmation after its appointment's
  * cancellation, and a retry waits for a send in flight. BR-14: a cancellation, which outlives its
  * deleted appointment, is deleted once it is final. Its own loop is off in the tests, so each test
  * calls {@link NotificationDispatcher#runOnce} with the instant it wants: no test sleeps. The
@@ -51,6 +52,12 @@ import za.co.fynbos.branchbook.support.MutableClock;
 @IntegrationTest
 @ExtendWith(DatabaseReset.class)
 class NotificationDispatcherIT {
+
+  /** The code of AWS's refusal of a number the SMS sandbox has not verified: permanent. */
+  private static final String NOT_VERIFIED = "AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED";
+
+  /** The code of AWS's throttling: retryable. */
+  private static final String THROTTLED = "AWS_THROTTLED";
 
   @Autowired private MockMvcTester mvc;
 
@@ -96,7 +103,9 @@ class NotificationDispatcherIT {
 
   /**
    * BR-17: a refused SMS is tried again after 2, 4, 8 and 16 seconds, and the fifth refusal marks
-   * it FAILED with DELIVERY_FAILED: 30 seconds of backoff. A message is never tried early.
+   * it FAILED with DELIVERY_FAILED: 30 seconds of backoff. A message is never tried early. The
+   * simulated gateway's refusal of a number ending 0000 is retryable, so the demo still shows all
+   * five attempts.
    */
   @Test
   void retriesWithBackoffThenMarksFailedAfterFiveAttempts() {
@@ -132,6 +141,106 @@ class NotificationDispatcherIT {
     assertThat(jdbc.queryForObject("SELECT status FROM appointments", String.class))
         .as("BR-16: the appointment never depends on its delivery")
         .isEqualTo("CONFIRMED");
+  }
+
+  /**
+   * BR-17, BR-19: a refusal the gateway calls permanent, such as AWS's for a number the SMS sandbox
+   * has not verified, marks the message FAILED with DELIVERY_FAILED on that attempt, with the code
+   * as its last error, and it is never tried again. The log line gives the code beside the
+   * message's id, and the log holds the number in no form.
+   */
+  @Test
+  @ExtendWith(OutputCaptureExtension.class)
+  void permanentRefusalMarksFailedOnItsFirstAttemptAndLogsItsCode(CapturedOutput output) {
+    book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0181"));
+    UUID confirmation = messageId("CONFIRMATION");
+    ConcurrentLinkedQueue<UUID> tried = new ConcurrentLinkedQueue<>();
+    NotificationDispatcher refusing =
+        dispatcherWith(refusingInto(tried, MessageGateway.Refused.permanent(NOT_VERIFIED)));
+    Instant start = clock.instant();
+
+    assertThat(refusing.runOnce(start)).isOne();
+
+    assertThat(onlyMessage())
+        .containsEntry("status", "FAILED")
+        .containsEntry("failure_reason", "DELIVERY_FAILED")
+        .containsEntry("attempts", 1)
+        .containsEntry("last_error", NOT_VERIFIED)
+        .containsEntry("sent_at", null);
+    assertThat(refusing.runOnce(start.plusSeconds(3600))).as("never tried again").isZero();
+    assertThat(tried).containsExactly(confirmation);
+    assertThat(output.getAll())
+        .contains("outbox.failed messageId=" + confirmation + " attempts=1 code=" + NOT_VERIFIED)
+        .doesNotContain("outbox.retry messageId=")
+        .doesNotContainPattern(anyFormOf("0181"));
+  }
+
+  /**
+   * BR-14, BR-17: a cancellation the gateway refuses for good is final on that attempt, so it is
+   * deleted at once, in the same transaction, rather than tried four more times.
+   */
+  @Test
+  @ExtendWith(OutputCaptureExtension.class)
+  void cancellationRefusedPermanentlyIsDeletedOnItsFirstAttempt(CapturedOutput output) {
+    String reference =
+        reference(book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0182")));
+    assertThat(cancel(mvc, reference, "0182")).hasStatus(HttpStatus.OK);
+    UUID cancellation = messageId("CANCELLATION");
+    ConcurrentLinkedQueue<UUID> tried = new ConcurrentLinkedQueue<>();
+
+    int handled =
+        dispatcherWith(refusingInto(tried, MessageGateway.Refused.permanent(NOT_VERIFIED)))
+            .runOnce(clock.instant());
+
+    assertThat(handled).isOne();
+    assertThat(tried).containsExactly(cancellation);
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM notification_messages", Integer.class))
+        .as("a cancellation refused for good is not kept")
+        .isZero();
+    assertThat(output.getAll())
+        .contains("outbox.failed messageId=" + cancellation + " attempts=1 code=" + NOT_VERIFIED)
+        .contains("outbox.deleted messageId=" + cancellation + " kind=CANCELLATION");
+  }
+
+  /**
+   * BR-17: a retryable refusal, such as AWS's throttling, keeps the backoff: the message is tried
+   * again after 2, 4, 8 and 16 seconds, never early, and the fifth refusal marks it FAILED with
+   * DELIVERY_FAILED. Every outbox.retry line and the outbox.failed line give the code beside the
+   * message's id, and the log holds the number in no form.
+   */
+  @Test
+  @ExtendWith(OutputCaptureExtension.class)
+  void retryableRefusalBacksOffAndMarksFailedOnTheFifthAttempt(CapturedOutput output) {
+    book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0183"));
+    UUID confirmation = messageId("CONFIRMATION");
+    ConcurrentLinkedQueue<UUID> tried = new ConcurrentLinkedQueue<>();
+    NotificationDispatcher throttled =
+        dispatcherWith(refusingInto(tried, MessageGateway.Refused.retryable(THROTTLED)));
+    Instant start = clock.instant();
+
+    for (int second : new int[] {0, 2, 6, 14}) {
+      assertThat(throttled.runOnce(start.plusSeconds(second))).isOne();
+      assertThat(onlyMessage())
+          .containsEntry("status", "PENDING")
+          .containsEntry("last_error", THROTTLED);
+    }
+    assertThat(throttled.runOnce(start.plusSeconds(30).minusMillis(1)))
+        .as("not due a millisecond early")
+        .isZero();
+    assertThat(throttled.runOnce(start.plusSeconds(30))).isOne();
+
+    assertThat(onlyMessage())
+        .containsEntry("status", "FAILED")
+        .containsEntry("failure_reason", "DELIVERY_FAILED")
+        .containsEntry("attempts", 5)
+        .containsEntry("last_error", THROTTLED);
+    assertThat(tried).hasSize(5).containsOnly(confirmation);
+    String message = "messageId=" + confirmation + " attempts=";
+    assertThat(output.getAll())
+        .contains("outbox.retry " + message + "1 retryInSeconds=2 code=" + THROTTLED)
+        .contains("outbox.retry " + message + "4 retryInSeconds=16 code=" + THROTTLED)
+        .contains("outbox.failed " + message + "5 code=" + THROTTLED)
+        .doesNotContainPattern(anyFormOf("0183"));
   }
 
   /**
@@ -493,7 +602,7 @@ class NotificationDispatcherIT {
         message -> {
           holding.countDown();
           await(letGo);
-          return new MessageGateway.Refused("SIMULATED_FAILURE");
+          return MessageGateway.Refused.retryable("SIMULATED_FAILURE");
         };
     Instant fifth = start.plusSeconds(30);
     String messageId = messageId("CONFIRMATION").toString();
@@ -528,6 +637,23 @@ class NotificationDispatcherIT {
       sent.add(message.id());
       return new MessageGateway.Accepted("rec-" + message.id());
     };
+  }
+
+  /** A gateway that refuses every message the same way and records the order it was tried in. */
+  private static MessageGateway refusingInto(
+      ConcurrentLinkedQueue<UUID> tried, MessageGateway.Refused refusal) {
+    return message -> {
+      tried.add(message.id());
+      return refusal;
+    };
+  }
+
+  /**
+   * A pattern for a demo number in any of its forms, national or international, with or without
+   * separators, by its last four digits.
+   */
+  private static String anyFormOf(String lastFour) {
+    return "555\\D{0,3}" + lastFour;
   }
 
   /** The id of the one message of a kind. */
