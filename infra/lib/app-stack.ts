@@ -12,6 +12,7 @@ import * as logs from 'aws-cdk-lib/aws-logs';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as route53 from 'aws-cdk-lib/aws-route53';
 import * as targets from 'aws-cdk-lib/aws-route53-targets';
+import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import * as smsvoice from 'aws-cdk-lib/aws-smsvoice';
 import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
@@ -44,6 +45,9 @@ export interface AppStackProps extends StackProps {
 
   /** The database from {@link DataStack}; its generated secret supplies the credentials. */
   readonly database: rds.DatabaseInstance;
+
+  /** The SMS daily cap's HMAC key from {@link DataStack}, injected into the task and never into the template. */
+  readonly smsCapKey: secretsmanager.ISecret;
 
   /**
    * The public domain, at most 20 characters so that `https://` and it fit the 28 the confirmation SMS allows
@@ -185,6 +189,9 @@ export class AppStack extends Stack {
       secrets: {
         DB_USER: ecs.Secret.fromSecretsManager(secret, 'username'),
         DB_PASSWORD: ecs.Secret.fromSecretsManager(secret, 'password'),
+        // The daily cap's ledger keys each number's fingerprint with it. Without it the app would make a key at
+        // start-up, and every new task would start counting from zero.
+        BRANCHBOOK_SMS_RECIPIENT_CAP_KEY: ecs.Secret.fromSecretsManager(props.smsCapKey),
       },
       stopTimeout: Duration.seconds(30),
     });

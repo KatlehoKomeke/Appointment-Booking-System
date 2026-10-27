@@ -80,6 +80,7 @@ if (process.env.BRANCHBOOK_HOSTED_DEMO === 'true') {
     description: 'BranchBook hosted demo: WAF, the HTTPS load balancer and the Fargate task.',
     vpc: data.vpc,
     database: data.database,
+    smsCapKey: data.smsCapKey,
     domainName: context('demoDomain'),
     hostedZoneId: context('demoHostedZoneId'),
     // Personal data, so never committed; the alarms still exist without it, on a topic with no subscriber.
