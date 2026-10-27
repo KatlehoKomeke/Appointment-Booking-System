@@ -35,7 +35,7 @@ describe('Shell', () => {
 
     const about = screen.getByRole('complementary', { name: 'About this site' });
     expect(about).toHaveTextContent(
-      "Fynbos Bank is fictional. BranchBook is an engineering assessment, not a real bank's service. The hosted demo texts the number you give, so use only your own; the demo numbers 082 555 0000 to 082 555 0199 are never texted.",
+      "Fynbos Bank is fictional. BranchBook is an engineering assessment, not a real bank's service. The hosted demo texts the number you give, so use only your own; the demo numbers 082 555 0000 to 082 555 0199 are never texted. While AWS keeps the demo in its SMS sandbox, only numbers verified on its account receive the text; any other shows Not delivered, and the booking still stands.",
     );
 
     const header = screen.getByRole('banner');
