@@ -56,4 +56,4 @@ module, such as booking's `AppointmentRepository`, are left out.
 | `ConfirmationOutbox` | `booking` | `NotificationOutbox` (`notification`), which writes the PENDING confirmation SMS, and on a cancel supersedes it and writes the cancellation SMS | Built (M3; the cancel in M6) |
 | `AppointmentNotifications` | `booking` | `MessageQueries` (`notification`), which reads a booking's SMS | Built (M3) |
 | `NotificationEraser` | `booking` | `MessageEraser` (`notification`), which deletes a purged booking's messages in the purge's transaction | Built |
-| `MessageGateway` | `notification` | `SimulatedSmsGateway`, which sends nothing real | Built (M5) |
+| `MessageGateway` | `notification` | `SimulatedSmsGateway`, which sends nothing; and, where `branchbook.sms.gateway` is `aws`, `RoutingSmsGateway`, which sends every number outside the demo block a real SMS through `AwsSmsGateway` (AWS End User Messaging SMS) | Built (M5; AWS after M6) |

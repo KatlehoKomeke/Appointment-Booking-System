@@ -72,11 +72,13 @@ The GitHub settings behind layers 4 and 6 can be read with
    [infra/README.md](infra/README.md)).
 
 The demo has no sign-in, so it holds no password of its own: a sign-in prompt in front of a demo is a poor
-experience for everyone who opens it, reviewers included. The application keeps real personal data out instead:
-only the published demo numbers, 082 555 0000 to 082 555 0199, may book (`BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY`),
-every booking is deleted 48 hours after it is made (`BRANCHBOOK_RETENTION_ENABLED`), and the simulated gateway sends
-nothing. Both have been live since 2026-10-26 (058e6fd): a number outside the range gets `422
-DEMO_NUMBER_REQUIRED` and nothing is written, and the deletion runs every hour. The simulated inbox is off on the hosted demo
+experience for everyone who opens it, reviewers included. The application limits what it keeps and sends instead:
+every booking is deleted 48 hours after it is made (`BRANCHBOOK_RETENTION_ENABLED`), live since 2026-10-26 (058e6fd),
+with the deletion running every hour. Any South African mobile may book (`BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` is
+off), and every number outside the published demo block, 082 555 0000 to 082 555 0199, is sent a real SMS through AWS
+End User Messaging SMS (`BRANCHBOOK_SMS_GATEWAY=aws`), within the controls under
+[Unauthenticated SMS sending](#known-risks); the block itself stays simulated, because anyone may type it and it may
+belong to a stranger. The simulated inbox is off on the hosted demo
 (`BRANCHBOOK_INBOX_ENABLED=false`), so other visitors cannot see anyone's booking; each booker still sees their own
 SMS and its status on the confirmation page. `BRANCHBOOK_INBOX_REDACT_REFERENCES=true` (off by default, and off in
 compose, `make dev-api` and every test but `InboxReferencesHiddenIT`) shows every reference in the inbox and its
@@ -115,6 +117,10 @@ BranchBook is designed around the Protection of Personal Information Act, even t
   ([BR-19](docs/domain-rules.md#br-19); `AppointmentApiIT.responsesNeverContainUnmaskedMobile`,
   `InboxApiIT.listsTheNewestMessagesWithTheirReferencesAndRedactedRecipients`).
   Error bodies never contain personal data or another booking's details ([BR-23](docs/domain-rules.md#br-23)).
+- **Who else receives the number.** *Built.* Where `BRANCHBOOK_SMS_GATEWAY=aws`, as on the hosted demo, the number
+  and the text of each SMS go to AWS End User Messaging SMS in Cape Town (af-south-1), and on to the mobile network,
+  to deliver it; a refusal is stored as a fixed code such as `AWS_THROTTLED`, never AWS's message, which can quote
+  the number. Elsewhere nothing leaves the application.
 - **No personal data in logs.** *Built: the database and driver settings in M1, the log proof in M3.* Application
   logs and PostgreSQL's own error logs carry no names or numbers:
   - PostgreSQL logs errors tersely, without the DETAIL line that quotes a constraint's conflicting values (set in
@@ -143,13 +149,15 @@ BranchBook is designed around the Protection of Personal Information Act, even t
   docker compose books on a fresh database uses `+27 60 000 0001`, `+27 60 000 0002` and `+27 60 000 0000`, the last
   refused like any number ending 0000, with the fictional surname Demo ([api/README.md](api/README.md#demo-data)).
   Never use a real person's details, including your own.
-- **A hosted demo cannot collect a real number.** *Built; on in the hosted demo only.* While
+- **A deployment can refuse real numbers.** *Built; off by default, and off in the hosted demo since it sends real SMS.* While
   `branchbook.booking.demo-numbers-only` is true (`BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true`), a booking is taken
   only for the demo block, `082 555 0000` to `082 555 0199`. Any other South African mobile is refused with
   `422 DEMO_NUMBER_REQUIRED` before anything is written, so a real person's number is never stored or sent an SMS,
   and the refusal never repeats the number (`DemoNumbersOnlyIT.aNumberOutsideTheBlockIsRefusedOnItsFieldAndWritesNothing`,
   `MobileNumberTest.theDemoBlockRunsFrom0825550000To0825550199`). The start-up log says which numbers bookings take.
-  Nothing real is ever sent: the SMS gateway is simulated. On the hosted demo the simulated inbox is off, so no
+  The SMS gateway is simulated by default, and for the demo block everywhere; where `BRANCHBOOK_SMS_GATEWAY=aws`, as
+  on the hosted demo, every other number is sent a real SMS (`RoutingSmsGatewayTest.theDemoBlockIsAlwaysSimulated`,
+  and [Known risks](#known-risks)). On the hosted demo the simulated inbox is off, so no
   visitor can list other people's bookings, and every booking is deleted with the purge below. Names are free text;
   the form and the privacy page ask for a made-up one. ADR-0006 planned to lock each demo number to a fictional
   persona; the block and the purge were built instead
@@ -202,7 +210,7 @@ These risks are accepted in v1, or reduced but not closed. Each has the control 
 
 | Risk | Today | Production control |
 |---|---|---|
-| **Unauthenticated SMS sending.** Anyone can book with any South African mobile number, which invites SMS pumping, harassment and slot squatting. | Open by design ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)). v1 sends nothing real: confirmations go to a simulated gateway (built in M5), and the hosted demo accepts only the published demo numbers. | An OTP before an appointment counts as confirmed, per-recipient and per-prefix caps, CAPTCHA, blocking premium-rate prefixes, and cost alerts |
+| **Unauthenticated SMS sending.** Anyone can book with any South African mobile number, which invites SMS pumping, harassment and slot squatting. Where `BRANCHBOOK_SMS_GATEWAY=aws`, as on the hosted demo, the confirmation and the cancellation are real SMS. | Reduced, not closed ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)). The controls: the published demo block is always simulated (`RoutingSmsGatewayTest.theDemoBlockIsAlwaysSimulated`); the protect configuration lets AWS send only to South Africa (`BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID`); the per-recipient daily cap writes any SMS past `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` in 24 hours FAILED with `RECIPIENT_DAILY_CAP`, never sent ([BR-17](docs/domain-rules.md#br-17), `RecipientDailyCapIT`); WAF allows 30 booking `POST`s per address in five minutes; `MaxPrice` (`BRANCHBOOK_SMS_AWS_MAX_PRICE`, US$0.20 by default) refuses a dearer message; AWS's monthly SMS spend limit stops all sending once reached; and while the account is in the SMS sandbox, AWS texts only verified numbers. The residual risk: there is no one-time-code check, so anyone can make the app text any South African number, up to the cap a day (cancels racing each other can pass it by a message or two). | An OTP before an appointment counts as confirmed, per-recipient and per-prefix caps, CAPTCHA, blocking premium-rate prefixes, and cost alerts |
 | **Learning that a number has a booking.** Booking with another person's number returns `409 DUPLICATE_APPOINTMENT` or `409 CUSTOMER_OVERLAP`, though never the reference, branch or time ([BR-23](docs/domain-rules.md#br-23)). | Accepted for the demo | OTP verification of the number before any answer |
 | **Reference enumeration.** Guessing references to find appointments. | Built in M3: eight characters from a 31-symbol alphabet, the same 404 for an unknown reference and for wrong digits, and the lookup rate limit ([BR-13](docs/domain-rules.md#br-13)) | Appointments bound to a verified customer through the bank's identity provider |
 | **Blocking someone's lookup.** Five wrong tries, lookups and cancels together, block a known reference for an hour, and the counts are kept in memory for one instance ([docs/architecture.md](docs/architecture.md#lookup)). | Accepted: a reference appears only in the customer's own SMS and pages | A shared rate-limit store, and identity-bound lookups |

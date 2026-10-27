@@ -12,7 +12,8 @@ package za.co.fynbos.branchbook.booking.application;
 public interface ConfirmationOutbox {
 
   /**
-   * Writes the confirmation SMS as a PENDING message, inside the caller's transaction.
+   * Writes the confirmation SMS as a PENDING message, inside the caller's transaction; or as a
+   * FAILED one, never sent, where the number has reached the notification module's daily cap.
    *
    * @param confirmation what the message must say and where it goes
    */
@@ -20,9 +21,9 @@ public interface ConfirmationOutbox {
 
   /**
    * Supersedes the appointment's confirmation if it is still PENDING or FAILED, so it is not sent
-   * from then on, then writes the cancellation SMS as a PENDING message, inside the caller's
-   * transaction (BR-16, BR-24). A confirmation is therefore delivered before its cancellation, or
-   * never.
+   * from then on, then writes the cancellation SMS as a PENDING message, or a FAILED one where the
+   * number has reached the daily cap, inside the caller's transaction (BR-16, BR-24). A
+   * confirmation is therefore delivered before its cancellation, or never.
    *
    * @param cancellation what the message must say and where it goes
    */

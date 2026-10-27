@@ -104,3 +104,21 @@ The decision stands.
   number's last four digits are public ([infra/README.md](../../infra/README.md#the-hosted-demo)).
 
 The decision otherwise stands.
+
+**2026-10-27, real SMS on the hosted demo.** The project owner chose to let the demo send real SMS.
+
+- **Any South African mobile may book,** and a number outside the published demo block is sent a real SMS through AWS
+  End User Messaging SMS in af-south-1 (`BRANCHBOOK_SMS_GATEWAY=aws`); the task definition switches
+  `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` off. The block, 082 555 0000 to 0199, stays simulated, because it is published
+  for anyone to try. The CDK app adds a protect configuration that allows South Africa only, `sms-voice:SendTextMessage`
+  on the task role, and the `BRANCHBOOK_SMS_*` settings ([api/README.md](../../api/README.md#configuration)).
+- **Real numbers are now stored,** for at most 48 hours: the retention job still deletes every booking, with its
+  messages, 48 hours after it is made.
+- **Delivery is best effort.** South Africa supports no sender IDs, so with no origination identity AWS sends over a
+  shared route; until the owner opens a Support case for production access, the account is in the SMS sandbox, which
+  texts only verified numbers and spends at most US$1 a month ([docs/runbook.md](../runbook.md#let-the-hosted-demo-send-real-sms)).
+- **The cost and abuse controls** are the per-recipient daily cap, WAF's per-address booking limit, `MaxPrice` and
+  AWS's monthly spend limit; with no one-time code, anyone can make the demo text any South African number, up to the
+  cap a day ([SECURITY.md](../../SECURITY.md#known-risks)).
+
+The decision otherwise stands.

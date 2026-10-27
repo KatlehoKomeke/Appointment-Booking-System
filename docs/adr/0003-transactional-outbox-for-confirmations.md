@@ -64,3 +64,19 @@ stands, with one change:
   `FAILED` with `DELIVERY_FAILED` after five attempts, and the appointment stays `CONFIRMED`.
 - **Superseding arrives with cancellation.** In v1 as built no message is ever superseded; the rule arrives with the
   Tier 2 cancel (BR-14, BR-24).
+
+**2026-10-27, real SMS.** The outbox, the dispatcher and the port stand; the last hop is no longer always simulated.
+
+- **A real gateway, where a deployment asks.** `branchbook.sms.gateway` is `simulated` by default, as locally and in
+  the tests. Where it is `aws` (`BRANCHBOOK_SMS_GATEWAY=aws`, the hosted demo), `RoutingSmsGateway` sends every number
+  outside the published demo block, 082 555 0000 to 0199, a real SMS through `AwsSmsGateway`, AWS End User Messaging
+  SMS in af-south-1, which the CDK stack allows the task role to call; the block stays simulated, because anyone may
+  type it. As the Consequences expected, the provider is one more `MessageGateway` and configuration, built with the
+  AWS SDK for Java v2 and the JDK's own HTTP client ([architecture.md, section 5](../architecture.md#5-the-confirmation-sms)).
+- **Refusals are fixed codes.** The SDK does not retry, so the dispatcher's backoff is the only retry policy; a
+  refusal records the exception's type and typed reason, such as `AWS_THROTTLED`, never AWS's message
+  ([docs/runbook.md](../runbook.md#what-the-aws-codes-mean)). AWS's `MessageId` is the provider id. Delivery is still
+  at least once: a call that times out after AWS took the message is sent again.
+- **`RECIPIENT_DAILY_CAP` is produced.** Where `branchbook.sms.recipient-daily-cap` is above 0, a message past the cap
+  for its number in 24 hours is written FAILED with that reason and never sent; the booking or the cancel succeeds
+  ([BR-17](../domain-rules.md#br-17), `RecipientDailyCapIT`).

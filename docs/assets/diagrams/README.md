@@ -28,7 +28,7 @@ The rows run in reading order: the system, the application, the local stack, del
 | request-flow | Mermaid | What code runs, in what order, for a real request today | [architecture.md, section 2.1](../../architecture.md#21-one-request-through-the-jar) |
 | module-map | Mermaid | Which modules exist, which depend on which today, and which dependencies are planned | [architecture.md, section 3](../../architecture.md#3-modules-and-the-dependency-rule) |
 | booking-transaction | Mermaid | In what order a booking will take its locks and write its rows, and which part already exists | [architecture.md, section 4](../../architecture.md#4-the-booking-transaction) |
-| confirmation-states | Mermaid | Which states a confirmation message can be in, and how it moves between them | [architecture.md, section 5](../../architecture.md#5-the-simulated-confirmation) |
+| confirmation-states | Mermaid | Which states a confirmation message can be in, and how it moves between them | [architecture.md, section 5](../../architecture.md#5-the-confirmation-sms) |
 | appointment-lifecycle | Mermaid | Which states an appointment can take, and which transitions the API will expose | [architecture.md, section 6](../../architecture.md#6-appointment-lifecycle) |
 | [data-model](data-model.svg) | SVG | Which tables exist, which module owns each, how they relate, and what the database itself guarantees | [architecture.md, section 7](../../architecture.md#7-data-model) |
 | [local-runtime](local-runtime.svg) | SVG | What `make up` builds and starts, how it knows the stack is ready, and where else the same image runs | [architecture.md, section 10.1](../../architecture.md#101-locally-the-image-and-the-stack) |

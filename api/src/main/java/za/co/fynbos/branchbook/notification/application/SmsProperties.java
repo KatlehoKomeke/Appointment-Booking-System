@@ -1,0 +1,78 @@
+package za.co.fynbos.branchbook.notification.application;
+
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.PositiveOrZero;
+import org.jspecify.annotations.Nullable;
+import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.DefaultValue;
+import org.springframework.validation.annotation.Validated;
+
+/**
+ * How SMS leave the application, under {@code branchbook.sms} in application.yml.
+ *
+ * <p>The simulated gateway is the default, so a copy run locally or in the tests sends nothing.
+ * Where a deployment sets {@code gateway} to {@code aws}, as the hosted demo does, every number
+ * outside the published demo block, 082 555 0000 to 0199, is sent a real SMS through AWS End User
+ * Messaging SMS; the block itself stays simulated, because it is published for anyone to type and
+ * may belong to a real stranger. The per-recipient daily cap limits how many SMS one number can be
+ * made to receive, whichever gateway sends them (BR-17).
+ *
+ * @param gateway which gateway sends: {@link Gateway#SIMULATED}, the default, or {@link
+ *     Gateway#AWS}
+ * @param recipientDailyCap the most SMS one number outside the demo block may be written in any 24
+ *     hours; a message at or above it is written FAILED with {@code RECIPIENT_DAILY_CAP} and never
+ *     sent. {@code 0}, the default, switches the cap off
+ * @param aws how to reach AWS End User Messaging SMS; read only when the gateway is {@link
+ *     Gateway#AWS}
+ */
+@Validated
+@ConfigurationProperties("branchbook.sms")
+public record SmsProperties(
+    @NotNull @DefaultValue("simulated") Gateway gateway,
+    @PositiveOrZero int recipientDailyCap,
+    @NotNull @Valid @DefaultValue Aws aws) {
+
+  /** The gateways an SMS can leave through. */
+  public enum Gateway {
+
+    /** Nothing is sent: the simulated gateway accepts or refuses every message itself. */
+    SIMULATED,
+
+    /**
+     * Numbers outside the published demo block are sent a real SMS through AWS End User Messaging
+     * SMS; numbers inside it stay simulated.
+     */
+    AWS
+  }
+
+  /**
+   * The settings of AWS End User Messaging SMS (the {@code pinpoint-sms-voice-v2} API). Credentials
+   * are never set here: they come from the SDK's default provider chain, which in the hosted demo
+   * is the ECS task role. A blank optional value is left out of every request.
+   *
+   * @param region the AWS region to send from, such as {@code af-south-1}; blank leaves it to the
+   *     SDK's default region chain, and start-up fails if that finds none
+   * @param protectConfigurationId the protect configuration that limits which countries a message
+   *     may go to; blank sends none
+   * @param configurationSet the configuration set whose event destinations record each message;
+   *     blank sends none
+   * @param originationIdentity the phone number, pool or sender ID to send from; blank lets AWS
+   *     choose, which for South Africa is a shared route
+   * @param maxPrice the most, in US dollars, one message may cost, such as {@code 0.20}; AWS
+   *     refuses a dearer one. {@code 0.20} by default
+   * @param dryRun whether AWS only validates each message and sends none; {@code false} by default
+   */
+  public record Aws(
+      @Nullable String region,
+      @Nullable String protectConfigurationId,
+      @Nullable String configurationSet,
+      @Nullable String originationIdentity,
+      @NotNull @Pattern(regexp = MAX_PRICE_PATTERN) @DefaultValue("0.20") String maxPrice,
+      boolean dryRun) {
+
+    /** The form AWS accepts for {@code MaxPrice}: up to two digits, a point, one to five digits. */
+    public static final String MAX_PRICE_PATTERN = "[0-9]{0,2}\\.[0-9]{1,5}";
+  }
+}

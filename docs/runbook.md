@@ -1,7 +1,8 @@
 # Runbook
 
-How to look after a running BranchBook: whether it is healthy, what happened to a message, how to replay one that
-failed, whether the hosted demo's 48-hour purge ran, and how to follow one request through the logs. The commands
+How to look after a running BranchBook: whether it is healthy, what happened to a message, what an AWS refusal
+means and how to let the hosted demo send real SMS, how to replay one that failed, whether the hosted demo's 48-hour
+purge ran, and how to follow one request through the logs. The commands
 are for the local stack that `make up` starts; `make psql` opens a SQL prompt on its database. Every number in this
 file is a synthetic demo number.
 
@@ -39,6 +40,9 @@ A message is in one of three states:
     cancellation SMS replaces it, and it is not sent from then on ([BR-24](domain-rules.md#br-24)). Its `lastError`
     is kept: if it is `MARK_FAILED`, the confirmation was handed to the gateway once before the cancel and may have
     been delivered.
+  - `RECIPIENT_DAILY_CAP`: the number had already been written as many SMS in the last 24 hours as
+    `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` allows, so this one was written FAILED and never sent. The booking or the
+    cancel went through. It is never retried; the number gets SMS again once its older messages are a day old.
 
 `retryable` is true exactly when a retry would send the message again: FAILED with `DELIVERY_FAILED` or
 `DISPATCH_ERROR`, and, for a confirmation, an appointment that is neither cancelled nor started.
@@ -53,6 +57,54 @@ FROM notification_messages
 ORDER BY created_at DESC
 LIMIT 20;
 ```
+
+## What the AWS codes mean
+
+Where `BRANCHBOOK_SMS_GATEWAY=aws`, as on the hosted demo, every number outside the published demo block, 082 555 0000
+to 0199, is sent through AWS End User Messaging SMS, and the start-up log has one line naming the gateway, the
+region and whether a protect configuration and a daily cap are set. A refusal is retried like any other, so a
+message refused five times is FAILED with `DELIVERY_FAILED`, and `lastError` holds the last code. Each code is the
+exception's type and, where AWS gives one, its reason; AWS's message is never kept, because it can quote the number.
+
+| `lastError` | What happened | What to do |
+|---|---|---|
+| `AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED` | The account is in the SMS sandbox and the number is not a verified destination. | Verify the number, or leave the sandbox (below). |
+| `AWS_CONFLICT_DESTINATION_COUNTRY_BLOCKED_BY_PROTECT_CONFIGURATION` | The protect configuration does not allow the destination's country. | Nothing, for a number outside South Africa; otherwise check the protect configuration. |
+| `AWS_CONFLICT_DESTINATION_PHONE_NUMBER_OPTED_OUT` | The recipient replied STOP, or is on the account's opt-out list. | Nothing: AWS will not send to them. |
+| `AWS_QUOTA_MONTHLY_SPEND_LIMIT_REACHED_FOR_TEXT` | The account's monthly SMS spend limit is used up; nothing more is sent this month. | Raise the limit through the Support case below, or wait for the next month. |
+| `AWS_QUOTA_` and another reason | Another AWS quota is reached. | The reason names it. |
+| `AWS_VALIDATION_PRICE_OVER_THRESHOLD` | The message would cost more than `BRANCHBOOK_SMS_AWS_MAX_PRICE` (US$0.20 by default). | Raise the setting only if the price is expected. |
+| `AWS_VALIDATION_` and another reason | AWS refused the request, for example a setting it does not accept. | The reason names it; check the `BRANCHBOOK_SMS_AWS_*` settings. |
+| `AWS_ACCESS_DENIED` | The task role may not call `sms-voice:SendTextMessage`, or the account is disabled for SMS. | Check the task role's policy in the CDK app. |
+| `AWS_RESOURCE_NOT_FOUND` | A protect configuration, configuration set or origination identity named in the settings does not exist. | Correct the setting. |
+| `AWS_THROTTLED`, `AWS_INTERNAL` | AWS is busy or failed; the next attempt usually succeeds. | Nothing, unless every message shows it. |
+| `AWS_UNREACHABLE` | The SDK could not complete the call: the network, a 10-second timeout, or no credentials or region. | Check the task's network route to AWS and its role. |
+| `AWS_ERROR` | Any other AWS error. | Search the AWS Health Dashboard; the code carries nothing more. |
+
+A message AWS accepted is SENT with AWS's `MessageId` as its provider id. SENT means AWS took it, not that the phone
+received it: South Africa supports no sender IDs, so with no origination identity AWS sends over a shared route, best
+effort.
+
+### Let the hosted demo send real SMS
+
+The account owner does these steps in the AWS console, in Cape Town (af-south-1); the CDK app creates the protect
+configuration, the task role's permission and the settings, but not these.
+
+1. **In the sandbox, verify each number that should receive SMS.** A new account is in the SMS sandbox: it sends only
+   to verified destination numbers, at most 10, and spends at most US$1 a month. In AWS End User Messaging SMS, open
+   *Phone numbers > Verified destination numbers* (or the sandbox page), add the number, and enter the code AWS texts
+   to it. A booking for any other number is FAILED with `AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED` after
+   five attempts.
+2. **To text any South African number, open a Support case for production access.** In the same console, request
+   production access (a case with AWS Support) for af-south-1, naming the use (transactional appointment
+   confirmations), the expected volume and South Africa as the only destination. In the same case, or another, ask
+   for the monthly SMS spend limit the demo needs; the account's own limit can then be set up to it. Until AWS
+   answers, the sandbox's limits stand.
+3. **Check the start-up log** after the next deployment: `SMS gateway: AWS End User Messaging SMS in af-south-1 ...`,
+   with a protect configuration and a daily cap set.
+
+To stop real SMS at once, set `BRANCHBOOK_SMS_GATEWAY=simulated` and redeploy; every message then goes to the
+simulated gateway.
 
 ## Replay a failed message
 

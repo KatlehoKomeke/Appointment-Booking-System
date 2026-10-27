@@ -24,6 +24,8 @@
  *   <li>{@link za.co.fynbos.branchbook.notification.application.NotificationProperties} refuses at
  *       start-up a public base URL that could push a confirmation or a cancellation over one SMS
  *       segment.
+ *   <li>{@link za.co.fynbos.branchbook.notification.application.SmsProperties} chooses the gateway,
+ *       simulated or AWS, and sets the per-recipient daily cap.
  * </ul>
  *
  * <p>Whatever this module needs to know about an appointment it asks booking's {@code

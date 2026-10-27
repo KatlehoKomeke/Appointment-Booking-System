@@ -140,11 +140,38 @@ class NotificationOutboxIT {
             });
   }
 
+  /**
+   * BR-17: the per-recipient daily cap is off unless a deployment sets it, so a number outside the
+   * demo block is written every SMS it is owed. RecipientDailyCapIT shows the cap switched on.
+   */
+  @Test
+  void theDailyCapIsOffByDefault() {
+    new TransactionTemplate(transactionManager)
+        .executeWithoutResult(
+            status -> {
+              for (int i = 0; i < 6; i++) {
+                outbox.enqueueConfirmation(confirmationTo("+27825550200"));
+              }
+            });
+
+    assertThat(
+            jdbc.queryForList(
+                "SELECT status FROM notification_messages WHERE appointment_id = ?",
+                String.class,
+                APPOINTMENT))
+        .hasSize(6)
+        .containsOnly("PENDING");
+  }
+
   private static Confirmation confirmation() {
+    return confirmationTo("+27825550191");
+  }
+
+  private static Confirmation confirmationTo(String e164) {
     return new Confirmation(
         APPOINTMENT,
         "APT-7K3M-9Q2X",
-        MobileNumber.ofE164("+27825550191"),
+        MobileNumber.ofE164(e164),
         Instant.parse("2026-10-27T07:30:00Z"),
         ZoneId.of("Africa/Johannesburg"),
         "Sandton Summit",
