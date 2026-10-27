@@ -7,7 +7,7 @@ rewritten. Nothing here is planned; it records how far the seams reach.
 
 ## What carries over unchanged
 
-- **The schema.** The seven Flyway migrations, with the two `EXCLUDE USING gist` constraints, the 56 named
+- **The schema.** The eight Flyway migrations, with the two `EXCLUDE USING gist` constraints, the 61 named
   constraints and the indexes ([architecture.md, section 7](architecture.md#7-data-model)). The database rejects an
   overlapping seat from any code path ([ADR-0002](adr/0002-double-booking-prevention.md)), so the guarantee holds
   whichever runtime writes the rows. Flyway also runs as a command-line tool or a container, so the same files can

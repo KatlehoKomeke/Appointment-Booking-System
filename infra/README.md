@@ -19,7 +19,7 @@ and [ADR-0007](../docs/adr/0007-continuous-deployment-from-main.md).
 `main`; the administrator deploys `BranchbookAccount` by hand, and deployed the hosted demo by hand first, on
 2026-10-26.*
 
-![BranchBook in AWS, all built: the administrator's account stack in us-east-1 (OIDC provider, narrow deploy role, $90 budget), and in Cape Town the three stacks the pipeline deploys on every push to main: the release record and the demo, where Route 53, WAF and a load balancer front one Fargate task that uses RDS and texts only South African numbers through AWS End User Messaging.](../docs/assets/diagrams/aws-footprint.svg)
+![BranchBook in AWS, all built: the administrator's account stack in us-east-1 (OIDC provider, narrow deploy role, $110 budget), and in Cape Town the three stacks the pipeline deploys on every push to main: the release record and the demo, where Route 53, WAF and a load balancer front two Fargate tasks in two availability zones that use RDS and texts only South African numbers through AWS End User Messaging.](../docs/assets/diagrams/aws-footprint.svg)
 
 **A.** The administrator runs `cdk deploy` by hand from their own machine for `BranchbookAccount` in `us-east-1`,
 the stack that grants the pipeline its access, and did so for the hosted demo's first deployment on 2026-10-26. The
@@ -40,12 +40,12 @@ pipeline never deploys `BranchbookAccount`.
 | [`BranchbookAccount`](lib/account-stack.ts)<br>`us-east-1` | Administrator, by hand | The GitHub OIDC provider, the role `branchbook-github-deploy`, the budget `branchbook-monthly` and the output `DeployRoleArn` |
 | [`BranchbookRelease`](lib/release-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` | The SSM parameter `/branchbook/release`: the last commit the pipeline deployed |
 | [`BranchbookData`](lib/data-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` (first by hand, 2026-10-26) | The hosted demo's VPC, its RDS for PostgreSQL 17 database and the SMS daily cap's key ([The hosted demo](#the-hosted-demo)) |
-| [`BranchbookApp`](lib/app-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` (first by hand, 2026-10-26) | The hosted demo's certificate, WAF, load balancer, Fargate task, SMS protect configuration, logs, alarms and DNS record |
+| [`BranchbookApp`](lib/app-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` (first by hand, 2026-10-26) | The hosted demo's certificate, WAF, load balancer, two Fargate tasks, SMS protect configuration, logs, alarms and DNS record |
 | `CDKToolkit`<br>both Regions | Administrator, once per Region | The `cdk bootstrap` stack, qualifier `hnb659fds`: the deploy, file-publishing, image-publishing, lookup and cfn-exec roles, an assets bucket and an ECR repository |
 
 - **Cost.** `BranchbookAccount` and `BranchbookRelease` cost nothing to run; the bootstrap storage costs cents. The
-  hosted demo costs about $82 a month while it runs. The budget e-mails at 50, 80 and 100 percent of $90 a month
-  ($45, $72 and $90).
+  hosted demo costs about $102 a month while it runs. The budget e-mails at 50, 80 and 100 percent of $110 a month
+  ($55, $88 and $110).
 - **Why `us-east-1`.** IAM is global, AWS Budgets lives in `us-east-1`, and the stack holds no customer data.
   Everything that holds customer data is in Cape Town.
 - **The GitHub side.** The environment `aws-demo`, which admits only the branch `main` and `v*` tags, holds the secret
@@ -216,8 +216,9 @@ Both stacks are in `af-south-1`:
   ([Real SMS](#real-sms)). Deleting the stack leaves a final snapshot; deletion protection is off.
   PostgreSQL's own log is not exported, because a constraint error's `DETAIL` line can quote a mobile number (BR-19).
 - **[`BranchbookApp`](lib/app-stack.ts):** an ACM certificate for `branchbook.click`, validated through Route 53; AWS
-  WAF; an internet-facing Application Load Balancer; one Fargate task; an AWS End User Messaging SMS protect
-  configuration that lets the task text South Africa only ([Real SMS](#real-sms)); application logs in
+  WAF; an internet-facing Application Load Balancer; two Fargate tasks, one in each availability zone, so one can
+  fail or be replaced while the other serves; an AWS End User Messaging SMS protect configuration that lets the tasks
+  text South Africa only ([Real SMS](#real-sms)); application logs in
   `/branchbook/app`, kept 7 days; three CloudWatch alarms; and the Route 53 A alias that points the domain at the load
   balancer.
 
@@ -234,10 +235,10 @@ A reviewer's request takes this path:
 3. The load balancer, in the public subnets, ends HTTPS on port 443 with ELB's recommended TLS 1.3 policy, drops
    invalid header fields and health-checks `/readyz`. Plain HTTP on port 80 is answered with a redirect to HTTPS, and
    HSTS keeps browsers there.
-4. The Fargate task (ARM64, 0.5 vCPU, 1 GB), which admits traffic only from the load balancer, serves the request on
-   port 8080. It runs in a public subnet with a public IP, so it reaches ECR, Secrets Manager and AWS End User
-   Messaging without a NAT gateway.
-5. The task talks to RDS on port 5432 over TLS, directly, with no RDS Proxy; the database admits only the task.
+4. One of the two Fargate tasks (ARM64, 0.5 vCPU, 1 GB each), which admit traffic only from the load balancer, serves
+   the request on port 8080. Each runs in a public subnet with a public IP, so it reaches ECR, Secrets Manager and AWS
+   End User Messaging without a NAT gateway.
+5. The task talks to RDS on port 5432 over TLS, directly, with no RDS Proxy; the database admits only the tasks.
 
 The task is configured by environment variables; there are no `prod` or `demo` Spring profiles:
 
@@ -274,11 +275,12 @@ the deployment circuit breaker rolls back a version that never becomes healthy. 
 topic: the app answering 5xx to 5 or more requests in 5 minutes, no healthy task for 3 minutes, and the database
 with less than 2 GB free. They are e-mailed only if `BRANCHBOOK_DEMO_ALERT_EMAIL` was set at deploy time.
 
-**Cost.** About $82 a month before VAT while it runs (ADR-0006's estimate), inside the $90 budget; the domain costs
-about $3 a year. Each SMS is charged on top, up to the account's SMS spend limit ([Real SMS](#real-sms)).
+**Cost.** About $102 a month before VAT while it runs, inside the $110 budget. The second task adds about $19.50:
+Fargate ARM in Cape Town is $0.04372 per vCPU-hour and $0.0048 per GB-hour, and each task has 0.5 vCPU and 1 GB. The
+domain costs about $3 a year. Each SMS is charged on top, up to the account's SMS spend limit ([Real SMS](#real-sms)).
 
 **Teardown date: 2026-11-30**, the end of the review window. Extend it here, with the reason, if the review runs
-longer; until then the budget's alerts at $45, $72 and $90 are the backstop.
+longer; until then the budget's alerts at $55, $88 and $110 are the backstop.
 
 ### Real SMS
 
@@ -403,7 +405,9 @@ compiler API that TypeScript 7 does not yet provide, so this package uses TypeSc
 
 `BRANCHBOOK_ALERT_EMAIL` is where budget alerts go, read from the environment so that no personal address is ever
 committed, and `BRANCHBOOK_HOSTED_DEMO=true` asks for the hosted demo. Each brings its stacks into the app. Any
-placeholder address works for `synth`; use the real one only when deploying.
+placeholder address works for `synth`; use the real one only when deploying. The budget's amount,
+`monthlyBudgetUsd` in [cdk.json](cdk.json), lives in `BranchbookAccount`, which the pipeline never deploys: after
+changing it, the administrator runs `cdk deploy BranchbookAccount` with `BRANCHBOOK_ALERT_EMAIL` set.
 
 ## First-time setup
 
@@ -526,7 +530,7 @@ bootstrap goes last.
 | `lib/account-stack.ts` | `AccountStack`: the GitHub OIDC trust, the deploy role and the budget |
 | `lib/release-stack.ts` | `ReleaseStack`: records the deployed commit in `/branchbook/release` |
 | `lib/data-stack.ts` | `DataStack`: the hosted demo's VPC, database and SMS daily cap key |
-| `lib/app-stack.ts` | `AppStack`: the hosted demo's certificate, WAF, load balancer, Fargate task, SMS protect configuration, alarms and DNS record |
+| `lib/app-stack.ts` | `AppStack`: the hosted demo's certificate, WAF, load balancer, two Fargate tasks, SMS protect configuration, alarms and DNS record |
 | `lib/sms-countries.ts` | The countries AWS lists for a protect configuration; the hosted demo blocks every one but South Africa |
 | `test/account-stack.test.ts` | Unit tests that check the connection's security properties |
 | `test/release-stack.test.ts` | Unit tests for the release record the pipeline verifies |

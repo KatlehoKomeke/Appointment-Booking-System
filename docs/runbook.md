@@ -2,9 +2,9 @@
 
 How to look after a running BranchBook: whether it is healthy, what happened to a message, what an AWS refusal
 means and how to let the hosted demo send real SMS, how to replay one that failed, what the daily cap's ledger holds,
-whether the hosted demo's retention purge ran, and how to follow one request through the logs. The commands
-are for the local stack that `make up` starts; `make psql` opens a SQL prompt on its database. Every number in this
-file is a synthetic demo number.
+whether a reference is blocked, whether the hosted demo's retention purge ran, and how to follow one request through
+the logs. The commands are for the local stack that `make up` starts; `make psql` opens a SQL prompt on its database.
+Every number in this file is a synthetic demo number.
 
 ## Is it healthy?
 
@@ -260,6 +260,30 @@ To keep counts across restarts, set the variable from a secret store to at least
 of `openssl rand -base64 48`; a shorter one stops start-up. The hosted demo does: its task gets the key from the
 `branchbook/sms-cap-key` secret in AWS Secrets Manager. The key is never logged or printed. Changing it has the same
 effect as a restart: every count starts again.
+
+## Is a reference blocked?
+
+Five wrong lookups or cancels of a reference in an hour block it with `429 LOOKUP_RATE_LIMITED`
+([BR-13](domain-rules.md#br-13)). The counts live in `lookup_attempts` (V8), shared by every instance. Blocking a
+reference writes one WARN line, which names no reference:
+
+```text
+lookup.blocked failures=5 until=2026-10-27T10:15:00Z
+```
+
+This counts the references blocked now, without printing any of them:
+
+```sql
+SELECT count(*) FROM lookup_attempts WHERE failures >= 5 AND closes_at > now();
+```
+
+A block lifts by itself when its window closes, an hour after the first wrong try. A settle that failed writes
+`lookup.count_not_settled cause=…` at WARN; that try holds its place for 30 seconds at most. The purge deletes closed
+windows an hour after start-up, then every hour, and writes one INFO line with how many it deleted:
+
+```text
+lookup_attempts.purged count=3
+```
 
 <a id="did-the-48-hour-purge-run"></a>
 

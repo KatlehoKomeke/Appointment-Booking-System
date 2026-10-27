@@ -147,3 +147,16 @@ The decision otherwise stands.
 - **The daily cap has a stable key.** `BranchbookData` generates `branchbook/sms-cap-key` into Secrets Manager, and
   the task receives it as `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY`, so a new task keeps every number's count
   ([infra/README.md](../../infra/README.md#real-sms)).
+
+**2026-10-27, two tasks.** Facts that have changed since the notes above. The decision stands.
+
+- **The demo runs two Fargate tasks,** one in each of the two availability zones, so one can fail or be replaced
+  while the other serves. Nothing depends on one task any more: the lookup limit's counts moved to PostgreSQL in V8
+  ([BR-13](../domain-rules.md#br-13)), beside the dispatcher's claims, the idempotency keys, the seat locks and the
+  daily cap's ledger, and the hourly jobs delete only what is due, so both tasks run them harmlessly.
+- **It costs about $102 a month, not $82.** Each 0.5 vCPU, 1 GB task adds about $19.50. The budget is $110, with
+  e-mails at $55, $88 and $110; it lives in `BranchbookAccount`, so it takes effect when the administrator next
+  deploys that stack ([infra/README.md](../../infra/README.md#what-exists-today)).
+- **EKS is one production path, not the only one.** The design does not depend on which scheduler runs the
+  container. Production runs at least two replicas on the bank's own platform
+  ([production-notes.md](../production-notes.md#more-than-one-task)).

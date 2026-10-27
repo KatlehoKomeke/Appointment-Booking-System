@@ -125,7 +125,6 @@ Current at M7. `api/pom.xml`, the lockfiles, `Dockerfile` and `compose.yaml` are
 | Spring Boot | 4.1.1, with Spring Framework 7.0.9 and Spring Security 7.1.1 | `api/pom.xml` |
 | Hibernate ORM, Flyway | 7.4.5, 12.4.0 | managed by Spring Boot |
 | libphonenumber, AWS SDK for Java v2 | 9.0.41, to tell a mobile number from a landline; 2.55.15, the `software.amazon.awssdk` BOM, for the real SMS | `api/pom.xml` |
-| Caffeine | 3.2.4, the bounded cache behind the lookup limit | managed by Spring Boot |
 | PostgreSQL | 17.11; JDBC driver 42.7.13 | `compose.yaml`, `TestcontainersConfiguration` |
 | JUnit, Testcontainers | 6.0.3, 2.0.5 | managed by Spring Boot |
 | ArchUnit | 1.5.1 | `api/pom.xml` |

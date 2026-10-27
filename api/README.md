@@ -70,9 +70,11 @@ setting, `InboxSwitchedOffIT`, `InboxReferencesHiddenIT`, `DispatcherLoopIT`, `D
 `RecipientDailyCapIT` and `RecipientCapLedgerIT`, each build a context of their own, and with it a container of their
 own, because the container is a bean of the context.
 
-Tests that book through the API add `@ExtendWith(DatabaseReset.class)`, which empties the booking tables before
-and after each test and forgets the lookup counts. `Bookings` builds request bodies and sends bookings and lookups,
-and `ScriptedReferenceGenerator`, which replaces the random generator in every integration test, hands out the
+Tests that book through the API add `@ExtendWith(DatabaseReset.class)`, which empties the booking tables before and
+after each test, `lookup_attempts` with them, so the lookup counts start again. The lookup limiter's tests are
+integration tests, `LookupAttemptLimiterIT`, on the real database; `LookupAttemptLimiterTest` covers only a settle that
+fails, over the test-support `InMemoryLookupAttemptStore`. `Bookings` builds request bodies and sends bookings and
+lookups, and `ScriptedReferenceGenerator`, which replaces the random generator in every integration test, hands out the
 references a test scripts first, so a test can force a reference collision. The dispatcher's own loop is off in the
 tests: a test that delivers calls `NotificationDispatcher.runOnce` with the instant it wants, so no test sleeps.
 `BookingPause` holds a booking at step 10, after it has written its appointment and SMS and before it commits, or a
@@ -391,7 +393,7 @@ api/
     │   │   ├── api/                     the appointment endpoints and their request and response records
     │   │   ├── application/             the booking and cancel transactions, lookup, the limiter, the retention purge, and their ports
     │   │   ├── domain/                  plain Java: Appointment, MobileNumber, CustomerName, AppointmentReference
-    │   │   └── infrastructure/          JPA and SQL adapters, the constraint translator, the key purge, the retention job
+    │   │   └── infrastructure/          JPA and SQL adapters, the constraint translator, the key and lookup purges, the retention job
     │   ├── notification/                the confirmation and cancellation SMS, and the simulated inbox
     │   │   ├── api/                     the inbox and retry endpoints, which exist only while switched on
     │   │   ├── application/             the outbox writer, the dispatcher, the message reads, the inbox and the retry, the cap's fingerprints
@@ -406,7 +408,7 @@ api/
     │       └── web/                     serving the React app; the OpenAPI description
     ├── main/resources/
     │   ├── application.yml              configuration, one comment per property
-    │   └── db/migration/                Flyway migrations V1 to V7, one header comment each
+    │   └── db/migration/                Flyway migrations V1 to V8, one header comment each
     └── test/java/za/co/fynbos/branchbook/
         └── support/                     @IntegrationTest, MutableClock, DatabaseReset, Bookings, the container
 ```
