@@ -35,7 +35,7 @@ repository. The pipeline deploys none of these.
 |---|---|---|
 | [`BranchbookAccount`](lib/account-stack.ts)<br>`us-east-1` | Administrator, by hand | The GitHub OIDC provider, the role `branchbook-github-deploy`, the budget `branchbook-monthly` and the output `DeployRoleArn` |
 | [`BranchbookRelease`](lib/release-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` | The SSM parameter `/branchbook/release`: the last commit the pipeline deployed |
-| [`BranchbookData`](lib/data-stack.ts)<br>`af-south-1` | Administrator, by hand | The hosted demo's VPC and its RDS for PostgreSQL 17 database ([The hosted demo](#the-hosted-demo)) |
+| [`BranchbookData`](lib/data-stack.ts)<br>`af-south-1` | Administrator, by hand | The hosted demo's VPC, its RDS for PostgreSQL 17 database and the SMS daily cap's key ([The hosted demo](#the-hosted-demo)) |
 | [`BranchbookApp`](lib/app-stack.ts)<br>`af-south-1` | Administrator, by hand | The hosted demo's certificate, WAF, load balancer, Fargate task, SMS protect configuration, logs, alarms and DNS record |
 | `CDKToolkit`<br>both Regions | Administrator, once per Region | The `cdk bootstrap` stack, qualifier `hnb659fds`: the deploy, file-publishing, image-publishing, lookup and cfn-exec roles, an assets bucket and an ECR repository |
 
@@ -237,6 +237,7 @@ The task is configured by environment variables; there are no `prod` or `demo` S
 | `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY` | From the Secrets Manager secret `branchbook/sms-cap-key`, 48 random letters and digits; never in the template. The daily cap's ledger counts each number under an HMAC-SHA256 fingerprint keyed with it |
 | `PUBLIC_BASE_URL` | `https://branchbook.click`, the confirmation SMS's `/manage` link |
 | `BRANCHBOOK_INBOX_ENABLED` | `false`: the simulated inbox is off, so `/api/v1/messages` answers 404 and the `/messages` page says it is switched off on this deployment. Each booker still sees their own SMS and its status on the confirmation page |
+| `BRANCHBOOK_INBOX_REDACT_REFERENCES` | `true`: should the inbox ever be switched on, it shows every appointment reference as `APT-****-****` |
 | `BRANCHBOOK_RETENTION_ENABLED` | `true`: an hourly job deletes each booking, with its messages and idempotency keys, once its appointment is over |
 | `BRANCHBOOK_SMS_GATEWAY` | `aws`: each SMS goes through AWS End User Messaging SMS ([Real SMS](#real-sms)). The published demo numbers, 082 555 0000 to 082 555 0199, stay on the simulated gateway |
 | `BRANCHBOOK_SMS_AWS_REGION` | `af-south-1`, the stack's own Region |
@@ -513,7 +514,7 @@ bootstrap goes last.
 | `bin/branchbook.ts` | The CDK app: which stacks exist and where they deploy |
 | `lib/account-stack.ts` | `AccountStack`: the GitHub OIDC trust, the deploy role and the budget |
 | `lib/release-stack.ts` | `ReleaseStack`: records the deployed commit in `/branchbook/release` |
-| `lib/data-stack.ts` | `DataStack`: the hosted demo's VPC and database |
+| `lib/data-stack.ts` | `DataStack`: the hosted demo's VPC, database and SMS daily cap key |
 | `lib/app-stack.ts` | `AppStack`: the hosted demo's certificate, WAF, load balancer, Fargate task, SMS protect configuration, alarms and DNS record |
 | `lib/sms-countries.ts` | The countries AWS lists for a protect configuration; the hosted demo blocks every one but South Africa |
 | `test/account-stack.test.ts` | Unit tests that check the connection's security properties |

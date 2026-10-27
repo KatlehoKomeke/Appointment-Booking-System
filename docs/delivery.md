@@ -57,7 +57,10 @@ what gitleaks finds, but only after the push ([Known gaps](#known-gaps)).
 ## How changes reach main
 
 One maintainer works trunk-based: `make test` first (the checks of `ci`'s `api` and `web` jobs, see
-[Run the same checks locally](#run-the-same-checks-locally)), then the commits are pushed straight to `main`.
+[Run the same checks locally](#run-the-same-checks-locally)), then the commits reach `main`. Until 26 October 2026
+they were pushed straight to it; since pull request
+[#10](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/10) each change is merged from a short-lived
+branch through a pull request, as a merge commit, though nothing on GitHub requires one.
 Commits follow Conventional Commits with a module scope ([CONTRIBUTING.md](../CONTRIBUTING.md#workflow)).
 
 Actions builds the head of each push, not every commit. The six-commit M2 push
@@ -79,7 +82,7 @@ what that means and what would close it.
 
 | Workflow | Runs on | Jobs | What it proves | AWS access | Blocks |
 |---|---|---|---|---|---|
-| [`ci`](../.github/workflows/ci.yml) | Push to `main`; every pull request | `api`, `web`, `stack`, in parallel | The API builds and passes every check, and its unit and API tests pass again in America/New_York; the web app matches the contract, passes lint, type and format checks and its tests in two time zones, and builds; the Docker image starts healthy with PostgreSQL and passes the smoke test with no credential in its logs | None | Nothing on `main` |
+| [`ci`](../.github/workflows/ci.yml) | Push to `main`; every pull request | `api`, `web`, `stack`, in parallel | The API builds and passes every check, and its unit and API tests pass again in America/New_York; the web app matches the contract, passes lint, type and format checks and its tests in two time zones, and builds; the Docker image starts healthy with PostgreSQL and passes the smoke test, the end-to-end tests in Chromium at 390 and 1280 px, the smoke test again and the race of twenty bookings for the last seat, with no credential in its logs | None | Nothing on `main` |
 | [`secret-scan`](../.github/workflows/secret-scan.yml) | Every push (any branch or tag) and pull request | `gitleaks` | No commit in the full history (`fetch-depth: 0`) holds a secret that gitleaks or [.gitleaks.toml](../.gitleaks.toml) recognises | None | Nothing; it reports after the push |
 | [`infra`](../.github/workflows/infra.yml) | Push or pull request changing `infra/**` or `infra.yml` | `test-and-synth` | The CDK app lints, type-checks and passes Jest, and `cdk synth --quiet` succeeds for every stack. With the placeholder `BRANCHBOOK_ALERT_EMAIL=alerts@example.com` the app includes `BranchbookAccount`; no other workflow synthesises the app with that stack in it | None | Nothing |
 | [`deploy`](../.github/workflows/deploy.yml) | Push to `main`; manual run | `test`, then `deploy` (`needs: test`) | The CDK app passes lint, tsc and Jest; then `BranchbookRelease` deploys in af-south-1 and records this commit | `deploy` job only: OIDC as `branchbook-github-deploy`, in `aws-demo` | `test` blocks the `deploy` job |
@@ -98,8 +101,12 @@ name (set-up steps left out):
   TSDoc and accessibility rules*, *Type-check*, *Check formatting*, *Unit tests in UTC*, *Unit tests in
   America/New_York*, *Production build* ([web/README.md](../web/README.md#quality-gates)).
 - **`stack`**: *Build the image and start the stack, as make up does* (`docker compose up --build --detach --wait
-  --wait-timeout 300`), *Smoke-test the running application* ([scripts/smoke.sh](../scripts/smoke.sh)), *Check that
-  the logs hold no credentials* (the `app` and `db` logs must match neither `password` nor `local-dev-only`).
+  --wait-timeout 300`), *Smoke-test the running application* ([scripts/smoke.sh](../scripts/smoke.sh)), *Run the
+  end-to-end tests* (Playwright at 390 and 1280 px, [e2e/README.md](../e2e/README.md)), *Smoke-test the running
+  application again*, *Race twenty bookings for the last seat (make demo-409)*
+  ([scripts/demo-409.sh](../scripts/demo-409.sh)), *Check that the logs hold no credentials* (the `app` and `db` logs
+  must match neither `password` nor `local-dev-only`). A failed run keeps the end-to-end report and traces
+  (`e2e-report`) and the stack's logs (`compose-logs`) as artifacts.
 
 ## Which workflow runs when
 
@@ -210,6 +217,9 @@ group, so each image gets its own pull request. A major version always gets its 
 | `docker-compose` | `/` (compose.yaml) | none | `postgres` |
 | `github-actions` | `/` | `actions-minor-and-patch` | none |
 
+`/e2e` has no entry, so the end-to-end tests' npm dependencies (Playwright and axe among them) get no weekly version
+updates.
+
 The ignored majors are deliberate: Java and Node.js stay on their LTS lines, TypeScript stays on 6.x for
 typescript-eslint, and PostgreSQL stays on 17, the version the hosted demo's Amazon RDS database runs
 ([ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md)). Dependabot alerts and security updates are also on
@@ -279,7 +289,7 @@ Each gap is stated here once, with what limits it today and what would close it.
 | `ci / api` | `make test-api` | The same, including the New York pass. |
 | `ci / web` | `make test-web` | The tests run once, in your time zone. |
 | The test-reference check in `ci / api` | `make test-docs` | The same script. |
-| `ci / stack` | `make up && make smoke` | No credential check of the logs. |
+| `ci / stack` | `make up && make smoke && make e2e && make demo-409` | The smoke test runs once, a failed end-to-end test is not retried, and the logs are not checked for credentials. |
 | `secret-scan / gitleaks` | `make secrets-scan-history` | The same command. `make secrets-scan` scans the working tree instead, untracked files included. |
 | `infra / test-and-synth` and `deploy / test` | `cd infra && npm ci && npm run lint && npm run build && npm test` | There is no make target. `infra` also runs `npx cdk synth --quiet` with `BRANCHBOOK_ALERT_EMAIL=alerts@example.com` and `BRANCHBOOK_HOSTED_DEMO=true`. |
 

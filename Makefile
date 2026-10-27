@@ -12,7 +12,7 @@ GITLEAKS_IMAGE := ghcr.io/gitleaks/gitleaks:$(GITLEAKS_VERSION)
 GIT_SAFE_DIR := -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs psql smoke e2e demo-409dev-api dev-web test test-api test-web test-docs contract fmt hooks secrets-scan secrets-scan-history
+.PHONY: help up down logs psql smoke e2e demo-409 dev-api dev-web test test-api test-web test-docs contract fmt hooks secrets-scan secrets-scan-history
 
 help: ## List the available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-22s %s\n", $$1, $$2}'

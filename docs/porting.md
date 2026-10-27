@@ -45,9 +45,10 @@ ASP.NET Core, with EF Core on Npgsql over the same PostgreSQL 17 schema.
 
 The infrastructure barely moves. The Fargate task runs whatever image the [Dockerfile](../Dockerfile) builds, so a
 rewritten Dockerfile whose app listens on port 8080 and answers `/readyz` deploys as it is. The task's environment
-variables are the app's settings, and the port reads the same names, except two
-([app-stack.ts](../infra/lib/app-stack.ts)): `DB_URL` is a JDBC URL today, and `SERVER_FORWARD_HEADERS_STRATEGY` is
-a Spring Boot setting, replaced by ASP.NET Core's forwarded-headers middleware.
+variables are the app's settings, and the port reads the same names, except three
+([app-stack.ts](../infra/lib/app-stack.ts)): `DB_URL` is a JDBC URL today, `SERVER_FORWARD_HEADERS_STRATEGY` is a
+Spring Boot setting, replaced by ASP.NET Core's forwarded-headers middleware, and
+`MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE` limits Spring Boot's actuator to `health` and `info`.
 
 ## The front end on Vue 3
 

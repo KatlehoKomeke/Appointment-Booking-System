@@ -34,7 +34,7 @@ need no reset between runs: see [Running them again](#running-them-again).
 | Spec | Projects | Proves |
 |---|---|---|
 | [book-appointment.spec.ts](book-appointment.spec.ts) | mobile, desktop | The whole journey from the landing page through branch, service, date and time, details and review to the confirmation page. A landline is refused on its field with "We need a cellphone number to SMS your confirmation."; the confirmation shows an `APT-` reference and the SMS moving from Sending to "Sent at" within 15 s; the name and number never appear in the address at any step. On `/manage`, wrong digits get "We couldn't find an appointment with those details." and the right ones open the booking. axe finds no serious or critical WCAG 2.2 AA violation on the review step or the confirmation page. |
-| [cancel.spec.ts](cancel.spec.ts) | mobile, desktop | A customer opens the cancel dialog from the confirmation page, keeps the appointment and gets focus back on the Cancel button, then cancels. The page says "This appointment was cancelled" with "Its details have been deleted", offers no second cancel, and the time has one more seat free than before ([BR-14](../docs/domain-rules.md#br-14)). A refresh shows the same answer from what the tab remembers, and the API then answers 404 `APPOINTMENT_NOT_FOUND` even to the right last four digits. |
+| [cancel.spec.ts](cancel.spec.ts) | mobile, desktop | A customer opens the inline cancel step from the confirmation page, keeps the appointment and gets focus back on the Cancel button, then cancels. The page says "This appointment was cancelled" with "Its details have been deleted", offers no second cancel, and the time has one more seat free than before ([BR-14](../docs/domain-rules.md#br-14)). A refresh shows the same answer from what the tab remembers, and the API then answers 404 `APPOINTMENT_NOT_FOUND` even to the right last four digits. |
 | [keyboard.spec.ts](keyboard.spec.ts) | desktop | A booking made with Tab, Shift+Tab, Enter, Space and the arrow keys alone. The skip link is the first stop and moves focus to `main`, each step's heading takes focus, and every control tabbed to shows a focus outline. |
 | [failed-delivery.spec.ts](failed-delivery.spec.ts) | desktop | A booking for 082 555 0000, which the simulated gateway always refuses, shows "Not delivered" within 60 s once the dispatcher's five attempts are spent ([BR-17](../docs/domain-rules.md#br-17)), and says the booking still stands. |
 
@@ -75,4 +75,8 @@ The pictures show synthetic data only: the demo name, a demo number and a random
 
 Locally the list reporter prints each test; on CI (`CI` set) the run writes an HTML report to `playwright-report/`
 and annotates the pull request, and a failed test is retried once. A failure keeps its screenshot and trace in
-`test-results/`. All three output folders are git-ignored, since they can show a test's customer.
+`test-results/`. Both folders, and `blob-report/`, are git-ignored, since they can show a test's customer.
+
+On CI they run in `ci`'s `stack` job, on every push to `main` and every pull request, against the stack that job
+starts, and a failed run keeps `playwright-report/` and `test-results/` as the `e2e-report` artifact
+([docs/delivery.md](../docs/delivery.md#the-five-workflows)).

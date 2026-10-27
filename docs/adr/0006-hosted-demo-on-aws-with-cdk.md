@@ -138,3 +138,12 @@ The decision otherwise stands.
   ahead, so the 48-hour rule deleted appointments that had not happened yet. The hourly retention job now removes a
   booking, with its messages and idempotency keys, within the hour after its appointment ends, and a cancelled one
   after the time it would have ended. The notes above that say "48 hours" describe the rule as it first shipped.
+
+**2026-10-27, a cancel deletes the booking.** Facts that have changed since the notes above. The decision stands.
+
+- **A cancelled booking is deleted at once,** not kept until the time it would have ended: the cancel deletes it with
+  its confirmations, and only its cancellation SMS outlives it, until the dispatcher has sent it or given up on it
+  ([BR-14](../domain-rules.md#br-14), [SECURITY.md](../../SECURITY.md#personal-information-popia)).
+- **The daily cap has a stable key.** `BranchbookData` generates `branchbook/sms-cap-key` into Secrets Manager, and
+  the task receives it as `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY`, so a new task keeps every number's count
+  ([infra/README.md](../../infra/README.md#real-sms)).

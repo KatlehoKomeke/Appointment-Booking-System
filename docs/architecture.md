@@ -4,20 +4,20 @@ This document explains how BranchBook is built and why. The decisions behind it 
 [docs/adr](adr/README.md); the business rules are in [domain-rules.md](domain-rules.md). The whole design,
 including the parts not built yet, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX).
 
-**Status: design complete; milestones M0 to M5 are built, and M6's Tier 2 API.** M0 is the skeleton: one jar that serves the app,
-PostgreSQL 17 migrated by Flyway, health probes and security headers. M1 adds the whole schema, the seeded
-catalogue, the `catalogue` module with the public-holiday rule, and the shared error and correlation-id handling. M2
-adds the `scheduling` module (`SlotCalendar` and the availability API) and the committed OpenAPI contract that the
-web app's types are generated from. M3 adds the `booking` module's transaction and lookup, and the part of
-`notification` that writes and reads the confirmation SMS. M4 adds the web app's screens: the five-step booking
-flow, the confirmation page with its live delivery status, `/manage` and the simulated inbox, built to the
-[UI design](../web/README.md#ui-design). M5 adds the dispatcher that delivers the SMS through a simulated gateway,
-the simulated inbox's API and the concurrent proofs. M6 adds the Tier 2 API: cancelling an appointment with its
-cancellation SMS, retrying a failed message from the simulated inbox, demo data for a fresh compose stack, and two
-meters on `/actuator/prometheus`, with the web app's screens for them: cancelling from the appointment page and Retry in
-the simulated inbox. Each section opens with its status. Diagrams are Mermaid, or SVG files in
-[assets/diagrams](assets/diagrams/README.md); solid parts are built and dashed parts are planned, with their
-milestone.
+**Status: design complete; milestones M0 to M6 are built, and M7, the final pass before v1.0.0, is under way.** M0
+is the skeleton: one jar that serves the app, PostgreSQL 17 migrated by Flyway, health probes and security headers.
+M1 adds the whole schema, the seeded catalogue, the `catalogue` module with the public-holiday rule, and the shared
+error and correlation-id handling. M2 adds the `scheduling` module (`SlotCalendar` and the availability API) and
+the committed OpenAPI contract that the web app's types are generated from. M3 adds the `booking` module's
+transaction and lookup, and the part of `notification` that writes and reads the confirmation SMS. M4 adds the web
+app's screens: the five-step booking flow, the confirmation page with its live delivery status, `/manage` and the
+simulated inbox, built to the [UI design](../web/README.md#ui-design). M5 adds the dispatcher that delivers the SMS
+through a simulated gateway, the simulated inbox's API and the concurrent proofs. M6 adds the Tier 2 API: cancelling
+an appointment with its cancellation SMS, retrying a failed message from the simulated inbox, demo data for a fresh
+compose stack, and two meters on `/actuator/prometheus`, with the web app's screens for them: cancelling from the
+appointment page and Retry in the simulated inbox. Each section opens with its status. Diagrams are Mermaid, or SVG
+files in [assets/diagrams](assets/diagrams/README.md); solid parts are built and dashed parts are planned, with
+their milestone.
 
 **Contents:** [1. What it does](#1-what-the-system-does) ·
 [2. System and containers](#2-system-context-and-containers) ·
@@ -33,23 +33,23 @@ milestone.
 
 ## 1. What the system does
 
-*Status: describes the finished v1. Built so far: branches and availability (M1, M2), and booking and lookup with
-the confirmation SMS written as PENDING (M3), the booking screens (M4), the SMS's delivery (M5), and cancellation
-from the appointment page (M6).*
+*Status: Built: branches and availability (M1, M2), booking and lookup with the confirmation SMS written as PENDING
+(M3), the booking screens (M4), the SMS's delivery (M5), cancellation from the appointment page (M6), and the real
+SMS where a deployment asks (after M6).*
 
 A customer of the fictional Fynbos Bank picks a branch, a service, a date and a time slot, enters a name and a
 South African mobile number, and gets a booking reference such as `APT-7K3M-9Q2X`. An SMS confirmation follows
 within a few seconds, and its delivery status is visible on the confirmation page: simulated locally and for the
 published demo numbers, and a real SMS through AWS End User Messaging SMS where a deployment asks, as the hosted
 demo does ([5](#5-the-confirmation-sms)). The customer can later
-look the appointment up, and cancel it, with the reference and the last four digits of their mobile number.
+look the appointment up, and cancel it, with the reference and the last four digits of their mobile number. A cancel
+deletes the booking at once ([6](#6-appointment-lifecycle)).
 
 ## 2. System context and containers
 
-*Status: Built, except the web app's cancel and retry screens: the jar, the React app's booking screens over its
-typed API client (M4), the branch, availability, booking and lookup API, the confirmation SMS with its dispatcher and
-simulated SMS gateway (M5), the cancel and retry API (M6), and PostgreSQL 17. The picture still draws cancel dashed;
-its API is built.*
+*Status: Built: the jar, the React app's booking screens over its typed API client (M4) and its cancel and retry
+screens (M6), the branch, availability, booking and lookup API, the confirmation SMS with its dispatcher and
+simulated SMS gateway (M5), the cancel and retry API (M6), the real SMS gateway (after M6), and PostgreSQL 17.*
 
 ![BranchBook at a glance, all built: one Spring Boot jar serves the React app and a REST API that books, looks up and cancels over PostgreSQL 17, texting through a simulated gateway or, on the hosted demo, AWS End User Messaging; code ships through GitHub Actions and OpenID Connect to AWS, where the demo is deployed by hand.](assets/diagrams/system-at-a-glance.svg)
 
@@ -57,11 +57,12 @@ its API is built.*
   is one origin and no CORS. Locally it is plain HTTP on `127.0.0.1`; in the hosted demo the load balancer ends
   HTTPS ([10.3](#103-in-aws)).
 - **Everything on the customer path is synchronous.** Background work runs in the same jar: `HolidayCoverageCheck`
-  at start-up and daily at 06:00 SAST (M2), `IdempotencyKeyPurgeJob` every hour (M3) and the dispatcher (M5), which
-  delivers the outbox rows the booking transaction writes
+  at start-up and daily at 06:00 SAST (M2), `IdempotencyKeyPurgeJob` every hour (M3), `RecipientSendLedgerPurgeJob`
+  every hour from a minute after start-up, which deletes the daily cap's ledger rows once they are 24 hours old, and
+  the dispatcher (M5), which delivers the outbox rows the booking and cancel transactions write
   ([ADR-0003](adr/0003-transactional-outbox-for-confirmations.md)). `RetentionPurgeJob` runs every hour only where a
-  deployment switches it on, as the hosted demo does, and deletes each booking once its appointment is over
-  ([runbook](runbook.md#did-the-retention-purge-run)). `DemoDataLoader` runs once after start-up where
+  deployment switches it on, as the hosted demo does, and deletes each booking within the hour after its appointment
+  ends ([runbook](runbook.md#did-the-retention-purge-run)). `DemoDataLoader` runs once after start-up where
   `branchbook.demo-data.enabled` is on, which only compose sets: on an empty database it books three demo
   appointments through the booking handler, and where `branchbook.booking.demo-numbers-only` is on it skips with one
   INFO line, because its numbers are not demo numbers (M6, [api/README.md](../api/README.md#demo-data)).
@@ -80,7 +81,6 @@ its API is built.*
 runs it today.
 
 ```mermaid
-%%{init: {"sequence": {"width": 96, "actorMargin": 14, "noteMargin": 6, "boxMargin": 6}}}%%
 sequenceDiagram
     autonumber
     participant B as Browser
@@ -152,8 +152,8 @@ Every module may use `shared` (config, correlation, problem, security, time, web
 |---|---|---|
 | `catalogue` | Built (M1, M2) | Branches, services, weekday trading hours, capacities and public holidays. Read-only at runtime; seeded by Flyway. |
 | `scheduling` | Built (M2) | `SlotCalendar`, a pure function that computes and validates slots in the branch's time zone, and the availability query. It learns which seats are taken through the `BookedIntervalsPort`, which `booking` implements, so it never reads the appointments table itself. |
-| `booking` | Built (M3, M6) | The `Appointment` aggregate, the booking transaction, idempotency, lookup, cancellation (M6), the retention purge of ended appointments, the demo data (M6) and the `appointments_booked_total` counter (M6). |
-| `notification` | Built (M3, M5, M6) | The outbox writer, the confirmation and cancellation templates, the read of an appointment's messages, the dispatcher with the `MessageGateway` port and its simulated SMS gateway, the simulated inbox, the retry of a FAILED message (M6) and the `outbox_pending` gauge (M6). It reads nothing from `catalogue`: the booking hands it the branch's and the service's short names with the appointment. |
+| `booking` | Built (M3, M6) | The `Appointment` aggregate, the booking transaction, idempotency, lookup, cancellation, which deletes the appointment (M6), the retention purge of ended appointments, the demo data (M6) and the `appointments_booked_total` counter (M6). |
+| `notification` | Built (M3, M5, M6) | The outbox writer, the confirmation and cancellation templates, the read of an appointment's messages, the dispatcher with the `MessageGateway` port and its simulated SMS gateway, the simulated inbox, the retry of a FAILED message (M6), the `outbox_pending` gauge (M6), and the daily cap's ledger, `sms_recipient_sends`, with its hourly purge. It reads nothing from `catalogue`: the booking hands it the branch's and the service's short names with the appointment. |
 | `shared` | Built | Problem responses, correlation ids, security headers, the clock and configuration. |
 
 Inside every module the layers are `api` (HTTP only), `application` (use cases; the only layer that opens
@@ -211,7 +211,8 @@ sequenceDiagram
   `branch_services` row. Every booking takes them in that order, so two bookings cannot deadlock each other.
 - **Retries are safe.** The idempotency row is the first statement, so a double-click or a network retry with the
   same key returns the same booking for 24 hours, whether or not the hourly purge has removed the key yet
-  ([BR-12](domain-rules.md#br-12)), whether the retries arrive one after another or together.
+  ([BR-12](domain-rules.md#br-12)), whether the retries arrive one after another or together. Once that booking is
+  cancelled, the key is refused with `422 IDEMPOTENCY_KEY_REUSED` for the rest of its 24 hours and never books again.
 - **Failures roll back together.** If any step fails, everything rolls back, including the idempotency row and the
   SMS row, so a retry starts clean.
 - **One re-run, then an answer.** A reference collision, a deadlock (`40P01`) or a serialisation failure (`40001`)
@@ -258,21 +259,22 @@ instead ([ADR-0004](adr/0004-restraint-no-login-no-id-number.md)).
 ## 5. The confirmation SMS
 
 *Status: Built in M5 ([BR-17](domain-rules.md#br-17), proven). Built after M6: the real gateway, AWS End User
-Messaging SMS where `branchbook.sms.gateway` is `aws`, and the per-recipient daily cap ([BR-17](domain-rules.md#br-17),
-proven). Built in M3: every booking writes its SMS as a PENDING
-row in the booking transaction ([BR-16](domain-rules.md#br-16)). Built in M1: `notification_messages` and its 11
-named constraints, proven by `SchemaConstraintIT`. Built in M6: the cancellation SMS, written in the cancel's
-transaction ([BR-16](domain-rules.md#br-16)), superseding a confirmation by a cancellation
-([BR-24](domain-rules.md#br-24), proven) and the retry of a FAILED message from the simulated inbox
+Messaging SMS where `branchbook.sms.gateway` is `aws`, the per-recipient daily cap with its ledger (V7,
+[BR-17](domain-rules.md#br-17), proven), and a cancel that deletes the appointment's confirmations with the
+appointment (V6, [BR-24](domain-rules.md#br-24), proven). Built in M3: every booking writes its SMS as a PENDING
+row in the booking transaction ([BR-16](domain-rules.md#br-16)). Built in M1: `notification_messages` and its named
+constraints, 11 then and 12 since V6, proven by `SchemaConstraintIT`. Built in M6: the cancellation SMS, written in
+the cancel's transaction ([BR-16](domain-rules.md#br-16)), and the retry of a FAILED message from the simulated inbox
 ([BR-17](domain-rules.md#br-17), proven).*
 
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING: written with the booking or the cancel
-    [*] --> FAILED: written past the daily cap, never sent
+    [*] --> FAILED: a confirmation written past the daily cap, never sent
     PENDING --> SENT: gateway accepts
-    PENDING --> PENDING: failed, retry in 2, 4, 8, 16 s
-    PENDING --> FAILED: fifth failure, a failed mark, or cancelled (M6)
+    PENDING --> PENDING: refused but may pass next time, retry in 2, 4, 8, 16 s
+    PENDING --> FAILED: fifth failure, a refusal for good, a failed mark, or superseded
+    PENDING --> [*]: a cancellation, deleted once sent or failed for good
     FAILED --> PENDING: retry from the inbox (M6)
 ```
 
@@ -280,20 +282,24 @@ The dispatcher runs every two seconds on its own single thread, `outbox-1`, kept
 scheduler so the hourly and daily jobs never share it. It claims up to 20 due rows per tick, each in its own
 transaction with `FOR UPDATE SKIP LOCKED`, so a crash re-sends at most one message and two instances never send the
 same message. The simulated gateway takes 150 ms and refuses every number ending in `0000`, such as the demo number
-082 555 0000, so a failed delivery can be shown: about 30 seconds of backoff later it is FAILED. A FAILED row records why: `DELIVERY_FAILED` after the fifth failed attempt,
-`SUPERSEDED_BY_CANCELLATION` when the appointment is cancelled before the message is sent,
-`DISPATCH_ERROR` when recording the outcome of a send fails, so a poisoned row never loops, or
-`RECIPIENT_DAILY_CAP` when the daily cap below stopped it before it was ever sent. `notification_messages`
-already enforces the shape of this state machine with its named constraints: three statuses, at most five attempts,
-a failure reason exactly when FAILED and a sent time exactly when SENT. An appointment's status never depends on
-delivery: the seat is what the customer booked.
+082 555 0000, so a failed delivery can be shown: about 30 seconds of backoff later it is FAILED. A FAILED row
+records why: `DELIVERY_FAILED` after the fifth failed attempt, or on the attempt the gateway refused for good,
+`SUPERSEDED_BY_CANCELLATION` when the dispatcher finds a confirmation's appointment still kept as CANCELLED, which
+only one cancelled before V6, or by hand, can be, `DISPATCH_ERROR` when recording the outcome of a send fails, so a
+poisoned row never loops, or `RECIPIENT_DAILY_CAP` when the daily cap below stopped it before it was ever sent.
+A cancellation is not kept once final: its appointment is already gone, so where a confirmation would be marked
+SENT or FAILED, the dispatcher deletes it in the same transaction and logs `outbox.deleted`.
+`notification_messages` already enforces the shape of this state machine with its named constraints: three
+statuses, at most five attempts, a failure reason exactly when FAILED, a sent time exactly when SENT, and no
+appointment only for a cancellation. An appointment's status never depends on delivery: the seat is what the
+customer booked.
 
 `POST /api/v1/messages/{id}/retry`, which exists only while the simulated inbox is switched on
 (`branchbook.inbox.enabled`), resets a FAILED message with `DELIVERY_FAILED` or `DISPATCH_ERROR` to PENDING, due
 now, unless it is the confirmation of an appointment that is cancelled or has started; any other message comes back
-unchanged. It locks the message and waits up to 2 seconds for a send in flight, so it never races the dispatcher or
-a cancel. Where the inbox is off, the guarded SQL in the [runbook](runbook.md#replay-a-failed-message) replays a
-message instead.
+unchanged, and a final cancellation, already deleted, is `404 MESSAGE_NOT_FOUND`. It locks the message and waits
+up to 2 seconds for a send in flight, so it never races the dispatcher or a cancel. Where the inbox is off, the
+guarded SQL in the [runbook](runbook.md#replay-a-failed-message) replays a message instead.
 
 **Which gateway sends.** `branchbook.sms.gateway` decides, and one INFO line at start-up names the gateway, the
 region and whether a protect configuration and a daily cap are set. `simulated`, the default and what compose,
@@ -308,22 +314,31 @@ delivery is best effort, and while the AWS account is in the SMS sandbox only ve
 anything. The SDK does not retry, and a call gives up after 10 seconds; a refusal is a fixed code built from the
 exception's type and typed reason, such as `AWS_THROTTLED` or `AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED`,
 never AWS's message, which can quote the number ([runbook](runbook.md#what-the-aws-codes-mean)). The dispatcher's
-backoff and fifth-attempt FAILED apply as they do to the simulated gateway.
+backoff and fifth-attempt FAILED apply, as they do to the simulated gateway, to a refusal that sending again may
+cure; one it cannot, such as a number the sandbox has not verified, is FAILED on that attempt.
 
 **The per-recipient daily cap.** Where `branchbook.sms.recipient-daily-cap` is above 0
-(`BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP`), the outbox first counts the SMS the number was written in the last 24 hours,
-bound from the clock and leaving out those the cap itself stopped, through `ix_notification_messages_recipient`. At
-or above the cap the new message is written FAILED with `RECIPIENT_DAILY_CAP`: the dispatcher never claims it, the
-inbox's retry never resets it, and a later cancel leaves its reason alone, while the booking or the cancel succeeds
-as usual. The demo block is never capped, because it is never really sent. Bookings by one mobile are serialised
-([BR-22](domain-rules.md#br-22)), so their counts never race; a cancel takes no such lock, so cancels at the same
-moment as each other or as a booking can pass the cap by a message or two. The cap is off by default.
+(`BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP`), the outbox first counts the number's rows of the last 24 hours, bound from
+the clock, in the cap's ledger, `sms_recipient_sends`, through `ix_sms_recipient_sends_fingerprint`. A row holds only
+the instant the SMS was written and HMAC-SHA256 of the number's E.164 form, keyed with
+`branchbook.sms.recipient-cap-key` (`BRANCHBOOK_SMS_RECIPIENT_CAP_KEY`, at least 32 characters, or start-up stops);
+where the key is blank, a random one is made at start-up, one WARN says so, and every count starts again at each
+restart. The hosted demo's key is the `branchbook/sms-cap-key` secret in Secrets Manager. Each SMS written below the
+cap adds a row in the same transaction, and the row outlives its message, so a confirmation a cancel deleted, or a
+cancellation the dispatcher deleted, still counts for its 24 hours; `RecipientSendLedgerPurgeJob` deletes the rows
+once they are 24 hours old and logs `cap_ledger.purged count=N`. At or above the cap the new message is FAILED with
+`RECIPIENT_DAILY_CAP` and adds no row: a confirmation is written so, and the dispatcher never claims it and the
+inbox's retry never resets it; a cancellation is shown in the cancel's response but never stored. The booking or the
+cancel succeeds as usual. The demo block is never capped and never reaches the ledger, because it is never really
+sent. Bookings by one mobile are serialised ([BR-22](domain-rules.md#br-22)), so their counts never race; a cancel
+takes no such lock, so cancels at the same moment as each other or as a booking can pass the cap by a message or
+two. The cap is off by default.
 
 ## 6. Appointment lifecycle
 
 *Status: Built in M1 as domain code (`AppointmentStatus`, [BR-15](domain-rules.md#br-15), proven). Booking
 creates CONFIRMED appointments from M3; cancellation through the API is built in M6 ([BR-14](domain-rules.md#br-14),
-proven).*
+proven), and deletes the appointment at once since V6.*
 
 ```mermaid
 stateDiagram-v2
@@ -332,24 +347,27 @@ stateDiagram-v2
     CONFIRMED --> CHECKED_IN: branch check-in (domain only in v1)
     CHECKED_IN --> COMPLETED: consultation finished (domain only)
     CONFIRMED --> NO_SHOW: 15 minutes after the start, no check-in (domain only)
-    CANCELLED --> [*]
+    CANCELLED --> [*]: deleted in the same transaction
     COMPLETED --> [*]
     NO_SHOW --> [*]
 ```
 
 Cancellation is the only transition the API offers: `POST /api/v1/appointments/{reference}/cancel` with
-`X-Mobile-Last4`, through the same check and rate limit as a lookup. Before the start it frees the seat at once,
-supersedes a confirmation not yet sent and writes the cancellation SMS, all in one transaction; a repeat is the same
-`200`; at or after the start it is `409 TOO_LATE_TO_CANCEL`; and an appointment the retention job has already deleted is
-`404 APPOINTMENT_NOT_FOUND`, never a `500`. The staff transitions are modelled and tested
-so the next feature, branch check-in, has a correct foundation
+`X-Mobile-Last4`, through the same check and rate limit as a lookup. Before the start it deletes the appointment's
+confirmations, whatever their status, writes the cancellation SMS and deletes the appointment, all in one
+transaction, so the seat is free at once; the `200` shows the appointment as cancelled, with only that SMS, the one
+message that outlives it, until the dispatcher has sent it or given up on it. The booking is not kept as
+CANCELLED: from then on the reference is unknown, so a repeat, or a lookup with the right digits, is
+`404 APPOINTMENT_NOT_FOUND` and counts as a wrong try. At or after the start a cancel is `409 TOO_LATE_TO_CANCEL`,
+and an appointment the retention job has already deleted is `404 APPOINTMENT_NOT_FOUND`, never a `500`. The staff
+transitions are modelled and tested so the next feature, branch check-in, has a correct foundation
 ([ADR-0004](adr/0004-restraint-no-login-no-id-number.md)).
 
 ## 7. Data model
 
-*Status: Built in M1.*
+*Status: Built in M1; V6 and V7 change it after M6.*
 
-![The eight tables grouped by owning module: catalogue owns branches, hours, services, branch_services and public_holidays; booking owns appointments and idempotency_keys; notification owns notification_messages. Appointments reference branch_services by a composite key, and two exclusion constraints reject an overlapping seat or an overlapping booking by one mobile.](assets/diagrams/data-model.svg)
+![The nine tables grouped by owning module: catalogue owns branches, hours, services, branch_services and public_holidays; booking owns appointments and idempotency_keys; notification owns notification_messages and sms_recipient_sends, the daily cap's ledger. Appointments reference branch_services by a composite key, and two exclusion constraints reject an overlapping seat or an overlapping booking by one mobile.](assets/diagrams/data-model.svg)
 
 Each table belongs to one module. The one read across a module boundary is `booking`'s `SELECT ... FOR UPDATE`
 on the `branch_services` row (step 6 of [the booking transaction](#4-the-booking-transaction)); `scheduling`
@@ -364,16 +382,23 @@ learns which seats are held through `booking`'s `JdbcBookedIntervals`, so it nev
 | `public_holidays` | `catalogue` | 2 |
 | `appointments` | `booking` | 15 |
 | `idempotency_keys` | `booking` | 6 |
-| `notification_messages` | `notification` | 11 |
-| **Total** | | **54** |
+| `notification_messages` | `notification` | 12 |
+| `sms_recipient_sends` | `notification` | 1 |
+| **Total** | | **56** |
 
-The 54 are 8 primary keys, 3 unique constraints, 35 checks, 6 foreign keys and 2 exclusion constraints. Seven
-partial or plain indexes serve the hot queries: `ix_appointments_slot_lookup` (availability and the lowest free
+The 56 are 8 primary keys, 3 unique constraints, 37 checks, 6 foreign keys and 2 exclusion constraints.
+`sms_recipient_sends`, the daily cap's ledger, has no primary key, because two SMS to one number can be written at
+the same instant and each must count, and no foreign key: a row holds a number's keyed fingerprint and when its SMS
+was written, nothing that leads back to a booking or a message. Since V6 a cancellation SMS may outlive its
+appointment: `notification_messages.appointment_id` and `idempotency_keys.appointment_id` are set to null when the
+appointment is deleted, and `notification_messages_detached_cancellation_only` lets only a cancellation have none.
+Eight partial or plain indexes serve the hot queries: `ix_appointments_slot_lookup` (availability and the lowest free
 seat), `ix_appointments_customer_active` (the duplicate and overlap checks), `ix_idempotency_keys_expires` (the
-hourly purge), and `ix_notification_messages_due`, `_appointment`, `_created` and `_recipient` (the dispatcher's
-claim, an appointment's messages, the simulated inbox and the daily cap's count).
+hourly purge), `ix_notification_messages_due`, `_appointment` and `_created` (the dispatcher's claim, an
+appointment's messages and the simulated inbox), and `ix_sms_recipient_sends_fingerprint` and `_written` (the daily
+cap's count and the ledger's hourly purge).
 
-The schema is created by five Flyway migrations, never edited once committed:
+The schema is created by seven Flyway migrations, never edited once committed:
 
 | Migration | Contents |
 |---|---|
@@ -381,7 +406,9 @@ The schema is created by five Flyway migrations, never edited once committed:
 | [`V2__schema.sql`](../api/src/main/resources/db/migration/V2__schema.sql) | The eight tables, with every constraint named and the non-obvious ones commented |
 | [`V3__reference_data.sql`](../api/src/main/resources/db/migration/V3__reference_data.sql) | Six branches, their hours, six services and the capacities |
 | [`V4__public_holidays_2026_2027.sql`](../api/src/main/resources/db/migration/V4__public_holidays_2026_2027.sql) | The public holidays in law for 2026 and 2027 |
-| [`V5__notification_messages_recipient_index.sql`](../api/src/main/resources/db/migration/V5__notification_messages_recipient_index.sql) | The index the per-recipient daily cap counts through |
+| [`V5__notification_messages_recipient_index.sql`](../api/src/main/resources/db/migration/V5__notification_messages_recipient_index.sql) | The index the per-recipient daily cap first counted through, which V7 drops |
+| [`V6__cancel_deletes_the_booking.sql`](../api/src/main/resources/db/migration/V6__cancel_deletes_the_booking.sql) | A cancel deletes the appointment: the two foreign keys to it set null on delete, and only a cancellation may have no appointment |
+| [`V7__sms_recipient_sends.sql`](../api/src/main/resources/db/migration/V7__sms_recipient_sends.sql) | The daily cap's ledger, `sms_recipient_sends`, and its two indexes |
 
 Every constraint is named, because the application maps a violation to an API error by its name.
 [`SchemaConstraintIT`](../api/src/test/java/za/co/fynbos/branchbook/SchemaConstraintIT.java) proves each one fires,
@@ -409,8 +436,12 @@ the device's time zone: its tests run twice, under `TZ=UTC` and `TZ=America/New_
 *Status: Built for every surface that exists ([BR-19](domain-rules.md#br-19)), the booking screens and the
 simulated inbox among them.*
 
-BranchBook stores a first name, a last name and a South African mobile number, nothing more. The full number
-appears only to the person typing it, on the details and review steps, before the booking exists. Once booked, the
+BranchBook stores a first name, a last name and a South African mobile number, nothing more. A cancel deletes them
+with the booking, except the number in the cancellation SMS until it is final ([6](#6-appointment-lifecycle)). Two
+fingerprints can outlive a booking, neither for more than about 24 hours after it was written: the
+`Idempotency-Key`'s unkeyed SHA-256 of the request's details, names and number among them, and the daily cap's keyed
+fingerprint of the number ([5](#5-the-confirmation-sms)). The full number appears only to the person typing it, on
+the details and review steps, before the booking exists. Once booked, the
 API and the UI show it only masked: a caller who has just proved the last four digits sees `082 *** 0101`, and
 everyone else, including the simulated inbox, sees `082 *** ****`. Where `branchbook.inbox.redact-references` is
 on (`BRANCHBOOK_INBOX_REDACT_REFERENCES`, off by default and in compose, `make dev-api` and every test but
@@ -444,7 +475,7 @@ follow its start-up order:
    on the Temurin 25 JDK, then a Temurin 25 JRE runtime that runs as user 10001.
 2. The `db` service starts PostgreSQL 17.
 3. `pg_isready` succeeds and `db` is healthy; [`compose.yaml`](../compose.yaml) starts `app` only then.
-4. The app starts: Flyway applies V1 to V5, and Hibernate validates the schema against the entities.
+4. The app starts: Flyway applies V1 to V7, and Hibernate validates the schema against the entities.
 5. `/readyz` answers UP, and Docker marks the container healthy.
 6. `--wait` returns, and `make up` prints the URL.
 
@@ -491,7 +522,7 @@ to the load balancer, blocks `/actuator`, comparing the decoded, lowercased path
 `POST`s per address in 5 minutes, with no sign-in; the load balancer redirects plain HTTP to HTTPS, ends HTTPS and
 forwards to one ARM64 Fargate task on port 8080, which serves only the health and info endpoints; and the task
 reaches RDS for PostgreSQL 17 over TLS, directly. The simulated inbox is off there, so no visitor sees another's
-booking, and each booking is deleted once its appointment is over
+booking, and each booking is deleted within the hour after its appointment ends, or at once when it is cancelled
 ([ADR-0006, Notes](adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). The picture draws Route 53, then WAF, then the
 load balancer for readability; Route 53 only resolves the name.
 
@@ -499,7 +530,8 @@ Since 2026-10-27 the hosted demo texts real SMS, and any South African mobile nu
 through AWS End User Messaging SMS in Cape Town, through a protect configuration that allows South Africa alone and
 no voice or MMS, at most five SMS a day to one number; the published demo numbers, 082 555 0000 to 082 555 0199,
 stay on the simulated gateway. No delivery events are logged, because they carry the number. While the AWS account
-is in the SMS sandbox, only verified numbers receive a text, and any other ends `FAILED` with the booking standing.
+is in the SMS sandbox, only verified numbers receive a text, and any other ends `FAILED` on its first attempt with the
+booking standing, or, for a cancellation, is deleted.
 Resources, the request path step by step, the SMS controls, deploying, teardown, trust and access are in
 [infra/README.md](../infra/README.md#the-hosted-demo).
 

@@ -13,7 +13,7 @@ status.
   "type": "urn:branchbook:problem:SLOT_FULL",
   "title": "That time was just taken",
   "status": 409,
-  "detail": "All seats for this time were booked while you were completing your details.",
+  "detail": "All seats for this time were booked while you were completing your details. Choose one of the alternatives.",
   "instance": "urn:branchbook:request:3f6d2c0e-7a1b-4d7e-9f0c-2b1a9e8d7c6b",
   "code": "SLOT_FULL",
   "correlationId": "3f6d2c0e-7a1b-4d7e-9f0c-2b1a9e8d7c6b",

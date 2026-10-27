@@ -39,7 +39,7 @@ Run these from `api/`, or use the `make` targets in the repository root:
 
 | Check | Where | Fails the build when |
 |---|---|---|
-| Compiler lint | `-Xlint:all -Werror` in [pom.xml](pom.xml) | Any compiler warning appears in production code. |
+| Compiler lint | `-Xlint:all,-processing -Werror` in [pom.xml](pom.xml) | Any compiler warning appears in production code. |
 | Javadoc lint | `-Xdoclint:all/protected` | A public or protected type or member has no Javadoc, or its Javadoc is broken. |
 | Package documentation | `PackageDocumentationTest` | A package has no `package-info.java`. |
 | Docker-free unit run | `SurefireSuiteIsDockerFreeTest` (ArchUnit) | A `*Test` starts the application or uses Testcontainers, or a test that starts the application is not named `*IT`, so `./mvnw test` would need Docker. |
@@ -65,9 +65,10 @@ a Java agent at startup, as Mockito recommends on Java 21 and later.
 Integration tests are annotated `@IntegrationTest` (in `support/`). It starts the whole application on
 `postgres:17.11-alpine`, the image and logging flags `compose.yaml` uses, and replaces the clock with a
 `MutableClock` that tests set, so rules about dates and times are tested at fixed moments. Integration tests share
-that configuration, so Spring builds the context once and one container serves them. The three that switch a
-setting, `InboxSwitchedOffIT`, `DispatcherLoopIT` and `DemoNumbersOnlyIT`, each build a context of their own, and
-with it a container of their own, because the container is a bean of the context.
+that configuration, so Spring builds the context once and one container serves them. The six that switch a
+setting, `InboxSwitchedOffIT`, `InboxReferencesHiddenIT`, `DispatcherLoopIT`, `DemoNumbersOnlyIT`,
+`RecipientDailyCapIT` and `RecipientCapLedgerIT`, each build a context of their own, and with it a container of their
+own, because the container is a bean of the context.
 
 Tests that book through the API add `@ExtendWith(DatabaseReset.class)`, which empties the booking tables before
 and after each test and forgets the lookup counts. `Bookings` builds request bodies and sends bookings and lookups,
@@ -97,14 +98,14 @@ environment supplies the rest:
 | `PORT` | HTTP port, 8080 by default | Optional |
 | `BRANCHBOOK_DISPATCHER_ENABLED` | Runs the dispatcher that delivers PENDING messages every 2 seconds on its own thread. `true` by default; its interval and the simulated gateway's latency are in application.yml. | Optional; the tests switch it off and drive it themselves |
 | `BRANCHBOOK_INBOX_ENABLED` | Switches on the simulated inbox, `GET /api/v1/messages`, an operator view of every booking's messages, and its retry, `POST /api/v1/messages/{id}/retry`. `false` by default. | `compose.yaml` and `make dev-api` set it to `true`, and so do the tests |
-| `BRANCHBOOK_INBOX_REDACT_REFERENCES` | `branchbook.inbox.redact-references`. Shows every reference as `APT-****-****` in the inbox list and the retry's response: in the `reference` field, the body, the subject and the last error. Message ids are unchanged, so a retry still works, and the SMS itself still carries the real reference. With it, a public deployment could switch the inbox on without listing other visitors' references. `false` by default. | Nothing sets it today: `compose.yaml`, `make dev-api` and every test but `InboxReferencesHiddenIT` leave it off, and the hosted demo keeps the inbox off (`BRANCHBOOK_INBOX_ENABLED=false`) |
+| `BRANCHBOOK_INBOX_REDACT_REFERENCES` | `branchbook.inbox.redact-references`. Shows every reference as `APT-****-****` in the inbox list and the retry's response: in the `reference` field, the body, the subject and the last error. Message ids are unchanged, so a retry still works, and the SMS itself still carries the real reference. With it, a public deployment could switch the inbox on without listing other visitors' references. `false` by default. | The hosted demo's task definition sets it to `true`, should the inbox ever be switched on there; it keeps the inbox off (`BRANCHBOOK_INBOX_ENABLED=false`). `compose.yaml`, `make dev-api` and every test but `InboxReferencesHiddenIT` leave it off |
 | `BRANCHBOOK_DEMO_DATA_ENABLED` | Books three demo appointments once the application is ready, if the database has none ([Demo data](#demo-data)). `false` by default; skipped with one INFO line while `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` is on. | `compose.yaml` only; `make dev-api` and the tests leave it off |
-| `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` | Takes bookings only from the published demo numbers, 082 555 0000 to 0199, so a public demo is never given a real person's number ([ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md)). Any other South African mobile is `422 DEMO_NUMBER_REQUIRED`. `false` by default. | The hosted demo set it to `true` until it began sending real SMS; its task definition now switches it off, so any South African mobile books there. `EXPECT_DEMO_NUMBERS_ONLY=1 scripts/smoke.sh <url>` fails if a deployment that expects it has it off. The start-up log says which numbers bookings take. `compose.yaml` and `make dev-api` leave it off, and the shared test configuration sets it to `false`; `DemoNumbersOnlyIT` switches it on |
+| `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` | Takes bookings only from the published demo numbers, 082 555 0000 to 0199, so a public demo is never given a real person's number ([ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md)). Any other South African mobile is `422 DEMO_NUMBER_REQUIRED`. `false` by default. | The hosted demo set it to `true` until it began sending real SMS; its task definition no longer sets it, so it is off and any South African mobile books there. `EXPECT_DEMO_NUMBERS_ONLY=1 scripts/smoke.sh <url>` fails if a deployment that expects it has it off. The start-up log says which numbers bookings take. `compose.yaml` and `make dev-api` leave it off, and the shared test configuration sets it to `false`; `DemoNumbersOnlyIT` switches it on |
 | `BRANCHBOOK_RETENTION_ENABLED` | `branchbook.retention.enabled`. Switches on the hourly retention job, which deletes every booking once its appointment is over, plus the delay below, with its messages and idempotency keys, keeping the hosted demo's promise; a booking for a future date is never touched ([SECURITY.md](../SECURITY.md#personal-information-popia)). `false` by default. | The hosted demo's ECS task definition sets it to `true`, and nothing else does. `compose.yaml`, `make dev-api` and the tests leave it off; the tests call `RetentionPurge` themselves |
 | `BRANCHBOOK_RETENTION_AFTER_END` | `branchbook.retention.after-end`. How long after its appointment ends a booking is deleted, as an ISO-8601 duration. `PT0S` by default; a negative value stops start-up. | Optional; the hosted demo leaves it at zero |
 | `BRANCHBOOK_SMS_GATEWAY` | `branchbook.sms.gateway`. `simulated`, the default, sends nothing. `aws` sends every number outside the published demo block, 082 555 0000 to 0199, a real transactional SMS through AWS End User Messaging SMS; the block stays simulated, because anyone may type it. The start-up log names the gateway, the region and whether a protect configuration and a cap are set. Credentials come from the SDK's default chain, in the hosted demo the ECS task role. | The hosted demo's task definition sets `aws`; `compose.yaml`, `make dev-api` and the tests leave it `simulated` |
 | `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` | `branchbook.sms.recipient-daily-cap`. The most SMS one number outside the demo block is written in any 24 hours, confirmations and cancellations together; the next is FAILED with `RECIPIENT_DAILY_CAP`, never sent, and the booking or cancel still succeeds ([BR-17](../docs/domain-rules.md#br-17)). Each SMS is counted in the cap's ledger, `sms_recipient_sends`, which keeps a keyed fingerprint of the number for 24 hours, so a cancelled booking's confirmations and a cancellation once final still count after they are deleted. Cancels for one number at the same moment can pass it by a message or two. `0`, the default, is off, and the ledger then stays empty; a negative value stops start-up. | The hosted demo's task definition; off elsewhere |
-| `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY` | `branchbook.sms.recipient-cap-key`. The secret the cap's ledger keys each fingerprint with: HMAC-SHA256 of the number's E.164 form, so the ledger never holds the number and the fingerprint cannot be matched to one without the key. At least 32 characters, such as the output of `openssl rand -base64 48`, or start-up stops with a message that does not quote it; never logged or printed. Empty, the default, makes a random key at each start, so every number's count starts again when the application restarts, and logs one WARN at start-up while the cap is on. | A secret store, in a deployment that keeps counts across restarts; nothing sets it today, the hosted demo included |
+| `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY` | `branchbook.sms.recipient-cap-key`. The secret the cap's ledger keys each fingerprint with: HMAC-SHA256 of the number's E.164 form, so the ledger never holds the number and the fingerprint cannot be matched to one without the key. At least 32 characters, such as the output of `openssl rand -base64 48`, or start-up stops with a message that does not quote it; never logged or printed. Empty, the default, makes a random key at each start, so every number's count starts again when the application restarts, and logs one WARN at start-up while the cap is on. | A secret store, in a deployment that keeps counts across restarts: in the hosted demo, AWS Secrets Manager (`branchbook/sms-cap-key`), injected when the task starts. `compose.yaml`, `make dev-api` and the shared test configuration leave it empty |
 | `BRANCHBOOK_SMS_AWS_REGION` | `branchbook.sms.aws.region`. The region to send from, such as `af-south-1`. Empty by default, which leaves it to the SDK's default region chain; start-up fails if that finds none. | The hosted demo's task definition |
 | `BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID` | `branchbook.sms.aws.protect-configuration-id`. The protect configuration sent with every message, which in the hosted demo allows South Africa only. Empty sends none. | The hosted demo's task definition |
 | `BRANCHBOOK_SMS_AWS_CONFIGURATION_SET`, `BRANCHBOOK_SMS_AWS_ORIGINATION_IDENTITY` | `branchbook.sms.aws.configuration-set` and `.origination-identity`. Sent only where set. With no origination identity, AWS picks the route, a shared one for South Africa, which supports no sender IDs. | Optional |
@@ -128,7 +129,7 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 | `GET /api/v1/branches/{code}/availability?service=&date=` | One day's slots for one service at one branch, each with the seats left, or why the branch is closed that day |
 | `POST /api/v1/appointments` | Book a slot, with an `Idempotency-Key`. `201` with the appointment, its `Location` and its PENDING SMS |
 | `GET /api/v1/appointments/{reference}` | Open an appointment again, with `X-Mobile-Last4` |
-| `POST /api/v1/appointments/{reference}/cancel` | Cancel an appointment before it starts, with `X-Mobile-Last4`, and delete it at once. `200` with the appointment as the cancel left it: `CANCELLED`, with only its cancellation SMS, PENDING. From then on the reference is a `404`, counted |
+| `POST /api/v1/appointments/{reference}/cancel` | Cancel an appointment before it starts, with `X-Mobile-Last4`, and delete it at once. `200` with the appointment as the cancel left it: `CANCELLED`, with only its cancellation SMS, PENDING, or FAILED where the daily cap stopped it. From then on the reference is a `404`, counted |
 | `GET /api/v1/messages?limit=` | The simulated inbox: the newest messages of every booking, recipients redacted to `082 *** ****`, and references to `APT-****-****` while `branchbook.inbox.redact-references` is true. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
 | `POST /api/v1/messages/{id}/retry` | Make a FAILED message due again (the web inbox's Retry button calls it); any other message is returned unchanged. The answer is the message as the inbox shows it, its reference redacted the same way. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
 | `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml) |
@@ -228,7 +229,8 @@ cancellation SMS is kept, until it is sent or has failed for good:
 - A confirmation the dispatcher is sending at that moment is locked, so the cancel waits for that one send, for up
   to 2 seconds; a longer send makes the cancel `503 TRY_AGAIN`, with nothing changed. Once it went out, the cancel
   deletes it all the same: a confirmation is delivered before its cancellation, or never.
-- The dispatcher deletes the cancellation SMS once it is sent, or has failed for good, logging only its message id.
+- The dispatcher deletes the cancellation SMS once it is sent, or has failed for good, logging only its message id and
+  kind.
   The key expires with its 24 hours, as any key does.
 - From the commit the reference is unknown. A repeat cancel, or a lookup, is `404 APPOINTMENT_NOT_FOUND` and counts
   as a wrong try, exactly as for a reference never issued. Two cancels at the same moment get one `200` and that
@@ -339,13 +341,14 @@ through `BookAppointmentHandler`, with its own `Idempotency-Key`, at the first f
 day after today, as `SlotCalendar` finds it, so the lead time, Sundays and public holidays are respected whatever day
 the stack starts. It never books at Polokwane, whose single seats `make demo-409` races for, or at Sandton, which the
 smoke test and the README's walkthrough use. The three confirmations carry one correlation id, `sys-<uuid>`; the one
-to the number ending 0000 fails all five attempts by design and shows as FAILED in the inbox about 30 seconds after
+to the number ending 0000 fails all five attempts by design and shows as FAILED in the inbox about 35 seconds after
 start-up. The load runs on a virtual thread of its own, `demo-data`, so it never delays readiness, and a fixture that
 cannot be booked is logged as a warning naming its branch and service only (`demo_data.no_free_slot`,
 `demo_data.fixture_refused` or `demo_data.fixture_failed`); the application
 carries on. A restart books nothing more while any appointment exists. While
 `branchbook.booking.demo-numbers-only` is on, or `branchbook.sms.gateway` is `aws`, so a fixture could never be sent a real SMS, the loader books nothing and logs one INFO line,
-`demo_data.skipped reason=demo_numbers_only`, before it reads the database. Its `+27 60 000` numbers are outside the
+`demo_data.skipped reason=demo_numbers_only` or `reason=real_sms_gateway`, before it reads the database. Its
+`+27 60 000` numbers are outside the
 demo block, and it books through the booking handler, past the API's demo-number check, so it checks the setting
 itself rather than store numbers that deployment promised not to take. `DemoDataLoaderIT` drives the loader
 directly, and checks that the loader the application builds hands the load to that thread; `DemoDataPropertiesTest`

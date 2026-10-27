@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
   <title id="title">BranchBook at a glance</title>
-  <desc id="desc">BranchBook at a glance, read top to bottom; everything drawn is built. Upper band, what runs today with make up. A Customer, using a browser on a phone or laptop, reaches the app over HTTP, locally at 127.0.0.1:8080. Everything runs in one Spring Boot 4.1 jar, branchbook.jar, on Java 25. The main path runs from the Customer to the Web app, to the REST API, to PostgreSQL. The Web app is built (M4): React 19 and TypeScript, served by the jar from one origin, so there is no CORS. Its booking screens call the API through a typed client and TanStack Query. The Web app calls the REST API under /api/v1 with JSON whose types are generated from docs/openapi.yaml, and each request runs on a virtual thread. Built in the REST API: branches (M1), availability (M2), the OpenAPI 3.1 contract with Swagger UI (M2), book and look up (M3), and cancel (M6). The REST API reaches PostgreSQL through JdbcClient and JPA, one transaction per use case. Modules: catalogue (built, M1), scheduling (built, M2), notification (built, M5: it writes the confirmation SMS from M3 and sends it from M5) and booking (built, M3). A flow from booking writes the appointment and its PENDING confirmation SMS row in one transaction. The shared module holds the packages problem, correlation, security, time, config and web. ArchitectureTest checks that the modules have no cycles and that only application code opens transactions. Background: IdempotencyKeyPurgeJob deletes expired idempotency keys every hour. RetentionPurgeJob runs on the hosted demo only and, every hour, deletes each booking once its appointment is over. DemoDataLoader books three demo appointments on a fresh compose stack. HolidayCoverageCheck runs at start-up and daily at 06:00 SAST. NotificationDispatcher (built, M5) runs every 2 s, claims due rows from PostgreSQL and sends each message through the SMS gateway: the simulated gateway, which sends no real message, runs locally and for the published demo numbers; on the hosted demo, every other number is texted through AWS End User Messaging. PostgreSQL 17 is migrated by Flyway with the btree_gist extension; it has 9 tables and 56 named constraints, and 2 exclusion constraints stop double booking. Lower band, how it ships, left to right: Laptop, where an opt-in pre-commit hook scans for secrets; GitHub, with the workflows ci, secret-scan, infra and deploy; the deploy workflow signs in to AWS through OpenID Connect, so no keys are stored; AWS us-east-1, where the BranchbookAccount stack holds the deploy role and the budget; AWS af-south-1, where the BranchbookRelease stack records the deployed commit; and the hosted demo at branchbook.click, built and deployed by hand by the administrator rather than by the pipeline: the stacks BranchbookData, for the network and the database, and BranchbookApp, for the app behind AWS WAF and a load balancer. Legend: Built; Main path; AWS category: security, management and integration.</desc>
+  <desc id="desc">BranchBook at a glance, read top to bottom; everything drawn is built. Upper band, what runs today with make up. A Customer, using a browser on a phone or laptop, reaches the app over HTTP, locally at 127.0.0.1:8080. Everything runs in one Spring Boot 4.1 jar, branchbook.jar, on Java 25. The main path runs from the Customer to the Web app, to the REST API, to PostgreSQL. The Web app is built (M4): React 19 and TypeScript, served by the jar from one origin, so there is no CORS. Its booking screens call the API through a typed client and TanStack Query. The Web app calls the REST API under /api/v1 with JSON whose types are generated from docs/openapi.yaml, and each request runs on a virtual thread. Built in the REST API: branches (M1), availability (M2), the OpenAPI 3.1 contract with Swagger UI (M2), book and look up (M3), and cancel (M6). The REST API reaches PostgreSQL through JdbcClient and JPA, one transaction per use case. Modules: catalogue (built, M1), scheduling (built, M2), notification (built, M5: it writes the confirmation SMS from M3 and sends it from M5) and booking (built, M3). A flow from booking writes the appointment and its PENDING confirmation SMS row in one transaction. The shared module holds the packages problem, correlation, security, time, config and web. ArchitectureTest checks that the modules have no cycles and that only application code opens transactions. Background: IdempotencyKeyPurgeJob deletes expired idempotency keys every hour. RetentionPurgeJob runs on the hosted demo only and, every hour, deletes each booking once its appointment is over. DemoDataLoader books three demo appointments on a fresh compose stack. RecipientSendLedgerPurgeJob deletes the SMS daily cap's ledger rows every hour, once they are 24 hours old. HolidayCoverageCheck runs at start-up and daily at 06:00 SAST. NotificationDispatcher (built, M5) runs every 2 s, claims due rows from PostgreSQL and sends each message through the SMS gateway: the simulated gateway, which sends no real message, runs locally and for the published demo numbers; on the hosted demo, every other number is texted through AWS End User Messaging. PostgreSQL 17 is migrated by Flyway with the btree_gist extension; it has 9 tables and 56 named constraints, and 2 exclusion constraints stop double booking. Lower band, how it ships, left to right: Laptop, where an opt-in pre-commit hook scans for secrets; GitHub, with the workflows ci, secret-scan, infra and deploy; the deploy workflow signs in to AWS through OpenID Connect, so no keys are stored; AWS us-east-1, where the BranchbookAccount stack holds the deploy role and the budget; AWS af-south-1, where the BranchbookRelease stack records the deployed commit; and the hosted demo at branchbook.click, built and deployed by hand by the administrator rather than by the pipeline: the stacks BranchbookData, for the network and the database, and BranchbookApp, for the app behind AWS WAF and a load balancer. Legend: Built; Main path; AWS category: security, management and integration.</desc>
   <!--
     Diagram id: system-at-a-glance
     Shown in: README.md (hero, under the fictional-bank notice); docs/architecture.md (2. System context and containers)
@@ -8,15 +8,17 @@
       (catalogue, scheduling, booking, notification, shared;
       booking/api/AppointmentController.java (cancel); booking/infrastructure/RetentionPurgeJob.java,
       DemoDataLoader.java, IdempotencyKeyPurgeJob.java; notification/application/NotificationDispatcher.java;
+      notification/infrastructure/RecipientSendLedgerPurgeJob.java;
       notification/infrastructure/SimulatedSmsGateway.java and the AWS End User Messaging gateway);
-      api/src/main/resources/db/migration/V1__enable_btree_gist.sql and V2__schema.sql;
+      api/src/main/resources/db/migration/ (V1__enable_btree_gist.sql, V2__schema.sql, and V6 and V7, which bring
+      the tables to 9 and the named constraints to 56);
       api/src/test/java/za/co/fynbos/branchbook/ArchitectureTest.java; web/package.json; web/src/routes.tsx;
       web/src/api/client.ts; web/src/api/queries.ts; compose.yaml; Makefile; Dockerfile;
       docs/domain-rules.md (Status lines); docs/architecture.md; .githooks/pre-commit;
       .github/workflows/ci.yml, secret-scan.yml, infra.yml, deploy.yml; infra/bin/branchbook.ts;
       infra/lib/account-stack.ts; infra/lib/release-stack.ts; infra/lib/data-stack.ts; infra/lib/app-stack.ts
       (BRANCHBOOK_SMS_GATEWAY=aws, BRANCHBOOK_RETENTION_ENABLED); infra/cdk.json; infra/README.md
-    Verified at feat/real-sms (2026-10-27)
+    Verified at 4d4ba68 (2026-10-27)
     Conventions: docs/assets/diagrams/README.md
     Planned elements carry class="planned" data-milestone; none is left in this diagram.
   -->
@@ -89,69 +91,71 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
       </g>
     </g>
     <g id="node-rest-api">
-      <rect class="box" x="40.5" y="256.5" width="511" height="107" rx="8"/>
-      <text class="t" x="52" y="278">REST API</text>
-      <text class="s" x="136" y="278"><tspan class="mono">/api/v1</tspan> · one virtual thread per request</text>
-      <rect class="box" x="52.5" y="288.5" width="111" height="27" rx="6"/>
-      <text class="s" x="64" y="307">branches · M1</text>
-      <rect class="box" x="172.5" y="288.5" width="127" height="27" rx="6"/>
-      <text class="s" x="184" y="307">availability · M2</text>
-      <rect class="box" x="308.5" y="288.5" width="231" height="27" rx="6"/>
-      <text class="s" x="320" y="307">OpenAPI 3.1 · Swagger UI · M2</text>
+      <rect class="box" x="40.5" y="248.5" width="511" height="107" rx="8"/>
+      <text class="t" x="52" y="270">REST API</text>
+      <text class="s" x="136" y="270"><tspan class="mono">/api/v1</tspan> · one virtual thread per request</text>
+      <rect class="box" x="52.5" y="280.5" width="111" height="27" rx="6"/>
+      <text class="s" x="64" y="299">branches · M1</text>
+      <rect class="box" x="172.5" y="280.5" width="127" height="27" rx="6"/>
+      <text class="s" x="184" y="299">availability · M2</text>
+      <rect class="box" x="308.5" y="280.5" width="231" height="27" rx="6"/>
+      <text class="s" x="320" y="299">OpenAPI 3.1 · Swagger UI · M2</text>
       <g id="chip-book-and-look-up">
-        <rect class="box" x="52.5" y="324.5" width="247" height="27" rx="6"/>
-        <text class="s" x="64" y="343">book and look up</text>
-        <rect class="pill-built" x="220.5" y="328.5" width="75" height="19" rx="9.5"/>
-        <text class="pill-built-t" x="258" y="342" text-anchor="middle">built · M3</text>
+        <rect class="box" x="52.5" y="316.5" width="247" height="27" rx="6"/>
+        <text class="s" x="64" y="335">book and look up</text>
+        <rect class="pill-built" x="220.5" y="320.5" width="75" height="19" rx="9.5"/>
+        <text class="pill-built-t" x="258" y="334" text-anchor="middle">built · M3</text>
       </g>
       <g id="chip-cancel">
-        <rect class="box" x="308.5" y="324.5" width="231" height="27" rx="6"/>
-        <text class="s" x="320" y="343">cancel</text>
-        <rect class="pill-built" x="460.5" y="328.5" width="75" height="19" rx="9.5"/>
-        <text class="pill-built-t" x="498" y="342" text-anchor="middle">built · M6</text>
+        <rect class="box" x="308.5" y="316.5" width="231" height="27" rx="6"/>
+        <text class="s" x="320" y="335">cancel</text>
+        <rect class="pill-built" x="460.5" y="320.5" width="75" height="19" rx="9.5"/>
+        <text class="pill-built-t" x="498" y="334" text-anchor="middle">built · M6</text>
       </g>
     </g>
     <g id="modules">
-      <text class="g" x="40" y="388">Modules</text>
-      <text class="tp" x="120" y="388" font-size="12"><tspan class="mono">ArchitectureTest</tspan>: no cycles between modules; only application code opens transactions</text>
+      <text class="g" x="40" y="376">Modules</text>
+      <text class="tp" x="120" y="376" font-size="12"><tspan class="mono">ArchitectureTest</tspan>: no cycles between modules; only application code opens transactions</text>
       <g id="module-catalogue">
-        <rect class="box" x="40.5" y="398.5" width="121" height="47" rx="6"/>
-        <text class="t mono" x="52" y="416">catalogue</text>
-        <rect class="pill-built" x="52.5" y="421.5" width="75" height="19" rx="9.5"/>
-        <text class="pill-built-t" x="90" y="435" text-anchor="middle">built · M1</text>
+        <rect class="box" x="40.5" y="386.5" width="121" height="47" rx="6"/>
+        <text class="t mono" x="52" y="404">catalogue</text>
+        <rect class="pill-built" x="52.5" y="409.5" width="75" height="19" rx="9.5"/>
+        <text class="pill-built-t" x="90" y="423" text-anchor="middle">built · M1</text>
       </g>
       <g id="module-scheduling">
-        <rect class="box" x="170.5" y="398.5" width="121" height="47" rx="6"/>
-        <text class="t mono" x="182" y="416">scheduling</text>
-        <rect class="pill-built" x="182.5" y="421.5" width="75" height="19" rx="9.5"/>
-        <text class="pill-built-t" x="220" y="435" text-anchor="middle">built · M2</text>
+        <rect class="box" x="170.5" y="386.5" width="121" height="47" rx="6"/>
+        <text class="t mono" x="182" y="404">scheduling</text>
+        <rect class="pill-built" x="182.5" y="409.5" width="75" height="19" rx="9.5"/>
+        <text class="pill-built-t" x="220" y="423" text-anchor="middle">built · M2</text>
       </g>
       <g id="module-notification">
-        <rect class="box" x="300.5" y="398.5" width="121" height="47" rx="6"/>
-        <text class="t mono" x="312" y="416">notification</text>
-        <rect class="pill-built" x="312.5" y="421.5" width="75" height="19" rx="9.5"/>
-        <text class="pill-built-t" x="350" y="435" text-anchor="middle">built · M5</text>
+        <rect class="box" x="300.5" y="386.5" width="121" height="47" rx="6"/>
+        <text class="t mono" x="312" y="404">notification</text>
+        <rect class="pill-built" x="312.5" y="409.5" width="75" height="19" rx="9.5"/>
+        <text class="pill-built-t" x="350" y="423" text-anchor="middle">built · M5</text>
       </g>
       <g id="module-booking">
-        <rect class="box" x="430.5" y="398.5" width="121" height="47" rx="6"/>
-        <text class="t mono" x="442" y="416">booking</text>
-        <rect class="pill-built" x="442.5" y="421.5" width="75" height="19" rx="9.5"/>
-        <text class="pill-built-t" x="480" y="435" text-anchor="middle">built · M3</text>
+        <rect class="box" x="430.5" y="386.5" width="121" height="47" rx="6"/>
+        <text class="t mono" x="442" y="404">booking</text>
+        <rect class="pill-built" x="442.5" y="409.5" width="75" height="19" rx="9.5"/>
+        <text class="pill-built-t" x="480" y="423" text-anchor="middle">built · M3</text>
       </g>
       <g id="module-shared">
-        <rect class="box" x="40.5" y="454.5" width="511" height="25" rx="6"/>
-        <text class="t mono" x="52" y="472">shared</text>
-        <text class="s mono" x="112" y="472">problem · correlation · security · time · config · web</text>
+        <rect class="box" x="40.5" y="442.5" width="511" height="25" rx="6"/>
+        <text class="t mono" x="52" y="460">shared</text>
+        <text class="s mono" x="112" y="460">problem · correlation · security · time · config · web</text>
       </g>
     </g>
     <g id="background">
-      <text class="g" x="40" y="506">Background</text>
-      <text class="tp" x="136" y="506" font-size="12"><tspan class="mono">IdempotencyKeyPurgeJob</tspan></text>
-      <text class="tp" x="308" y="506" font-size="12">hourly: deletes expired idempotency keys</text>
-      <text class="tp" x="136" y="522" font-size="12"><tspan class="mono">RetentionPurgeJob</tspan></text>
-      <text class="tp" x="308" y="522" font-size="12">hosted demo, hourly: deletes bookings once they are over</text>
-      <text class="tp" x="136" y="538" font-size="12"><tspan class="mono">DemoDataLoader</tspan></text>
-      <text class="tp" x="308" y="538" font-size="12">three demo bookings on a fresh compose stack</text>
+      <text class="g" x="40" y="490">Background</text>
+      <text class="tp" x="136" y="490" font-size="12"><tspan class="mono">IdempotencyKeyPurgeJob</tspan></text>
+      <text class="tp" x="340" y="490" font-size="12">hourly: deletes expired idempotency keys</text>
+      <text class="tp" x="136" y="506" font-size="12"><tspan class="mono">RetentionPurgeJob</tspan></text>
+      <text class="tp" x="340" y="506" font-size="12">hosted demo, hourly: deletes bookings once over</text>
+      <text class="tp" x="136" y="522" font-size="12"><tspan class="mono">DemoDataLoader</tspan></text>
+      <text class="tp" x="340" y="522" font-size="12">three demo bookings on a fresh compose stack</text>
+      <text class="tp" x="136" y="538" font-size="12"><tspan class="mono">RecipientSendLedgerPurgeJob</tspan></text>
+      <text class="tp" x="340" y="538" font-size="12">hourly: deletes cap ledger rows 24 h old</text>
       <g id="node-holiday-coverage-check">
         <rect class="box" x="40.5" y="552.5" width="187" height="71" rx="8"/>
         <text class="t mono" x="52" y="574">HolidayCoverageCheck</text>
@@ -189,18 +193,18 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <text class="l halo-2" x="306" y="103">HTTP · locally <tspan class="mono">127.0.0.1:8080</tspan></text>
   </g>
   <g id="edge-json">
-    <path class="edge-acc" d="M296,220 V256" marker-end="url(#ah-acc)"/>
-    <text class="l halo-2" x="306" y="242">JSON · types generated from <tspan class="mono">docs/openapi.yaml</tspan></text>
+    <path class="edge-acc" d="M296,220 V248" marker-end="url(#ah-acc)"/>
+    <text class="l halo-2" x="306" y="238">JSON · types generated from <tspan class="mono">docs/openapi.yaml</tspan></text>
   </g>
   <g id="edge-sql">
-    <path class="edge-acc" d="M552,310 H776" marker-end="url(#ah-acc)"/>
-    <text class="l halo-2" x="664" y="302" text-anchor="middle"><tspan class="mono">JdbcClient</tspan> and JPA</text>
-    <text class="l halo-2" x="664" y="326" text-anchor="middle">one transaction per use case</text>
+    <path class="edge-acc" d="M552,302 H776" marker-end="url(#ah-acc)"/>
+    <text class="l halo-2" x="664" y="294" text-anchor="middle"><tspan class="mono">JdbcClient</tspan> and JPA</text>
+    <text class="l halo-2" x="664" y="318" text-anchor="middle">one transaction per use case</text>
   </g>
   <g id="edge-booking-write">
-    <path class="edge" d="M552,422 H776" marker-end="url(#ah)"/>
-    <text class="l halo-2" x="664" y="414" text-anchor="middle">appointment + PENDING</text>
-    <text class="l halo-2" x="664" y="438" text-anchor="middle">SMS row, one transaction</text>
+    <path class="edge" d="M552,410 H776" marker-end="url(#ah)"/>
+    <text class="l halo-2" x="664" y="402" text-anchor="middle">appointment + PENDING</text>
+    <text class="l halo-2" x="664" y="426" text-anchor="middle">SMS row, one transaction</text>
   </g>
   <g id="edge-claim-due-rows">
     <path class="edge" d="M646,552 V490 A6,6 0 0 1 652,484 H776" marker-end="url(#ah)"/>
