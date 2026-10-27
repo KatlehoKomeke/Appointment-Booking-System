@@ -128,6 +128,13 @@ The decision otherwise stands.
 - **WAF compares the decoded path.** Its path rules decode and lowercase the path first, so `/%61ctuator` is blocked
   too, and the task serves only `health` and `info` (`MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info`).
 - **No delivery events are logged,** because they carry the destination number (BR-19).
-- **Unchanged:** the 48-hour deletion stays on and the simulated inbox stays off.
+- **Unchanged:** the retention job stays on and the simulated inbox stays off.
 
 The decision otherwise stands.
+
+**2026-10-27, retention after the appointment.** Facts that have changed since the notes above. The decision stands.
+
+- **A booking is deleted once its appointment is over, not 48 hours after it was made.** Bookings open 30 days
+  ahead, so the 48-hour rule deleted appointments that had not happened yet. The hourly retention job now removes a
+  booking, with its messages and idempotency keys, within the hour after its appointment ends, and a cancelled one
+  after the time it would have ended. The notes above that say "48 hours" describe the rule as it first shipped.

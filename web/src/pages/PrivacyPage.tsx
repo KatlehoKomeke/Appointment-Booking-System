@@ -34,7 +34,7 @@ const SECTIONS = [
   {
     id: 'privacy-retention',
     heading: 'How long we keep it',
-    body: "The hosted demo deletes every booking, with your name and number, from its database about 48 hours after it is made. The database's backups, which could still hold it, expire after 7 days. A copy run locally keeps them on that machine until you delete them.",
+    body: "The hosted demo keeps a booking, with your name and number, until its appointment is over, and deletes it within the hour after it ends. The database's backups, which could still hold it, expire after 7 days. A copy run locally keeps them on that machine until you delete them.",
   },
   {
     id: 'privacy-rights',

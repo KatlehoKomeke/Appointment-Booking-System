@@ -20,7 +20,7 @@ One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Soli
 | Stage | Milestones M0 to M6 built: the web app's five-step booking flow, confirmation page, `/manage` and simulated inbox; booking in one transaction that also writes the confirmation SMS; lookup with the reference and the last four digits; a dispatcher that delivers the SMS through a simulated gateway, or through AWS End User Messaging SMS where a deployment asks, with the race proofs; and cancelling and retrying, in the API and the web app, with end-to-end tests in a real browser. M7, the final documentation and the release, is under way. |
 | Design | The whole design, including planned work, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX); its header names the commit it was last checked against. The repository records what is built and wins where the two disagree. |
 | Run locally | `make up`, then open http://localhost:8080 |
-| Hosted demo | https://branchbook.click, in AWS Cape Town (af-south-1) since 2026-10-26, open to anyone with no sign-in, and with the simulated inbox off so no visitor sees another's booking. Any South African mobile may book there: a number outside the demo block 082 555 0000 to 0199 is sent a real SMS through AWS End User Messaging SMS, at most five a day to one number (best effort over a shared route, and only to verified numbers while the AWS account is in the SMS sandbox). Defined in AWS CDK and deployed by the administrator by hand; bookings are deleted 48 hours after they are made ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md), [infra/README.md](infra/README.md#the-hosted-demo)). |
+| Hosted demo | https://branchbook.click, in AWS Cape Town (af-south-1) since 2026-10-26, open to anyone with no sign-in, and with the simulated inbox off so no visitor sees another's booking. Any South African mobile may book there: a number outside the demo block 082 555 0000 to 0199 is sent a real SMS through AWS End User Messaging SMS, at most five a day to one number (best effort over a shared route, and only to verified numbers while the AWS account is in the SMS sandbox). Defined in AWS CDK and deployed by the administrator by hand; each booking is deleted once its appointment is over ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md), [infra/README.md](infra/README.md#the-hosted-demo)). |
 | Deployment | Every push to `main` deploys `BranchbookRelease`, a release record in af-south-1 that holds the deployed commit, through OpenID Connect with no stored keys, after the CDK app's own tests pass ([ADR-0007](docs/adr/0007-continuous-deployment-from-main.md), [docs/delivery.md](docs/delivery.md)). The application's CI runs alongside and does not gate it yet. The pipeline does not deploy the hosted demo. |
 
 ### Milestones
@@ -286,7 +286,7 @@ holiday also closes the Monday after it (section 2(1)), derived in code: 10 Augu
 No secret is stored here. A pre-commit hook scans each commit, push protection each push, and a workflow the full
 history after every push. GitHub Actions reaches AWS through OpenID Connect, so no AWS key exists, and the hosted demo
 reads its database credentials from Secrets Manager. Local data is synthetic; the hosted demo takes real names and
-numbers, texts South Africa only and deletes every booking after 48 hours. Details: [SECURITY.md](SECURITY.md).
+numbers, texts South Africa only and deletes each booking once it is over. Details: [SECURITY.md](SECURITY.md).
 
 ## AI assistance
 

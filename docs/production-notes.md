@@ -135,8 +135,8 @@ tracing and no outbox alarm: the outbox is read through the simulated inbox wher
 ## Retention and POPIA
 
 **Today.** Collection is minimal: a name and a South African mobile number
-([SECURITY.md](../SECURITY.md#personal-information-popia)). The hosted demo deletes every booking 48 hours after it
-is made (`BRANCHBOOK_RETENTION_ENABLED`, live since 058e6fd); its backups expire after 7
+([SECURITY.md](../SECURITY.md#personal-information-popia)). The hosted demo deletes each booking once its appointment
+is over (`BRANCHBOOK_RETENTION_ENABLED`); its backups expire after 7
 days, and its logs, which hold no personal data, after 7 days. A local copy keeps its data until `make down`.
 
 **In production:**
@@ -158,7 +158,7 @@ The hosted demo is open on purpose ([ADR-0006, Notes](adr/0006-hosted-demo-on-aw
 |---|---|---|
 | No sign-in | A sign-in prompt in front of a demo is a poor experience for everyone who opens it | Customers verified by OTP or the bank's identity provider |
 | Any South African mobile number may book, unverified (since 2026-10-27) | The demo texts the number it is given, so a visitor can see the real SMS | Any South African mobile number, proved by OTP before the booking counts |
-| Every booking deleted 48 hours after it is made (live since 058e6fd) | Nothing typed in stays | The retention schedule above |
+| Each booking deleted once its appointment is over | Nothing typed in outlives its appointment | The retention schedule above |
 | The simulated inbox is off | With no sign-in it would list every booking's reference, and a demo number's last four digits are public | No inbox: the customer's phone is the inbox. It stays a local tool, off unless a deployment switches it on (`branchbook.inbox.enabled`) |
 | Real SMS through AWS End User Messaging on AWS's shared route, to South Africa only, at most five a day to one number; the demo numbers stay on the simulated gateway (since 2026-10-27) | A visitor sees the real message, and the README's examples never text a stranger | The bank's own origination identity, delivery receipts recorded without the number, and per-prefix caps |
 | No delivery events logged | They carry the destination number ([BR-19](domain-rules.md#br-19)), so `SENT` means only that AWS accepted the message | Receipts matched on `provider_message_id`, as under [A real SMS provider](#a-real-sms-provider) |
