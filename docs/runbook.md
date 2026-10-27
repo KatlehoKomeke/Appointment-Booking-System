@@ -161,8 +161,8 @@ while, each with no appointment:
 
 - its cancellation SMS, PENDING, which holds the number and the text until the dispatcher sends it or gives up on
   it, within about 35 seconds while the dispatcher runs, and then deletes it;
-- its idempotency key, which holds no personal data, until the hourly key purge removes it 24 hours after the
-  booking, so a retry of that booking is `422 IDEMPOTENCY_KEY_REUSED` rather than a new booking;
+- its idempotency key, which holds no name or number, only an unkeyed SHA-256 of the request's details, until the
+  hourly key purge removes it 24 hours after the booking, so a retry of that booking is `422 IDEMPOTENCY_KEY_REUSED` rather than a new booking;
 - where the daily cap is on, one row in the cap's ledger for each SMS the booking was written, which holds a keyed
   fingerprint of the number and nothing that names the booking, until the ledger's purge removes it 24 hours after
   its SMS ([below](#the-daily-caps-ledger)).

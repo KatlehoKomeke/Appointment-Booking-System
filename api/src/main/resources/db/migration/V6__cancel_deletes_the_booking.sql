@@ -2,8 +2,9 @@
 -- cancel transaction destroys it instead of keeping it CANCELLED. Only two things outlive it:
 -- - its cancellation SMS, which still holds the number and the text until the dispatcher has sent it or given up on
 --   it, and then deletes it (BR-16, BR-17);
--- - its Idempotency-Key, which holds no personal data and keeps its 24 hours, so a retry of the booking is refused
---   rather than booked again (BR-12).
+-- - its Idempotency-Key, which holds no name or number, only an unkeyed SHA-256 of the request's details (so a
+--   guess of them can be confirmed against it: pseudonymised, not anonymous), and keeps its 24 hours, so a retry of
+--   the booking is refused rather than booked again (BR-12).
 --
 -- The cancel deletes the appointment's confirmations, writes the cancellation SMS against the appointment, and then
 -- deletes the appointment, with its version checked. The two foreign keys below detach what is kept in that same

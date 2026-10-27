@@ -198,8 +198,9 @@ BranchBook is designed around the Protection of Personal Information Act, even t
   cancelled booking stays in the live database ([BR-14](docs/domain-rules.md#br-14)). Two things are kept, with no
   appointment: the cancellation SMS, which holds the number and the reference, only until it is sent or has failed
   for good, within about 35 seconds while the dispatcher runs, when it is deleted too; and the booking's
-  idempotency key, which holds no personal data, for the rest of its 24 hours, so a retry cannot book the cancelled
-  booking again. Opening or cancelling the reference afterwards is the same `404` as for a reference never issued.
+  idempotency key, which holds no name or number, only an unkeyed SHA-256 of the request's details (pseudonymised:
+  someone who guesses the details could confirm them against it), for the rest of its 24 hours, so a retry cannot
+  book the cancelled booking again. Opening or cancelling the reference afterwards is the same `404` as for a reference never issued.
   The deleted messages still count towards the per-recipient daily cap for 24 hours, through the cap's ledger of
   keyed fingerprints below ([BR-17](docs/domain-rules.md#br-17)). Backups are not purged, as above
   (`CancelAppointmentIT.cancelReturnsTheCancelledAppointmentWithOnlyItsCancellationAndDeletesIt`,
