@@ -1,13 +1,23 @@
 /**
- * Cancelling an appointment (Tier 2): the confirmation step sends nothing until the customer confirms, the cancelled
- * page says so calmly, the cancellation SMS goes out, and the seat is free again for someone else (BR-14, BR-24).
- * Runs in both projects; each books its own fresh demo number, so neither meets the other's booking.
+ * Cancelling an appointment (Tier 2): the confirmation step sends nothing until the customer confirms, the seat is
+ * free again for someone else (BR-14), and the appointment is deleted as it is cancelled. The cancelled page says
+ * the details are deleted and the cancellation SMS is on its way; a refresh shows the same from what the tab
+ * remembers, while the API answers 404 even to the right digits. Runs in both projects; each books its own fresh
+ * demo number, so neither meets the other's booking.
  *
  * @packageDocumentation
  */
 import type { Page } from '@playwright/test';
 
-import { bookingResponse, chooseDate, expect, test, timeTile, type Candidate } from './fixtures';
+import {
+  bookingResponse,
+  chooseDate,
+  expect,
+  last4,
+  test,
+  timeTile,
+  type Candidate,
+} from './fixtures';
 
 interface Availability {
   slots: { startsAt: string; seatsAvailable: number }[];
@@ -26,9 +36,10 @@ async function seatsAt(page: Page, candidate: Candidate): Promise<number> {
   return slot?.seatsAvailable ?? -1;
 }
 
-test('a customer cancels, sees the appointment cancelled and its SMS sent, and the seat is free again', async ({
+test('a customer cancels, the appointment is deleted and the seat is free again', async ({
   page,
   booking,
+  expectConsoleError,
 }) => {
   const { candidate, reference } = await booking.book(async (c) => {
     await page.goto(`/book?branch=${c.branch.code}`);
@@ -45,8 +56,12 @@ test('a customer cancels, sees the appointment cancelled and its SMS sent, and t
       page.getByRole('button', { name: 'Confirm appointment' }).click(),
     );
   });
+  const digits = last4(candidate.mobile);
 
   await page.waitForURL(`**/appointments/${reference}`);
+  // The page stops polling when it sends the cancel, but a poll already on its way can still meet the deleted
+  // appointment, and the browser logs that 404; it changes nothing on the page.
+  expectConsoleError(new RegExp(`404.*/api/v1/appointments/${reference}`));
   await expect(
     page.getByRole('heading', { level: 1, name: 'Your appointment is confirmed' }),
   ).toBeVisible();
@@ -66,20 +81,36 @@ test('a customer cancels, sees the appointment cancelled and its SMS sent, and t
 
   await cancel.click();
   await page.getByRole('button', { name: 'Yes, cancel it' }).click();
+  const cancelled = page.getByRole('heading', { level: 1, name: 'This appointment was cancelled' });
+  await expect(cancelled).toBeVisible();
+  await expect(cancelled).toBeFocused();
+  // The cancel's answer names the masked number when it carries the cancellation SMS.
   await expect(
-    page.getByRole('heading', { level: 1, name: 'This appointment was cancelled' }),
+    page.getByText(
+      new RegExp(
+        `^Its details have been deleted\\. A cancellation SMS is on its way to (082 \\*\\*\\* ${digits}|the number you booked with)\\.$`,
+      ),
+    ),
   ).toBeVisible();
-  await expect(page.getByText(/Its time is free again for someone else to book/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Cancel appointment' })).toHaveCount(0);
-  await expect(page.getByText('Cancellation SMS', { exact: true })).toBeVisible();
 
   // The seat came back: the next customer sees one more seat at that time than before the cancellation.
   expect(await seatsAt(page, candidate)).toBe(seatsWhileBooked + 1);
 
-  // The cancellation is the server's, not the page's: a refresh shows the same.
+  // The server kept nothing to open, so a refresh shows what this tab remembers of the cancellation.
   await page.reload();
+  await expect(cancelled).toBeVisible();
   await expect(
-    page.getByRole('heading', { level: 1, name: 'This appointment was cancelled' }),
+    page.getByText(
+      'Its details have been deleted. A cancellation SMS was sent to the number you booked with.',
+    ),
   ).toBeVisible();
   await expect(page.getByRole('button', { name: 'Cancel appointment' })).toHaveCount(0);
+
+  // Even the right digits find nothing now. This request is the test's own, so the browser logs no 404.
+  const opened = await page.request.get(`/api/v1/appointments/${reference}`, {
+    headers: { 'X-Mobile-Last4': digits },
+  });
+  expect(opened.status()).toBe(404);
+  expect(((await opened.json()) as { code?: unknown }).code).toBe('APPOINTMENT_NOT_FOUND');
 });

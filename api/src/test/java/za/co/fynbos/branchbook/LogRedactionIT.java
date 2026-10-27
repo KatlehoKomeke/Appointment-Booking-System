@@ -34,6 +34,7 @@ import za.co.fynbos.branchbook.booking.domain.AppointmentReference;
 import za.co.fynbos.branchbook.booking.domain.CustomerDetails;
 import za.co.fynbos.branchbook.booking.domain.CustomerName;
 import za.co.fynbos.branchbook.booking.domain.MobileNumber;
+import za.co.fynbos.branchbook.notification.application.NotificationDispatcher;
 import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
 import za.co.fynbos.branchbook.support.MutableClock;
@@ -84,6 +85,8 @@ class LogRedactionIT {
 
   @Autowired private MutableClock clock;
 
+  @Autowired private NotificationDispatcher dispatcher;
+
   @Test
   void bookingLogsContainNoCustomerNameOrMobile(CapturedOutput output) {
     String key = UUID.randomUUID().toString();
@@ -125,9 +128,10 @@ class LogRedactionIT {
   }
 
   /**
-   * BR-19 for a cancellation and a retry: refused, cancelled, repeated, raced by a retry of its
-   * superseded confirmation and by a retry that resets its failed cancellation, and finally too
-   * late. The log shows every step, by appointment and message id, and nothing of the customer.
+   * BR-19 for a cancellation and a retry: refused, cancelled and so deleted, repeated after the
+   * delete, its cancellation SMS retried while PENDING with no appointment, reset once failed, sent
+   * and deleted, and finally a cancel too late. The log shows every step, by appointment and
+   * message id, and nothing of the customer.
    */
   @Test
   void cancelAndRetryLogsContainNoCustomerNameMobileOrReference(CapturedOutput output) {
@@ -137,27 +141,28 @@ class LogRedactionIT {
     List<MvcTestResult> results = new ArrayList<>();
 
     results.add(cancel(mvc, reference, "0188"));
+    MvcTestResult cancelled = cancel(mvc, reference, "0187");
+    results.add(cancelled);
     results.add(cancel(mvc, reference, "0187"));
-    results.add(cancel(mvc, reference, "0187"));
-    MvcTestResult cancelled = results.getLast();
-    results.add(retry(mvc, string(cancelled, "$.notifications[0].id")));
-    String cancellation = string(cancelled, "$.notifications[1].id");
+    String cancellation = string(cancelled, "$.notifications[0].id");
+    results.add(retry(mvc, cancellation));
     jdbc.update(
         "UPDATE notification_messages SET status = 'FAILED', failure_reason = 'DELIVERY_FAILED'"
             + " WHERE id = ?::uuid",
         cancellation);
     results.add(retry(mvc, cancellation));
+    assertThat(dispatcher.runOnce(clock.instant())).isOne();
     String later = string(book(mvc, ours("BEL", "CARD", TUESDAY_0930, MOBILE)), "$.reference");
     clock.setInstant(OffsetDateTime.parse(TUESDAY_0930).toInstant());
     results.add(cancel(mvc, later, "0187"));
 
     assertThat(results)
         .extracting(result -> result.getResponse().getStatus())
-        .containsExactly(404, 200, 200, 200, 200, 409);
+        .containsExactly(404, 200, 404, 200, 200, 409);
     assertThat(output.getAll())
-        .contains("cancel.refused code=APPOINTMENT_NOT_FOUND", "cancel.cancelled")
-        .contains("cancel.already_cancelled", "cancel.refused code=TOO_LATE_TO_CANCEL")
-        .contains("outbox.superseded", "outbox.retry_unchanged", "outbox.retry_reset");
+        .contains("cancel.refused code=APPOINTMENT_NOT_FOUND", "cancel.deleted")
+        .contains("cancel.refused code=TOO_LATE_TO_CANCEL", "outbox.confirmations_deleted")
+        .contains("outbox.retry_unchanged", "outbox.retry_reset", "outbox.deleted");
     assertHoldsNothingOfTheCustomer("the application's log", output.getAll(), reference);
     assertHoldsNothingOfTheCustomer("the application's log", output.getAll(), later);
     assertHoldsNothingOfTheCustomer("the database's log", postgres.getLogs(), reference);

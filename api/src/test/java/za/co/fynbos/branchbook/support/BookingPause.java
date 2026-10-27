@@ -12,9 +12,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * the test can look at the database from outside the transaction, or send a second request into it,
  * at a moment it chooses. No test sleeps for this. {@link #hold} holds a booking at step 10, after
  * it has written its appointment and its SMS; {@link #before} holds any write, such as a cancel's
- * UPDATE of the appointment or its INSERT of the cancellation SMS; {@link #beforeFirstStatement}
- * holds one statement before it locks anything, such as a retry's reset of a message it locked
- * earlier.
+ * INSERT of the cancellation SMS, or the UPDATE of an idempotency key that its delete of the
+ * appointment cascades to; {@link #beforeFirstStatement} holds one statement before it locks
+ * anything, such as a retry's reset of a message it locked earlier.
  *
  * <p>A temporary trigger makes the chosen statement wait for an advisory lock that this class holds
  * on a connection of its own. The trigger raises that transaction's {@code lock_timeout} to 10

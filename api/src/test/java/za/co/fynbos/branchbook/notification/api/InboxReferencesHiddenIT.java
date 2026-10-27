@@ -70,7 +70,8 @@ class InboxReferencesHiddenIT {
     assertThat(json).doesNotContain(kept).doesNotContain(cancelled);
     assertThat(CLEAR_REFERENCE.matcher(json).find()).as("a reference in the clear").isFalse();
     assertThat(JsonPath.<List<String>>read(json, "$.messages[*].reference"))
-        .hasSize(3)
+        .as("the kept booking's confirmation, and the cancelled one's cancellation alone")
+        .hasSize(2)
         .containsOnly(HIDDEN);
     assertThat(JsonPath.<List<String>>read(json, "$.messages[*].body"))
         .allSatisfy(text -> assertThat(text).contains("Ref " + HIDDEN + "."));

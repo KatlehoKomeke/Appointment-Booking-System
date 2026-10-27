@@ -103,8 +103,9 @@ class InboxController {
           "Resets a FAILED message whose failureReason is DELIVERY_FAILED or DISPATCH_ERROR to"
               + " PENDING with no attempts, due now. Any other message, and the confirmation of an"
               + " appointment that is cancelled or has started, is returned unchanged with"
-              + " retryable false. Waits up to 2 seconds for a send of the message in flight to"
-              + " finish first, and keeps the message locked until it commits."
+              + " retryable false. A cancellation is deleted once it is sent or has failed for"
+              + " good, so its retry is then a 404. Waits up to 2 seconds for a send of the message"
+              + " in flight to finish first, and keeps the message locked until it commits."
               + REFERENCES_HIDDEN
               + " Switched off unless branchbook.inbox.enabled is true; then the path is a 404.")
   @ApiResponse(
@@ -119,7 +120,9 @@ class InboxController {
               schema = @Schema(ref = OpenApiConfig.PROBLEM)))
   @ApiResponse(
       responseCode = "404",
-      description = "MESSAGE_NOT_FOUND: no message has that id",
+      description =
+          "MESSAGE_NOT_FOUND: no message has that id, or it was a cancellation, deleted once"
+              + " final",
       content =
           @Content(
               mediaType = MediaType.APPLICATION_PROBLEM_JSON_VALUE,

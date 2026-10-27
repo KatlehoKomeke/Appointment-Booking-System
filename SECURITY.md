@@ -82,8 +82,10 @@ asks visitors to use only their own number. What limits the personal data it hol
   with a protect configuration that blocks SMS to every country AWS lists except South Africa, and every voice and
   MMS destination. The task role may call `sms-voice:SendTextMessage` through that protect configuration and nothing
   else.
-- **At most five SMS a day to one number** (`BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP=5`), and WAF allows 10 booking and
-  cancel `POST`s per address in five minutes.
+- **At most five SMS a day to one number** (`BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP=5`), counted by a keyed fingerprint
+  of the number, cancelled bookings' messages included, and WAF allows 10 booking and cancel `POST`s per address in
+  five minutes. The task definition sets no `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY`, so the key is random and a restart
+  of the task starts every number's count again.
 - **The demo numbers are never texted.** 082 555 0000 to 082 555 0199 always stay on the simulated gateway, so the
   README's examples never reach a stranger.
 - **No delivery events are logged.** No configuration set records them, because they carry the destination number
@@ -191,6 +193,32 @@ BranchBook is designed around the Protection of Personal Information Act, even t
   `make dev-api` and the tests keep their bookings until you delete them, as the privacy page says of a local copy.
   Each run logs one line of counts (`retention.purged appointments= messages= keys=`) and nothing else
   (`RetentionPurgeIT.aFutureBookingIsKeptHoweverLongAgoItWasMade`, `RetentionPurgeIT.anAppointmentGoesOnceItHasEndedNotBefore`).
+- **A cancelled booking is deleted at once.** *Built; everywhere.* The cancel deletes the appointment, with the
+  customer's name and number, and every confirmation SMS of it, in the same transaction that cancels it, so no
+  cancelled booking stays in the live database ([BR-14](docs/domain-rules.md#br-14)). Two things are kept, with no
+  appointment: the cancellation SMS, which holds the number and the reference, only until it is sent or has failed
+  for good, within about 35 seconds while the dispatcher runs, when it is deleted too; and the booking's
+  idempotency key, which holds no name or number, only an unkeyed SHA-256 of the request's details (pseudonymised:
+  someone who guesses the details could confirm them against it), for the rest of its 24 hours, so a retry cannot
+  book the cancelled booking again. Opening or cancelling the reference afterwards is the same `404` as for a reference never issued.
+  The deleted messages still count towards the per-recipient daily cap for 24 hours, through the cap's ledger of
+  keyed fingerprints below ([BR-17](docs/domain-rules.md#br-17)). Backups are not purged, as above
+  (`CancelAppointmentIT.cancelReturnsTheCancelledAppointmentWithOnlyItsCancellationAndDeletesIt`,
+  `NotificationDispatcherIT.cancelDeletesThePendingConfirmationAndTheSentCancellationIsDeleted`).
+- **The daily cap keeps a keyed fingerprint of a number, not the number, for 24 hours.** *Built; only where the cap
+  is on, as on the hosted demo.* While `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` is above 0, each SMS written to a number
+  outside the demo block adds one row to the cap's ledger, `sms_recipient_sends`: the number's fingerprint,
+  HMAC-SHA256 of its E.164 form under `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY`, and when the SMS was written. No number,
+  name, reference, text or link to a booking or message is stored there. The cap counts these rows, so the messages a
+  cancel deletes still count, and an hourly job deletes each row 24 hours after its SMS
+  ([BR-17](docs/domain-rules.md#br-17)). Where the cap is off, nothing is written. A fingerprint is still personal
+  information to whoever holds the key, who could match it to a number by trying every South African mobile number,
+  so the key is a secret: at least 32 characters, never logged or printed. Where none is set, a random key is made at
+  each start, kept only in memory, and lost with it, so earlier fingerprints can no longer be matched by anyone
+  (`RecipientCapLedgerIT.theLedgerHoldsOnlyTheNumbersKeyedFingerprint`,
+  `RecipientCapLedgerIT.bookingAndCancellingInTurnReachesTheCapThoughEveryMessageIsDeleted`,
+  `RecipientSendLedgerPurgeJobIT.purgeRemovesRowsTwentyFourHoursOldAndKeepsYoungerOnes`,
+  `NotificationOutboxIT.theDailyCapIsOffByDefault`, `RecipientFingerprintsTest.aShortKeyStopsStartUpAndIsNeverPrinted`).
 
 ## Hardening in the application
 
@@ -225,7 +253,7 @@ These risks are accepted in v1, or reduced but not closed. Each has the control 
 
 | Risk | Today | Production control |
 |---|---|---|
-| **Unauthenticated SMS sending.** Anyone can book with any South African mobile number, which invites SMS pumping, harassment and slot squatting. Where `BRANCHBOOK_SMS_GATEWAY=aws`, as on the hosted demo, the confirmation and the cancellation are real SMS. | Reduced, not closed ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)). The controls: the published demo block is always simulated (`RoutingSmsGatewayTest.theDemoBlockIsAlwaysSimulated`); the protect configuration lets AWS send only to South Africa (`BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID`); the per-recipient daily cap writes any SMS past `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` in 24 hours FAILED with `RECIPIENT_DAILY_CAP`, never sent ([BR-17](docs/domain-rules.md#br-17), `RecipientDailyCapIT`); the hosted demo's WAF allows 10 booking and cancel `POST`s per address in five minutes; `MaxPrice` (`BRANCHBOOK_SMS_AWS_MAX_PRICE`, US$0.20 by default) refuses a dearer message; AWS's monthly SMS spend limit stops all sending once reached; and while the account is in the SMS sandbox, AWS texts only verified numbers. The residual risk: there is no one-time-code check, so anyone can make the app text any South African number, up to the cap a day (cancels racing each other can pass it by a message or two). | An OTP before an appointment counts as confirmed, per-recipient and per-prefix caps, CAPTCHA, blocking premium-rate prefixes, and cost alerts |
+| **Unauthenticated SMS sending.** Anyone can book with any South African mobile number, which invites SMS pumping, harassment and slot squatting. Where `BRANCHBOOK_SMS_GATEWAY=aws`, as on the hosted demo, the confirmation and the cancellation are real SMS. | Reduced, not closed ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)). The controls: the published demo block is always simulated (`RoutingSmsGatewayTest.theDemoBlockIsAlwaysSimulated`); the protect configuration lets AWS send only to South Africa (`BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID`); the per-recipient daily cap writes any SMS past `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` in 24 hours FAILED with `RECIPIENT_DAILY_CAP`, never sent, counting the messages a cancel deletes too ([BR-17](docs/domain-rules.md#br-17), `RecipientDailyCapIT`, `RecipientCapLedgerIT`); the hosted demo's WAF allows 10 booking and cancel `POST`s per address in five minutes; `MaxPrice` (`BRANCHBOOK_SMS_AWS_MAX_PRICE`, US$0.20 by default) refuses a dearer message; AWS's monthly SMS spend limit stops all sending once reached; and while the account is in the SMS sandbox, AWS texts only verified numbers. The residual risk: there is no one-time-code check, so anyone can make the app text any South African number, up to the cap a day (cancels racing each other can pass it by a message or two, and without `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY` a restart starts every count again). | An OTP before an appointment counts as confirmed, per-recipient and per-prefix caps, CAPTCHA, blocking premium-rate prefixes, and cost alerts |
 | **Learning that a number has a booking.** Booking with another person's number returns `409 DUPLICATE_APPOINTMENT` or `409 CUSTOMER_OVERLAP`, though never the reference, branch or time ([BR-23](docs/domain-rules.md#br-23)). | Accepted for the demo | OTP verification of the number before any answer |
 | **Reference enumeration.** Guessing references to find appointments. | Built in M3: eight characters from a 31-symbol alphabet, the same 404 for an unknown reference and for wrong digits, and the lookup rate limit ([BR-13](docs/domain-rules.md#br-13)) | Appointments bound to a verified customer through the bank's identity provider |
 | **Blocking someone's lookup.** Five wrong tries, lookups and cancels together, block a known reference for an hour, and the counts are kept in memory for one instance ([docs/architecture.md](docs/architecture.md#lookup)). | Accepted: a reference appears only in the customer's own SMS and pages | A shared rate-limit store, and identity-bound lookups |

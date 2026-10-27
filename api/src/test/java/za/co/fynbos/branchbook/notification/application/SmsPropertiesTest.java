@@ -21,6 +21,9 @@ import org.springframework.core.env.SystemEnvironmentPropertySource;
  */
 class SmsPropertiesTest {
 
+  /** A test value for the cap's key, of low entropy so no secret scanner mistakes it for one. */
+  private static final String KEY = "a-test-key-a-test-key-a-test-key-a-test-key";
+
   private final ApplicationContextRunner context =
       new ApplicationContextRunner().withUserConfiguration(SmsSettings.class);
 
@@ -32,6 +35,7 @@ class SmsPropertiesTest {
               SmsProperties sms = started.getBean(SmsProperties.class);
               assertThat(sms.gateway()).isEqualTo(SmsProperties.Gateway.SIMULATED);
               assertThat(sms.recipientDailyCap()).isZero();
+              assertThat(sms.recipientCapKey()).isNull();
               assertThat(sms.aws().region()).isNull();
               assertThat(sms.aws().protectConfigurationId()).isNull();
               assertThat(sms.aws().configurationSet()).isNull();
@@ -48,6 +52,7 @@ class SmsPropertiesTest {
             Map.of(
                 "BRANCHBOOK_SMS_GATEWAY", "aws",
                 "BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP", "5",
+                "BRANCHBOOK_SMS_RECIPIENT_CAP_KEY", KEY,
                 "BRANCHBOOK_SMS_AWS_REGION", "af-south-1",
                 "BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID", "protect-0a1b2c",
                 "BRANCHBOOK_SMS_AWS_CONFIGURATION_SET", "branchbook-sms",
@@ -59,6 +64,7 @@ class SmsPropertiesTest {
               SmsProperties sms = started.getBean(SmsProperties.class);
               assertThat(sms.gateway()).isEqualTo(SmsProperties.Gateway.AWS);
               assertThat(sms.recipientDailyCap()).isEqualTo(5);
+              assertThat(sms.recipientCapKey()).isEqualTo(KEY);
               assertThat(sms.aws())
                   .isEqualTo(
                       new SmsProperties.Aws(
@@ -104,6 +110,22 @@ class SmsPropertiesTest {
                     .getFailure()
                     .rootCause()
                     .hasMessageContaining("recipientDailyCap"));
+  }
+
+  /** The cap's key is a secret: the settings' description says only whether it is set. */
+  @Test
+  void theKeyIsMaskedWhereverTheSettingsArePrinted() {
+    withEnvironment(Map.of("BRANCHBOOK_SMS_RECIPIENT_CAP_KEY", KEY))
+        .run(
+            started ->
+                assertThat(started.getBean(SmsProperties.class).toString())
+                    .contains("recipientCapKey=(masked)", "recipientDailyCap=0")
+                    .doesNotContain(KEY));
+    withEnvironment(Map.of())
+        .run(
+            started ->
+                assertThat(started.getBean(SmsProperties.class).toString())
+                    .contains("recipientCapKey=(blank)"));
   }
 
   @Test

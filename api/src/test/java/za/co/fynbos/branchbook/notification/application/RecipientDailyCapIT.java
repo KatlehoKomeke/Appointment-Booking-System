@@ -23,14 +23,16 @@ import za.co.fynbos.branchbook.support.MutableClock;
 
 /**
  * BR-17: with {@code branchbook.sms.recipient-daily-cap} at 2, a number outside the published demo
- * block is written at most two SMS in any 24 hours, confirmations and cancellations together. The
- * next is written FAILED with {@code RECIPIENT_DAILY_CAP}, is never sent, and the booking or the
- * cancel succeeds as usual. Messages the cap stopped do not count, and the demo block, which is
- * always simulated, is never capped.
+ * block is written at most two SMS in any 24 hours, confirmations and cancellations together,
+ * counted in the cap's ledger whatever became of the messages. The next is FAILED with {@code
+ * RECIPIENT_DAILY_CAP}, is never sent, and the booking or the cancel succeeds as usual; a capped
+ * confirmation is stored, a capped cancellation only reported (BR-14). Messages the cap stopped do
+ * not count, and the demo block, which is always simulated, is never capped.
  *
  * <p>This test builds an application context of its own, and with it a database container of its
- * own. The cap is off everywhere else, which {@code NotificationOutboxIT} shows. The clock stands
- * at 08:00 on Monday 26 October 2026 in Johannesburg.
+ * own; it sets no key, so the ledger's key is random, as where none is configured. The cap is off
+ * everywhere else, which {@code NotificationOutboxIT} shows; {@code RecipientCapLedgerIT} shows the
+ * ledger itself. The clock stands at 08:00 on Monday 26 October 2026 in Johannesburg.
  */
 @IntegrationTest
 @ExtendWith(DatabaseReset.class)
@@ -76,40 +78,48 @@ class RecipientDailyCapIT {
             "CONFIRMATION SENT null 1", "CONFIRMATION SENT null 1", capped("CONFIRMATION"));
   }
 
-  /** A cancellation SMS counts like a confirmation, and the cancel itself goes through. */
+  /**
+   * A cancellation SMS counts like a confirmation, and the confirmation the cancel deleted still
+   * counts: the number has been written two SMS, so the next two bookings meet the cap, though only
+   * the cancellation is stored.
+   */
   @Test
   void cancellationsCountTowardsTheCap() {
+    MvcTestResult first = bookLater("FICA", tuesday("09:00"), OUTSIDE_THE_BLOCK);
+    assertThat(cancelLater(first)).hasStatus(HttpStatus.OK);
+    MvcTestResult second = bookLater("CARD", tuesday("10:00"), OUTSIDE_THE_BLOCK);
+    MvcTestResult third = bookLater("OPEN", tuesday("11:00"), OUTSIDE_THE_BLOCK);
+
+    assertThat(second).hasStatus(HttpStatus.CREATED);
+    assertThat(third).hasStatus(HttpStatus.CREATED);
+    assertThat(messages())
+        .containsExactly(
+            "CANCELLATION PENDING null 0", capped("CONFIRMATION"), capped("CONFIRMATION"));
+  }
+
+  /**
+   * BR-14: a cancellation the cap stops is final at once, so it is never stored; the cancel still
+   * succeeds and its response says the SMS was not sent. The confirmation it replaces still counts
+   * against it, though the cancel deletes it.
+   */
+  @Test
+  void aCancellationPastTheCapIsReportedButNeverStored() {
     MvcTestResult first = bookLater("FICA", tuesday("09:00"), OUTSIDE_THE_BLOCK);
     bookLater("CARD", tuesday("10:00"), OUTSIDE_THE_BLOCK);
 
     MvcTestResult cancelled = cancelLater(first);
 
     assertThat(cancelled).hasStatus(HttpStatus.OK);
+    assertThat(cancelled)
+        .bodyJson()
+        .isLenientlyEqualTo(
+            """
+            {"status": "CANCELLED", "notifications": [
+              {"kind": "CANCELLATION", "status": "FAILED", "failureReason": "RECIPIENT_DAILY_CAP",
+               "attempts": 0}]}""");
     assertThat(messages())
-        .containsExactly(
-            "CONFIRMATION FAILED SUPERSEDED_BY_CANCELLATION 0",
-            "CONFIRMATION PENDING null 0",
-            capped("CANCELLATION"));
-  }
-
-  /**
-   * A confirmation the cap stopped keeps its reason when its appointment is cancelled, so it goes
-   * on not counting; the cancellation SMS after it is capped by the two that did count.
-   */
-  @Test
-  void aCappedConfirmationKeepsItsReasonWhenItsAppointmentIsCancelled() {
-    bookLater("FICA", tuesday("09:00"), OUTSIDE_THE_BLOCK);
-    bookLater("CARD", tuesday("10:00"), OUTSIDE_THE_BLOCK);
-    MvcTestResult third = bookLater("OPEN", tuesday("11:00"), OUTSIDE_THE_BLOCK);
-
-    assertThat(cancelLater(third)).hasStatus(HttpStatus.OK);
-
-    assertThat(messages())
-        .containsExactly(
-            "CONFIRMATION PENDING null 0",
-            "CONFIRMATION PENDING null 0",
-            capped("CONFIRMATION"),
-            capped("CANCELLATION"));
+        .as("the cancelled booking's confirmation is deleted, and the capped SMS never stored")
+        .containsExactly("CONFIRMATION PENDING null 0");
   }
 
   /**

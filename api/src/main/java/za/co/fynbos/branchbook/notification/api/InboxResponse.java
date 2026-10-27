@@ -48,7 +48,8 @@ public record InboxResponse(List<InboxMessageResponse> messages) {
               example = "APT-7K3M-9Q2X",
               description =
                   "The appointment's reference, or APT-****-**** where the deployment hides"
-                      + " references (branchbook.inbox.redact-references)")
+                      + " references (branchbook.inbox.redact-references), and for a cancellation"
+                      + " whose booking the cancel has already deleted")
           String reference,
       @Schema(allowableValues = {"CONFIRMATION", "CANCELLATION"}) String kind,
       @Schema(allowableValues = {"SMS", "EMAIL"}) String channel,

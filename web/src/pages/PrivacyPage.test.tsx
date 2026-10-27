@@ -37,6 +37,16 @@ describe('PrivacyPage', () => {
     expect(screen.getByRole('region', { name: 'How long we keep it' })).toHaveTextContent(
       'backups, which could still hold it, expire after 7 days',
     );
+    expect(screen.getByRole('region', { name: 'How long we keep it' })).toHaveTextContent(
+      'A booking you cancel is deleted at once; only the cancellation SMS is kept, until it has been sent or has failed for good.',
+    );
+    // What outlives a booking holds neither the name nor the number, only fingerprints that last about a day.
+    expect(screen.getByRole('region', { name: 'How long we keep it' })).toHaveTextContent(
+      "a one-way fingerprint of the booking's details is kept, never the details themselves",
+    );
+    expect(screen.getByRole('region', { name: 'Who sends the SMS' })).toHaveTextContent(
+      'a keyed fingerprint of the number, never the number itself, for about a day after each message',
+    );
     expect(screen.getByRole('region', { name: 'What we collect' })).toHaveTextContent(
       'Use only your own cellphone number: the hosted demo texts it.',
     );

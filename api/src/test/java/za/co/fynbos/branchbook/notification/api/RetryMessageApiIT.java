@@ -10,11 +10,13 @@ import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import javax.sql.DataSource;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,8 +38,9 @@ import za.co.fynbos.branchbook.support.ResponseText;
  * was, among them the confirmation of an appointment that is cancelled or has started; the inbox's
  * {@code retryable} flag says which is which by the same rule. A failure the dispatcher records
  * after five refusals is set here with SQL, so the next tick, through the simulated gateway, can
- * deliver it. The clock stands at 08:00 on Monday 26 October 2026 in Johannesburg; the numbers are
- * synthetic.
+ * deliver it. BR-14: a cancellation whose appointment the cancel deleted is retried, or left alone,
+ * with no appointment, until it is final and deleted. The clock stands at 08:00 on Monday 26
+ * October 2026 in Johannesburg; the numbers are synthetic.
  */
 @IntegrationTest
 @ExtendWith(DatabaseReset.class)
@@ -130,14 +133,15 @@ class RetryMessageApiIT {
   }
 
   /**
-   * BR-24: a confirmation the cancellation superseded stays superseded. A retry returns it
-   * unchanged, and the inbox never offers one.
+   * BR-24: a confirmation the dispatcher superseded, because its appointment was found cancelled,
+   * stays superseded. A retry returns it unchanged, and the inbox never offers one.
    */
   @Test
   void retryOfSupersededConfirmationIsNoOp() {
-    String reference = reference(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0109")));
-    assertThat(cancel(mvc, reference, "0109")).hasStatus(HttpStatus.OK);
+    book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0109"));
     String id = confirmationId();
+    fail(id, "SUPERSEDED_BY_CANCELLATION", null, 0);
+    assertThat(inboxEntry()).containsEntry("retryable", false);
     Map<String, Object> before = row(id);
 
     MvcTestResult retried = retry(mvc, id);
@@ -154,13 +158,15 @@ class RetryMessageApiIT {
 
   /**
    * BR-24: even a confirmation whose delivery failed is never sent again once its appointment is
-   * cancelled, however it came to be FAILED with DELIVERY_FAILED; here an operator's SQL put it
-   * back.
+   * cancelled. A cancel deletes both, so here the appointment is cancelled by SQL, as one cancelled
+   * before cancels deleted their bookings was left, and its confirmation set FAILED.
    */
   @Test
   void retryOfAFailedConfirmationOfACancelledAppointmentIsANoOp() {
-    String reference = reference(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0110")));
-    assertThat(cancel(mvc, reference, "0110")).hasStatus(HttpStatus.OK);
+    book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0110"));
+    jdbc.update(
+        "UPDATE appointments SET status = 'CANCELLED', cancelled_at = updated_at,"
+            + " version = version + 1");
     String id = confirmationId();
     fail(id, "DELIVERY_FAILED", "SIMULATED_FAILURE", 5);
     Map<String, Object> before = row(id);
@@ -204,15 +210,14 @@ class RetryMessageApiIT {
 
   /**
    * FR-18: the cancellation guard is for confirmations only. A cancellation whose delivery failed
-   * is still worth sending, so its appointment being cancelled does not stop the retry.
+   * is still worth sending, though its appointment is gone. The dispatcher deletes one that fails
+   * for good, so here an operator's SQL set it FAILED.
    */
   @Test
   void retryOfAFailedCancellationResetsIt() {
     String reference = reference(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0123")));
     assertThat(cancel(mvc, reference, "0123")).hasStatus(HttpStatus.OK);
-    String id =
-        jdbc.queryForObject(
-            "SELECT id::text FROM notification_messages WHERE kind = 'CANCELLATION'", String.class);
+    String id = cancellationId();
     fail(id, "DELIVERY_FAILED", "SIMULATED_FAILURE", 5);
 
     MvcTestResult retried = retry(mvc, id);
@@ -221,20 +226,61 @@ class RetryMessageApiIT {
         .bodyJson()
         .isLenientlyEqualTo(
             """
-            {"kind": "CANCELLATION", "status": "PENDING", "attempts": 0, "retryable": false}""");
+            {"reference": "APT-****-****", "kind": "CANCELLATION", "status": "PENDING",
+             "attempts": 0, "retryable": false}""");
   }
 
   /**
-   * BR-24, FR-18: a cancel that arrives while a retry holds the confirmation still supersedes it.
-   * The retry keeps the message locked from its read to its commit, so the cancel waits for it and
-   * then supersedes the confirmation the retry has just made due. A test-only statement trigger
-   * holds the retry at its reset, after it has locked the message and read the appointment as not
-   * cancelled, until the cancel is seen waiting for that lock. Were the lock let go before the
-   * reset, the cancel would commit in between and the reset would bring the superseded confirmation
-   * back to PENDING.
+   * BR-14, FR-18: a cancellation whose appointment the cancel deleted is shown with APT-****-****,
+   * its recipient still redacted. While it is PENDING a retry is the same no-op as for any PENDING
+   * message; once it is sent it is deleted, so it leaves the inbox and its retry is 404
+   * MESSAGE_NOT_FOUND.
    */
   @Test
-  void cancelCommittingWhileARetryHoldsTheMessageStillSupersedesIt() throws Exception {
+  void retryOfACancellationWithNoAppointmentIsANoOpUntilItIsSentThen404() throws Exception {
+    String reference = reference(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0125")));
+    assertThat(cancel(mvc, reference, "0125")).hasStatus(HttpStatus.OK);
+    String id = cancellationId();
+    Map<String, Object> before = row(id);
+    clock.advance(Duration.ofMinutes(1));
+
+    MvcTestResult pending = retry(mvc, id);
+
+    assertThat(pending).hasStatus(HttpStatus.OK);
+    assertThat(pending)
+        .bodyJson()
+        .isLenientlyEqualTo(
+            """
+            {"id": "%s", "reference": "APT-****-****", "kind": "CANCELLATION",
+             "recipientMasked": "082 *** ****", "status": "PENDING", "retryable": false,
+             "attempts": 0, "createdAt": "2026-10-26T08:00:00+02:00"}"""
+                .formatted(id));
+    assertThat(ResponseText.withoutIdentifiers(pending.getResponse().getContentAsString()))
+        .doesNotContain("0125");
+    assertThat(row(id)).isEqualTo(before);
+    assertThat(dispatcher.runOnce(clock.instant())).isOne();
+
+    assertThat(retry(mvc, id))
+        .hasStatus(HttpStatus.NOT_FOUND)
+        .bodyJson()
+        .extractingPath("$.code")
+        .isEqualTo("MESSAGE_NOT_FOUND");
+    assertThat(mvc.get().uri("/api/v1/messages"))
+        .bodyJson()
+        .extractingPath("$.messages")
+        .isEqualTo(List.of());
+  }
+
+  /**
+   * BR-24, FR-18: a cancel that arrives while a retry holds the confirmation still deletes it. The
+   * retry keeps the message locked from its read to its commit, so the cancel waits for it and then
+   * deletes the confirmation the retry has just made due. A test-only statement trigger holds the
+   * retry at its reset, after it has locked the message and read the appointment as not cancelled,
+   * until the cancel is seen waiting for that lock. Were the lock let go before the reset, the
+   * cancel would commit in between and the reset would find no message to bring back.
+   */
+  @Test
+  void cancelCommittingWhileARetryHoldsTheMessageStillDeletesIt() throws Exception {
     String reference = reference(book(mvc, body("SAN", "FICA", TUESDAY_0930, "082 555 0124")));
     String id = confirmationId();
     fail(id, "DELIVERY_FAILED", "SIMULATED_FAILURE", 5);
@@ -257,13 +303,16 @@ class RetryMessageApiIT {
     assertThat(retried).hasStatus(HttpStatus.OK);
     assertThat(retried).bodyJson().extractingPath("$.status").isEqualTo("PENDING");
     assertThat(cancelled).hasStatus(HttpStatus.OK);
-    assertThat(row(id))
-        .containsEntry("status", "FAILED")
-        .containsEntry("failure_reason", "SUPERSEDED_BY_CANCELLATION");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT count(*) FROM notification_messages WHERE id = ?::uuid", Integer.class, id))
+        .as("the confirmation the retry made due is deleted")
+        .isZero();
     assertThat(dispatcher.runOnce(clock.instant()))
         .as("the cancellation is sent, and the confirmation is not")
         .isOne();
-    assertThat(row(id)).containsEntry("status", "FAILED");
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM notification_messages", Integer.class))
+        .isZero();
   }
 
   /** FR-18: an id no message has is 404 MESSAGE_NOT_FOUND. */
@@ -297,7 +346,7 @@ class RetryMessageApiIT {
   }
 
   /** Sets a message FAILED, as the dispatcher would after its attempts. */
-  private void fail(String id, String reason, String lastError, int attempts) {
+  private void fail(String id, String reason, @Nullable String lastError, int attempts) {
     jdbc.update(
         "UPDATE notification_messages SET status = 'FAILED', failure_reason = ?, last_error = ?,"
             + " attempts = ? WHERE id = ?::uuid",
@@ -305,6 +354,11 @@ class RetryMessageApiIT {
         lastError,
         attempts,
         id);
+  }
+
+  private String cancellationId() {
+    return jdbc.queryForObject(
+        "SELECT id::text FROM notification_messages WHERE kind = 'CANCELLATION'", String.class);
   }
 
   private String confirmationId() {

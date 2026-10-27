@@ -104,6 +104,11 @@ branchbook:
     # still succeeds (BR-17). 0 switches the cap off, as locally and in the tests; the hosted demo is to set it with
     # BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP, so nobody can make the app text one number without end.
     recipient-daily-cap: 0
+    # The secret that keys each number's fingerprint in the cap's ledger, sms_recipient_sends, which holds a keyed
+    # HMAC-SHA256 of the number for 24 hours instead of the number (BRANCHBOOK_SMS_RECIPIENT_CAP_KEY). At least 32
+    # characters, or start-up stops; never logged or printed, so never set it here. Empty, as locally and in the tests,
+    # makes a random key at start-up, so every count starts again at each restart; with the cap on, one WARN says so.
+    recipient-cap-key:
     aws:
       # Read only when the gateway is aws. Credentials never appear here: the SDK's default chain finds them, which in
       # the hosted demo is the ECS task role. The region to send from, such as af-south-1 (BRANCHBOOK_SMS_AWS_REGION);

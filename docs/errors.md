@@ -61,7 +61,9 @@ One request yields exactly one code:
   3. `422 MOBILE_NUMBER_REQUIRED`: the number is missing or not a South African mobile number. Then, only where the
      deployment takes only the published demo numbers, `422 DEMO_NUMBER_REQUIRED`: the number is a South African
      mobile outside them.
-  4. `422 IDEMPOTENCY_KEY_REUSED`, or a replay of the key's booking. Nothing after this step runs for a replay.
+  4. `422 IDEMPOTENCY_KEY_REUSED`, or a replay of the key's booking. The key is refused when it booked other
+     details, and also when the booking it made has since been cancelled, and so deleted: a retry of a cancelled
+     booking is never booked again. Nothing after this step runs for a replay.
   5. `404 BRANCH_NOT_FOUND`, then `422 SERVICE_NOT_OFFERED_AT_BRANCH`.
   6. The one slot code, by the precedence above.
   7. The 409 conflicts, by the precedence above.
@@ -76,15 +78,16 @@ One request yields exactly one code:
   while it is being checked and is released if its digits were right, so lookups of one reference that arrive
   together are refused with `429` and `Retry-After: 1` once the wrong ones and those still being checked reach five.
 - **Cancel** (`POST /api/v1/appointments/{reference}/cancel`): exactly as a lookup up to the `404`, and counted
-  towards the same five wrong tries of the reference. Then an appointment that is already cancelled is a `200` that
-  writes nothing, even after its start; then one that has started is `409 TOO_LATE_TO_CANCEL` and is left as it
-  was. A second cancel of the same appointment at the same moment is not an error: its version check fails, it
-  reads the appointment once more and returns the same `200`. A lock not granted within 2 s is `503 TRY_AGAIN`. An
-  appointment that the retention purge has deleted once it was over, before the cancel or while it runs, is
-  `404 APPOINTMENT_NOT_FOUND`, never a `500`; one the purge deletes after the cancel checked its digits is not
-  counted as a wrong try.
+  towards the same five wrong tries of the reference. Then one that has started is `409 TOO_LATE_TO_CANCEL` and is
+  left as it was. A cancel that succeeds deletes the appointment ([BR-14](domain-rules.md#br-14)), so its reference
+  is unknown from then on: a repeat cancel, or a lookup, is `404 APPOINTMENT_NOT_FOUND` and is counted, exactly as
+  for a reference never issued. The same counted `404` answers a second cancel of the appointment at the same
+  moment, which finds the row gone at its version-checked lock, and a cancel whose appointment the retention purge deleted
+  once it was over, before the cancel or while it waits on the purge's lock; never a `500`. A lock not granted within
+  2 s, such as on a confirmation still being sent, is `503 TRY_AGAIN`, and nothing is changed.
 - **Retry** (`POST /api/v1/messages/{id}/retry`, only while `branchbook.inbox.enabled` is true): an `id` that is not
-  a UUID is `400 VALIDATION_FAILED`; then an unknown id is `404 MESSAGE_NOT_FOUND`. Any message that exists is a
+  a UUID is `400 VALIDATION_FAILED`; then an unknown id is `404 MESSAGE_NOT_FOUND`, as is a cancellation once it
+  has been sent or has failed for good, when it is deleted. Any message that exists is a
   `200`: reset to PENDING if a retry could send it, otherwise returned unchanged with `retryable` false. While
   `branchbook.inbox.redact-references` is true, its reference shows as `APT-****-****`, as in the inbox.
 
@@ -117,7 +120,7 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 |---|---|---|
 | `429 LOOKUP_RATE_LIMITED` | Up to 3600 | The seconds left until an hour after the reference's first wrong lookup or cancel, rounded up. |
 | `429 LOOKUP_RATE_LIMITED` | 1 | Fewer than five wrong lookups, but the wrong lookups and the lookups of the reference still being checked together reach five. |
-| `503 TRY_AGAIN` | 2 | A lock not granted within 2 s, a statement over 5 s, a deadlock or serialisation failure that happened again after the one automatic re-run, or a cancel whose version check failed again after its one re-read. |
+| `503 TRY_AGAIN` | 2 | A lock not granted within 2 s, a statement over 5 s, a deadlock or serialisation failure that happened again after the one automatic re-run, or a cancel that waited that long on its appointment or on a confirmation being sent. |
 | `503 TRY_AGAIN` | 5 | No database connection within 3 s, or any other temporary failure. |
 
 ## Codes
@@ -127,7 +130,7 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 | `VALIDATION_FAILED` | 400 | The request is malformed: a missing or badly shaped field, unknown JSON property, a `startsAt` without an offset, or a missing or malformed `X-Mobile-Last4` header. | Inline messages on the fields named in `errors[]`. |
 | `IDEMPOTENCY_KEY_REQUIRED` | 400 | `POST /api/v1/appointments` arrived without an `Idempotency-Key` header holding a UUID. | Nothing; the web app always sends one. |
 | `BRANCH_NOT_FOUND` | 404 | The branch code is unknown or the branch is inactive. | "We couldn't find that branch." |
-| `APPOINTMENT_NOT_FOUND` | 404 | The reference is unknown or malformed, **or** the last four digits are wrong, **or** the appointment is over and the retention purge has deleted it, even while a cancel of it ran. Every case returns the same body, the digits are compared in constant time, and the answer is never `403`, so the API cannot be used to discover references. | "We couldn't find an appointment with those details." |
+| `APPOINTMENT_NOT_FOUND` | 404 | The reference is unknown or malformed, **or** the last four digits are wrong, **or** the appointment has been deleted: by a cancel, its own earlier or another at the same moment, or by the retention purge once it was over, even while a cancel of it ran. A deleted appointment's reference counts as a wrong try, like an unknown one. Every case returns the same body, the digits are compared in constant time, and the answer is never `403`, so the API cannot be used to discover references. | "We couldn't find an appointment with those details." |
 | `MESSAGE_NOT_FOUND` | 404 | Retry of a simulated message id that does not exist. The retry, `POST /api/v1/messages/{id}/retry`, exists only while `branchbook.inbox.enabled` is true, as the inbox does; otherwise its path is a plain `404` with no code. | Not shown to customers. |
 | `SERVICE_NOT_OFFERED_AT_BRANCH` | 422 | The branch does not offer the requested service, or no active service has that code. | "This branch doesn't offer that service." |
 | `DATE_OUTSIDE_BOOKING_WINDOW` | 422 | The date is outside the 30 bookable days, `[today, today + 30 days)` in the branch's time zone. | The date is not selectable. |
@@ -137,11 +140,11 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 | `SLOT_WITHIN_LEAD_TIME` | 422 | The slot starts less than two hours from now; usually a page left open too long. | "That time is too soon. Please choose a later slot." |
 | `MOBILE_NUMBER_REQUIRED` | 422 | The number is missing or not a South African mobile number (for example a landline or a VoIP number). `errors[]` names `customer.mobile`. | "We need a cellphone number to SMS your confirmation." |
 | `DEMO_NUMBER_REQUIRED` | 422 | Only where the deployment takes only the published demo numbers (`branchbook.booking.demo-numbers-only`, off by default, and off on the hosted demo since it sends real SMS): the number is a South African mobile outside 082 555 0000 to 0199. Decided with `MOBILE_NUMBER_REQUIRED`, before anything is written, so a real person's number is never stored or sent an SMS ([ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md)). `errors[]` names `customer.mobile`; the body never repeats the number. | "Use a demo number. This demo accepts only the numbers 082 555 0000 to 082 555 0199. Try 082 555 0101." On the cellphone field: "This demo accepts only 082 555 0000 to 082 555 0199, for example 082 555 0101." |
-| `IDEMPOTENCY_KEY_REUSED` | 422 | The same `Idempotency-Key` was sent with a different request body. | Nothing; the web app mints a new key when the details change. |
+| `IDEMPOTENCY_KEY_REUSED` | 422 | The same `Idempotency-Key` was sent with a different request body, **or** with the same body after the booking it made was cancelled; then the fixed detail says that booking has been cancelled and a new key is needed, and nothing is booked. | Nothing; the web app mints a new key when the details change, and for each new booking. |
 | `DUPLICATE_APPOINTMENT` | 409 | This mobile already has an upcoming appointment for this service. The body names no reference, branch or time. | "You already have an upcoming appointment for this service." |
 | `CUSTOMER_OVERLAP` | 409 | This mobile already has an appointment at an overlapping time, at any branch. | "You already have an appointment at that time." |
 | `SLOT_FULL` | 409 | The last seat was taken while the customer was filling in their details. Carries up to three `alternatives[]`. | "That time was just taken", with the alternatives and the details kept. |
-| `TOO_LATE_TO_CANCEL` | 409 | Cancellation was requested at or after the appointment's start time. The appointment is left as it was, still `CONFIRMED`. Cancelling an appointment that is already cancelled is a `200`, never this. | "This appointment has already started." |
+| `TOO_LATE_TO_CANCEL` | 409 | Cancellation was requested at or after the appointment's start time. The appointment is left as it was, still `CONFIRMED`. A cancelled appointment is deleted, so cancelling it again is `404 APPOINTMENT_NOT_FOUND`, never this. | "This appointment has already started." |
 | `LOOKUP_RATE_LIMITED` | 429 | Five wrong tries of one reference, lookups and cancels together, block it, even for the right digits, until an hour after the first. Carries `Retry-After`. | "Too many attempts. Try again later." |
 | `INTERNAL_ERROR` | 500 | An unexpected failure, such as a second reference collision in one booking. Only the correlation id is returned. | A generic error with the correlation id to quote. |
 | `TRY_AGAIN` | 503 | A lock or statement timeout, a deadlock after one automatic retry, no database connection, or any other temporary failure. Always carries `Retry-After`. | The web app retries once with the same idempotency key, then asks the customer to try again. |

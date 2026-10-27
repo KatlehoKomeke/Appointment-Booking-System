@@ -12,7 +12,8 @@ import org.jspecify.annotations.Nullable;
  * shows neither.
  *
  * @param id the message's id
- * @param appointmentId the appointment it is about
+ * @param appointmentId the appointment it is about, or {@code null} for a cancellation whose
+ *     appointment the cancel has deleted; only a cancellation outlives its appointment (BR-14)
  * @param kind what it tells the customer
  * @param channel how it reaches them
  * @param recipient the mobile number in E.164 form (or the e-mail address)
@@ -30,7 +31,7 @@ import org.jspecify.annotations.Nullable;
  */
 public record NotificationMessage(
     UUID id,
-    UUID appointmentId,
+    @Nullable UUID appointmentId,
     NotificationKind kind,
     NotificationChannel channel,
     String recipient,
@@ -48,11 +49,13 @@ public record NotificationMessage(
   /** The failure reason of a message the per-recipient daily cap stopped (BR-17). */
   public static final String RECIPIENT_DAILY_CAP = "RECIPIENT_DAILY_CAP";
 
-  /** Rejects a missing value. */
+  /** Rejects a missing value, and a confirmation without its appointment. */
   public NotificationMessage {
     Objects.requireNonNull(id, "id");
-    Objects.requireNonNull(appointmentId, "appointmentId");
     Objects.requireNonNull(kind, "kind");
+    if (appointmentId == null && kind != NotificationKind.CANCELLATION) {
+      throw new IllegalArgumentException("Only a cancellation outlives its appointment");
+    }
     Objects.requireNonNull(channel, "channel");
     Objects.requireNonNull(recipient, "recipient");
     Objects.requireNonNull(body, "body");

@@ -75,7 +75,7 @@ and `ScriptedReferenceGenerator`, which replaces the random generator in every i
 references a test scripts first, so a test can force a reference collision. The dispatcher's own loop is off in the
 tests: a test that delivers calls `NotificationDispatcher.runOnce` with the instant it wants, so no test sleeps.
 `BookingPause` holds a booking at step 10, after it has written its appointment and SMS and before it commits, or a
-cancel at the statement a test names, such as its UPDATE of the appointment, or a retry at its reset before that
+cancel at the statement a test names, such as its INSERT of the cancellation SMS, or a retry at its reset before that
 statement locks anything, so a test can look from outside the transaction or send a second request into it at a moment
 it chooses. `LockWaits` waits until PostgreSQL shows the sessions a test expects waiting for a lock, so a race is
 forced, never hoped for, and no test sleeps.
@@ -103,7 +103,8 @@ environment supplies the rest:
 | `BRANCHBOOK_RETENTION_ENABLED` | `branchbook.retention.enabled`. Switches on the hourly retention job, which deletes every booking once its appointment is over, plus the delay below, with its messages and idempotency keys, keeping the hosted demo's promise; a booking for a future date is never touched ([SECURITY.md](../SECURITY.md#personal-information-popia)). `false` by default. | The hosted demo's ECS task definition sets it to `true`, and nothing else does. `compose.yaml`, `make dev-api` and the tests leave it off; the tests call `RetentionPurge` themselves |
 | `BRANCHBOOK_RETENTION_AFTER_END` | `branchbook.retention.after-end`. How long after its appointment ends a booking is deleted, as an ISO-8601 duration. `PT0S` by default; a negative value stops start-up. | Optional; the hosted demo leaves it at zero |
 | `BRANCHBOOK_SMS_GATEWAY` | `branchbook.sms.gateway`. `simulated`, the default, sends nothing. `aws` sends every number outside the published demo block, 082 555 0000 to 0199, a real transactional SMS through AWS End User Messaging SMS; the block stays simulated, because anyone may type it. The start-up log names the gateway, the region and whether a protect configuration and a cap are set. Credentials come from the SDK's default chain, in the hosted demo the ECS task role. | The hosted demo's task definition sets `aws`; `compose.yaml`, `make dev-api` and the tests leave it `simulated` |
-| `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` | `branchbook.sms.recipient-daily-cap`. The most SMS one number outside the demo block is written in any 24 hours, confirmations and cancellations together; the next is FAILED with `RECIPIENT_DAILY_CAP`, never sent, and the booking or cancel still succeeds ([BR-17](../docs/domain-rules.md#br-17)). Cancels for one number at the same moment can pass it by a message or two. `0`, the default, is off; a negative value stops start-up. | The hosted demo's task definition; off elsewhere |
+| `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` | `branchbook.sms.recipient-daily-cap`. The most SMS one number outside the demo block is written in any 24 hours, confirmations and cancellations together; the next is FAILED with `RECIPIENT_DAILY_CAP`, never sent, and the booking or cancel still succeeds ([BR-17](../docs/domain-rules.md#br-17)). Each SMS is counted in the cap's ledger, `sms_recipient_sends`, which keeps a keyed fingerprint of the number for 24 hours, so a cancelled booking's confirmations and a cancellation once final still count after they are deleted. Cancels for one number at the same moment can pass it by a message or two. `0`, the default, is off, and the ledger then stays empty; a negative value stops start-up. | The hosted demo's task definition; off elsewhere |
+| `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY` | `branchbook.sms.recipient-cap-key`. The secret the cap's ledger keys each fingerprint with: HMAC-SHA256 of the number's E.164 form, so the ledger never holds the number and the fingerprint cannot be matched to one without the key. At least 32 characters, such as the output of `openssl rand -base64 48`, or start-up stops with a message that does not quote it; never logged or printed. Empty, the default, makes a random key at each start, so every number's count starts again when the application restarts, and logs one WARN at start-up while the cap is on. | A secret store, in a deployment that keeps counts across restarts; nothing sets it today, the hosted demo included |
 | `BRANCHBOOK_SMS_AWS_REGION` | `branchbook.sms.aws.region`. The region to send from, such as `af-south-1`. Empty by default, which leaves it to the SDK's default region chain; start-up fails if that finds none. | The hosted demo's task definition |
 | `BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID` | `branchbook.sms.aws.protect-configuration-id`. The protect configuration sent with every message, which in the hosted demo allows South Africa only. Empty sends none. | The hosted demo's task definition |
 | `BRANCHBOOK_SMS_AWS_CONFIGURATION_SET`, `BRANCHBOOK_SMS_AWS_ORIGINATION_IDENTITY` | `branchbook.sms.aws.configuration-set` and `.origination-identity`. Sent only where set. With no origination identity, AWS picks the route, a shared one for South Africa, which supports no sender IDs. | Optional |
@@ -127,7 +128,7 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 | `GET /api/v1/branches/{code}/availability?service=&date=` | One day's slots for one service at one branch, each with the seats left, or why the branch is closed that day |
 | `POST /api/v1/appointments` | Book a slot, with an `Idempotency-Key`. `201` with the appointment, its `Location` and its PENDING SMS |
 | `GET /api/v1/appointments/{reference}` | Open an appointment again, with `X-Mobile-Last4` |
-| `POST /api/v1/appointments/{reference}/cancel` | Cancel an appointment before it starts, with `X-Mobile-Last4`. `200` with the appointment as a lookup now shows it: `CANCELLED`, its PENDING or FAILED confirmation superseded and its cancellation SMS PENDING |
+| `POST /api/v1/appointments/{reference}/cancel` | Cancel an appointment before it starts, with `X-Mobile-Last4`, and delete it at once. `200` with the appointment as the cancel left it: `CANCELLED`, with only its cancellation SMS, PENDING. From then on the reference is a `404`, counted |
 | `GET /api/v1/messages?limit=` | The simulated inbox: the newest messages of every booking, recipients redacted to `082 *** ****`, and references to `APT-****-****` while `branchbook.inbox.redact-references` is true. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
 | `POST /api/v1/messages/{id}/retry` | Make a FAILED message due again (the web inbox's Retry button calls it); any other message is returned unchanged. The answer is the message as the inbox shows it, its reference redacted the same way. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
 | `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml) |
@@ -203,7 +204,8 @@ How a booking is decided ([docs/architecture.md](../docs/architecture.md), secti
   lowest free seat, insert the appointment, write the SMS, complete the key. A refusal rolls all of it back.
 - The same key with the same details returns the first booking with `Idempotent-Replayed: true`; with other details
   it is `422 IDEMPOTENCY_KEY_REUSED`. The details are compared after parsing, so `0825550101` and `082 555 0101` are
-  the same request.
+  the same request. Once that booking is cancelled, the same key is `422 IDEMPOTENCY_KEY_REUSED` too, with a detail
+  saying the booking has been cancelled: a retry never books it again.
 - A reference collision, a deadlock or a serialisation failure runs the transaction once more. A lock not granted
   in 2 seconds is `503 TRY_AGAIN` with `Retry-After: 2`.
 - A full slot is `409 SLOT_FULL` with up to three free slots later that day, found after the rollback.
@@ -212,24 +214,30 @@ Opening an appointment needs its reference, in any case and with or without hyph
 the number. Every mismatch is the same `404`, and five wrong tries block the reference, right digits included, until
 an hour after the first (`429` with `Retry-After`).
 
-How a cancel is decided (BR-13, BR-14, BR-16, BR-24):
+How a cancel is decided (BR-13, BR-14, BR-16, BR-24). A cancelled booking is deleted at once; only its
+cancellation SMS is kept, until it is sent or has failed for good:
 
 - It needs the same reference and digits as a lookup, through the same check, and its wrong tries count towards the
   same five.
-- One `READ COMMITTED` transaction loads the appointment through JPA without a lock, cancels it, and flushes:
-  `UPDATE ... WHERE id = ? AND version = ?`, which frees the seat at once. It then marks the appointment's
-  confirmation FAILED with `SUPERSEDED_BY_CANCELLATION` if it is still PENDING or FAILED, and writes the PENDING
-  cancellation SMS. All of it commits together.
-- A confirmation the dispatcher is sending at that moment is locked, so the cancel waits for that one send, for up
-  to 2 seconds; a longer send makes the cancel `503 TRY_AGAIN`, with nothing changed. If it went out, the cancel
-  leaves it alone: a confirmation is delivered before its cancellation, or never.
-- A repeat is the same `200` and writes nothing. Two cancels at the same moment both get it: the second one's version
-  check fails, and it reads the appointment once more and finds it cancelled.
 - At or after the start it is `409 TOO_LATE_TO_CANCEL`, and the appointment stays `CONFIRMED`.
-- An appointment the retention purge has deleted, before the cancel or while it runs, is the same
-  `404 APPOINTMENT_NOT_FOUND` as an unknown reference, never a `500`.
+- One `READ COMMITTED` transaction loads the appointment through JPA without a lock, then locks its row with
+  `SELECT ... WHERE id = ? AND version = ? FOR UPDATE`. It deletes every confirmation of the appointment, whatever
+  its status, writes the PENDING cancellation SMS, builds the response, and deletes the appointment with
+  `DELETE ... WHERE id = ? AND version = ?`, which frees the seat. The foreign keys keep the cancellation SMS and
+  the idempotency key, each with no appointment. All of it commits together.
+- A confirmation the dispatcher is sending at that moment is locked, so the cancel waits for that one send, for up
+  to 2 seconds; a longer send makes the cancel `503 TRY_AGAIN`, with nothing changed. Once it went out, the cancel
+  deletes it all the same: a confirmation is delivered before its cancellation, or never.
+- The dispatcher deletes the cancellation SMS once it is sent, or has failed for good, logging only its message id.
+  The key expires with its 24 hours, as any key does.
+- From the commit the reference is unknown. A repeat cancel, or a lookup, is `404 APPOINTMENT_NOT_FOUND` and counts
+  as a wrong try, exactly as for a reference never issued. Two cancels at the same moment get one `200` and that
+  same counted `404`: the second waits for the first's lock and finds the row gone.
+- An appointment the retention purge has deleted once it was over, before the cancel or while it runs, is the same counted
+  `404 APPOINTMENT_NOT_FOUND`, never a `500`.
 
-`POST /api/v1/appointments/APT-7K3M-9Q2X/cancel` with `X-Mobile-Last4: 0101`, shortened:
+`POST /api/v1/appointments/APT-7K3M-9Q2X/cancel` with `X-Mobile-Last4: 0101`, shortened. The confirmation is not
+listed: it has been deleted.
 
 ```json
 {
@@ -237,8 +245,8 @@ How a cancel is decided (BR-13, BR-14, BR-16, BR-24):
   "status": "CANCELLED",
   "canCancel": false,
   "cancelledAt": "2026-10-26T08:10:00+02:00",
+  "customer": { "firstName": "Thandi", "lastName": "Mokoena", "mobileMasked": "082 *** 0101" },
   "notifications": [
-    { "kind": "CONFIRMATION", "status": "FAILED", "failureReason": "SUPERSEDED_BY_CANCELLATION", "...": "..." },
     {
       "kind": "CANCELLATION",
       "status": "PENDING",
@@ -254,7 +262,8 @@ The retry of a message locks it with `FOR UPDATE` until it commits, and waits up
 flight, so it never races the dispatcher or a cancel. It resets a FAILED message whose `failureReason` is
 `DELIVERY_FAILED` or `DISPATCH_ERROR` to PENDING, with no attempts and due now. Every other message, and the
 confirmation of an appointment that is cancelled or has started, comes back unchanged with `retryable` false, by the
-same rule that sets `retryable` in the inbox. Where the inbox is off, [docs/runbook.md](../docs/runbook.md) holds the
+same rule that sets `retryable` in the inbox. A cancellation whose booking has been deleted shows `APT-****-****` as
+its reference, in the inbox and its retry, and once it is deleted its retry is `404 MESSAGE_NOT_FOUND`. Where the inbox is off, [docs/runbook.md](../docs/runbook.md) holds the
 guarded SQL that replays a message instead.
 
 Every error is an RFC 9457 problem with a stable `code` ([docs/errors.md](../docs/errors.md)). Its `instance` names
@@ -382,9 +391,9 @@ api/
     │   │   └── infrastructure/          JPA and SQL adapters, the constraint translator, the key purge, the retention job
     │   ├── notification/                the confirmation and cancellation SMS, and the simulated inbox
     │   │   ├── api/                     the inbox and retry endpoints, which exist only while switched on
-    │   │   ├── application/             the outbox writer, the dispatcher, the message reads, the inbox and the retry
+    │   │   ├── application/             the outbox writer, the dispatcher, the message reads, the inbox and the retry, the cap's fingerprints
     │   │   ├── domain/                  plain Java: NotificationTemplates, Gsm7
-    │   │   └── infrastructure/          SQL for notification_messages
+    │   │   └── infrastructure/          SQL for notification_messages and the cap's ledger, the ledger's purge, the SMS gateways
     │   └── shared/                      cross-cutting concerns
     │       ├── problem/                 RFC 9457 error responses
     │       ├── correlation/             correlation ids
@@ -394,7 +403,7 @@ api/
     │       └── web/                     serving the React app; the OpenAPI description
     ├── main/resources/
     │   ├── application.yml              configuration, one comment per property
-    │   └── db/migration/                Flyway migrations V1 to V4, one header comment each
+    │   └── db/migration/                Flyway migrations V1 to V7, one header comment each
     └── test/java/za/co/fynbos/branchbook/
         └── support/                     @IntegrationTest, MutableClock, DatabaseReset, Bookings, the container
 ```

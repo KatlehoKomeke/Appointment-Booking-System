@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
 import org.springframework.transaction.support.TransactionTemplate;
+import za.co.fynbos.branchbook.booking.application.IdempotencyKeyStore.Cancelled;
 import za.co.fynbos.branchbook.booking.application.IdempotencyKeyStore.New;
 import za.co.fynbos.branchbook.booking.application.IdempotencyKeyStore.Replay;
 import za.co.fynbos.branchbook.booking.application.IdempotencyKeyStore.Reused;
@@ -33,7 +34,8 @@ import za.co.fynbos.branchbook.shared.problem.ProblemException;
  * <p>{@link #book} runs the ten steps in one READ COMMITTED transaction, one line each:
  *
  * <ol>
- *   <li>Claim the {@code Idempotency-Key}, or replay what it already booked (BR-12).
+ *   <li>Claim the {@code Idempotency-Key}, or replay what it already booked, or refuse it if that
+ *       booking has been cancelled (BR-12, BR-14).
  *   <li>Load the branch and how it offers the service (BR-6).
  *   <li>Check the requested start against the slot rules, by their fixed precedence (BR-1 to BR-5,
  *       BR-21).
@@ -146,11 +148,17 @@ public class BookAppointmentHandler {
       throw new SlotFullException(
           alternatives.after(command.branchCode(), command.serviceCode(), command.startsAt()));
     }
-    AppointmentView view = views.byId(booked.appointmentId(), now);
     if (booked.replayed()) {
+      // A cancel may delete the appointment between this commit and this read: its booking was
+      // cancelled, which the key now answers, as it would have a moment later.
+      AppointmentView view =
+          views
+              .findById(booked.appointmentId(), now)
+              .orElseThrow(IdempotencyKeyReusedException::bookingCancelled);
       log.info("booking.replayed appointmentId={}", booked.appointmentId());
       return new BookingResult.Replayed(view);
     }
+    AppointmentView view = views.byId(booked.appointmentId(), now);
     log.info(
         "booking.confirmed appointmentId={} branch={} service={} seat={}",
         booked.appointmentId(),
@@ -183,6 +191,7 @@ public class BookAppointmentHandler {
         keys.reserve(c.idempotencyKey(), c.requestHash(), now);
     return switch (reservation) {
       case Reused _ -> throw new IdempotencyKeyReusedException();
+      case Cancelled _ -> throw IdempotencyKeyReusedException.bookingCancelled();
       case New fresh -> fresh;
       case Replay replay -> replay;
     };

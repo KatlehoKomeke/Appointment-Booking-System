@@ -18,21 +18,23 @@ import org.springframework.context.annotation.Import;
  * <p>Integration tests that use only this configuration share one context, so Spring builds it once
  * and one database container serves them all. A class that switches a setting with
  * {@code @TestPropertySource}, as {@code InboxSwitchedOffIT}, {@code InboxReferencesHiddenIT},
- * {@code DispatcherLoopIT}, {@code DemoNumbersOnlyIT} and {@code RecipientDailyCapIT} do, builds a
- * context of its own, and with it a container of its own, because the container is a bean of the
- * context; each one adds several seconds to the run. Before every test the clock is back at {@link
- * TestClockConfiguration#DEFAULT_INSTANT}, so no test depends on the order tests run in.
+ * {@code DispatcherLoopIT}, {@code DemoNumbersOnlyIT}, {@code RecipientDailyCapIT} and {@code
+ * RecipientCapLedgerIT} do, builds a context of its own, and with it a container of its own,
+ * because the container is a bean of the context; each one adds several seconds to the run. Before
+ * every test the clock is back at {@link TestClockConfiguration#DEFAULT_INSTANT}, so no test
+ * depends on the order tests run in.
  *
  * <p>The simulated inbox is switched on, as it is in docker compose, and the dispatcher's own loop
  * is off with no gateway latency: tests that deliver call {@code NotificationDispatcher.runOnce}
  * with the clock's instant, so no test sleeps. Bookings take any South African mobile, the inbox
- * shows references, every SMS goes through the simulated gateway and no daily cap applies, as
- * everywhere but the hosted demo; all are set here rather than left to the default, so a {@code
- * BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY}, {@code BRANCHBOOK_INBOX_REDACT_REFERENCES}, {@code
- * BRANCHBOOK_SMS_GATEWAY} or {@code BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP} exported in the developer's
- * shell cannot change what the tests prove, nor make a test send a real SMS. References come from a
- * {@link ScriptedReferenceGenerator}, which hands out random ones unless a test scripts them.
- * Classes that book through the API add {@link DatabaseReset}.
+ * shows references, every SMS goes through the simulated gateway and no daily cap applies, with no
+ * key for its ledger, as everywhere but the hosted demo; all are set here rather than left to the
+ * default, so a {@code BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY}, {@code
+ * BRANCHBOOK_INBOX_REDACT_REFERENCES}, {@code BRANCHBOOK_SMS_GATEWAY}, {@code
+ * BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP} or {@code BRANCHBOOK_SMS_RECIPIENT_CAP_KEY} exported in the
+ * developer's shell cannot change what the tests prove, nor make a test send a real SMS. References
+ * come from a {@link ScriptedReferenceGenerator}, which hands out random ones unless a test scripts
+ * them. Classes that book through the API add {@link DatabaseReset}.
  *
  * <p>Metrics are exported as the application exports them, so {@code /actuator/prometheus} answers:
  * Spring Boot switches export off in tests unless {@link AutoConfigureMetrics} asks for it. Every
@@ -49,7 +51,8 @@ import org.springframework.context.annotation.Import;
       "branchbook.dispatcher.simulated-latency=PT0S",
       "branchbook.booking.demo-numbers-only=false",
       "branchbook.sms.gateway=simulated",
-      "branchbook.sms.recipient-daily-cap=0"
+      "branchbook.sms.recipient-daily-cap=0",
+      "branchbook.sms.recipient-cap-key="
     })
 @ExtendWith(ResetClockExtension.class)
 @AutoConfigureMockMvc

@@ -12,7 +12,8 @@ import za.co.fynbos.branchbook.booking.domain.AppointmentReference;
  * Lets in only the caller who proves an appointment with its reference and the last four digits of
  * the mobile number that booked it, the customer's only credential (BR-13, ADR-0004). Opening and
  * cancelling both come through here, so a wrong cancel is counted exactly as a wrong lookup is, and
- * five of either block the reference.
+ * five of either block the reference. A cancel deletes the appointment, so its reference is unknown
+ * from then on, and opening or cancelling it again is counted as any unknown one is.
  *
  * <p>Each try is counted by the {@link LookupAttemptLimiter} from before the database is read until
  * the digits have been compared: a wrong one becomes a failure and a right one is released. A read
@@ -58,21 +59,18 @@ class AppointmentAccess {
   }
 
   /**
-   * Loads again, in a later transaction of the same request, an appointment the caller proved with
-   * {@link #open} moments ago, without counting the try: the digits matched then, and the limiter
-   * released them. The appointment may have gone since, deleted by the retention purge, which is no
-   * guess of the caller's, so that is a {@code 404} that counts towards no block.
+   * Counts a try whose appointment was gone by the time the caller could act on it, exactly as a
+   * try of an unknown reference is counted: a concurrent cancel or the retention purge deleted it
+   * after {@link #open} matched its digits. A deleted reference must be indistinguishable from one
+   * that never existed, in the answer and in the count alike (BR-13, BR-14).
    *
    * @param reference the reference, already parsed
-   * @param mobileLast4 the last four digits the caller proved it with
-   * @return the appointment, loaded through JPA without a lock
-   * @throws AppointmentNotFoundException if the appointment is no longer there
+   * @param now the current instant, which the limiter's window is measured on
+   * @throws LookupRateLimitedException if the reference has had too many wrong tries, as an unknown
+   *     one would be answered
    */
-  Appointment reopen(AppointmentReference reference, String mobileLast4) {
-    return appointments
-        .findByReference(reference)
-        .filter(appointment -> sameDigits(appointment.mobile().last4(), mobileLast4))
-        .orElseThrow(AppointmentNotFoundException::new);
+  void countAsUnknown(AppointmentReference reference, Instant now) {
+    limiter.end(limiter.begin(reference, now), true);
   }
 
   /** Compares in constant time, so the response time does not leak how many digits matched. */

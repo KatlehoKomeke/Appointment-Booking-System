@@ -5,6 +5,10 @@
  *   <li>{@link
  *       za.co.fynbos.branchbook.notification.infrastructure.JdbcNotificationMessageRepository}
  *       stores, reads, claims and marks {@code notification_messages} with plain SQL.
+ *   <li>{@link za.co.fynbos.branchbook.notification.infrastructure.JdbcRecipientSendLedger} counts
+ *       and records the daily cap's fingerprints in {@code sms_recipient_sends}, and {@link
+ *       za.co.fynbos.branchbook.notification.infrastructure.RecipientSendLedgerPurgeJob} deletes
+ *       them every hour once they are 24 hours old.
  *   <li>{@link za.co.fynbos.branchbook.notification.infrastructure.SmsGatewayConfiguration} builds
  *       the one {@code MessageGateway} from {@code branchbook.sms}.
  *   <li>{@link za.co.fynbos.branchbook.notification.infrastructure.SimulatedSmsGateway} sends

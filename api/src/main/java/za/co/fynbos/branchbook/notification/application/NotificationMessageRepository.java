@@ -5,7 +5,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import za.co.fynbos.branchbook.notification.domain.NotificationChannel;
 import za.co.fynbos.branchbook.notification.domain.NotificationMessage;
 
 /** Where messages are stored: the {@code notification_messages} table. */
@@ -43,19 +42,6 @@ public interface NotificationMessageRepository {
    * @return the message, or empty if no message has that id
    */
   Optional<NotificationMessage> lockById(UUID id);
-
-  /**
-   * Counts the messages on one channel to one recipient written after the given instant, for the
-   * per-recipient daily cap (BR-17). A message the cap itself stopped is not counted, so a number
-   * that keeps being refused is not held back for longer than a day by its own refusals.
-   *
-   * @param recipient the recipient, in the form the messages store it (E.164 for an SMS)
-   * @param channel the channel
-   * @param since the start of the window, from the application's clock; a message written at it or
-   *     earlier is not counted
-   * @return how many messages count towards the cap
-   */
-  long countTowardsDailyCap(String recipient, NotificationChannel channel, Instant since);
 
   /**
    * Counts the messages still waiting to be delivered, whether due now or backing off, for the
@@ -105,17 +91,16 @@ public interface NotificationMessageRepository {
   void markFailed(UUID id, int attempts, String failureReason, String lastError);
 
   /**
-   * Marks FAILED with {@code SUPERSEDED_BY_CANCELLATION} every CONFIRMATION of an appointment that
-   * is still PENDING or FAILED, in the caller's transaction (BR-24). A confirmation the dispatcher
-   * is sending is locked, so this waits for that one send to be marked and then leaves the message
-   * alone if it went out: a confirmation is delivered before its cancellation, or never. One the
-   * per-recipient daily cap stopped keeps {@code RECIPIENT_DAILY_CAP}: it was never going to be
-   * sent, and the cap must go on leaving it out of its count (BR-17).
+   * Deletes every CONFIRMATION of an appointment, whatever its status, in the caller's transaction,
+   * keeping no copy, because the cancel is about to delete the appointment itself (BR-14, BR-24). A
+   * confirmation the dispatcher is sending is locked, so this waits for that one send to be marked,
+   * at most the session's {@code lock_timeout}, and then deletes it too: a confirmation is
+   * delivered before its cancellation, or never.
    *
    * @param appointmentId the appointment being cancelled
-   * @return how many confirmations were superseded
+   * @return how many confirmations were deleted
    */
-  int supersedeConfirmations(UUID appointmentId);
+  int deleteConfirmations(UUID appointmentId);
 
   /**
    * Marks one message FAILED with {@code SUPERSEDED_BY_CANCELLATION}, for a confirmation the
@@ -143,6 +128,23 @@ public interface NotificationMessageRepository {
    * @param lastError what to record, {@code MARK_FAILED}
    */
   void markDispatchError(UUID id, String lastError);
+
+  /**
+   * Deletes one message in the caller's transaction, for a cancellation that has reached a final
+   * state: sent, or failed for good (BR-14). The caller has locked it.
+   *
+   * @param id the message
+   */
+  void delete(UUID id);
+
+  /**
+   * Deletes a message that is still PENDING, in place of marking it FAILED with {@code
+   * DISPATCH_ERROR}, for a cancellation whose outcome could not be recorded (BR-14).
+   *
+   * @param id the message
+   * @return whether it was deleted; false if it is no longer PENDING or no longer there
+   */
+  boolean deleteIfPending(UUID id);
 
   /**
    * Deletes every message of the given appointments, in the caller's transaction, for booking's

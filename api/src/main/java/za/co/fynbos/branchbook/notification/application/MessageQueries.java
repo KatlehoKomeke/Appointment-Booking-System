@@ -32,7 +32,13 @@ public class MessageQueries implements AppointmentNotifications {
     return messages.forAppointment(appointmentId).stream().map(MessageQueries::summary).toList();
   }
 
-  private static NotificationSummary summary(NotificationMessage message) {
+  /**
+   * Shows one message as an appointment's response does, with the recipient masked.
+   *
+   * @param message the message
+   * @return its summary
+   */
+  static NotificationSummary summary(NotificationMessage message) {
     String recipient =
         message.channel() == NotificationChannel.SMS
             ? MobileNumber.ofE164(message.recipient()).masked()

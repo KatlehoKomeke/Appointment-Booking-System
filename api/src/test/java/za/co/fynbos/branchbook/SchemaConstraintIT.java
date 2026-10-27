@@ -5,8 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.fail;
 
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -169,6 +171,43 @@ class SchemaConstraintIT {
     assertThat(predicates).hasSize(4).allSatisfy(p -> assertThat(statusesIn(p)).isEqualTo(active));
   }
 
+  /**
+   * BR-14, V6: deleting an appointment keeps its cancellation SMS and its completed idempotency
+   * key, each with no appointment, in the same statement; a key still in progress, which has no
+   * appointment yet, is untouched.
+   */
+  @Test
+  void deletingAnAppointmentDetachesItsCancellationAndItsKey() throws SQLException {
+    try (Connection connection = dataSource.getConnection()) {
+      connection.setAutoCommit(false);
+      try (Statement statement = connection.createStatement()) {
+        statement.execute(bookedAppointment().insert());
+        statement.execute(message().with("id", TEST_ID).with("kind", "'CANCELLATION'").insert());
+        statement.execute(
+            idempotencyKey()
+                .with("key", TEST_ID)
+                .with("appointment_id", APPOINTMENT_ID)
+                .with("response_status", "201")
+                .insert());
+        statement.execute(idempotencyKey().insert());
+
+        assertThat(statement.executeUpdate("DELETE FROM appointments WHERE id = " + APPOINTMENT_ID))
+            .isOne();
+
+        assertThat(rows(statement, "SELECT kind, appointment_id FROM notification_messages"))
+            .containsExactly("CANCELLATION null");
+        assertThat(
+                rows(
+                    statement,
+                    "SELECT response_status, appointment_id FROM idempotency_keys"
+                        + " ORDER BY response_status NULLS LAST"))
+            .containsExactly("201 null", "null null");
+      } finally {
+        connection.rollback();
+      }
+    }
+  }
+
   /** Primary keys, unique, check, foreign key and exclusion constraints: every one has a case. */
   @Test
   void everyNamedConstraintHasACase() {
@@ -201,7 +240,34 @@ class SchemaConstraintIT {
                         holiday().insert(),
                         bookedAppointment().insert(),
                         idempotencyKey().insert(),
-                        message().insert())));
+                        message().insert(),
+                        recipientSend().insert())));
+  }
+
+  /**
+   * BR-17, V7: the daily cap counts through the ledger's two indexes, and V5's index on the
+   * messages' recipients, which nothing reads any more, is gone.
+   */
+  @Test
+  void theCapsLedgerHasItsIndexesAndTheMessagesRecipientIndexIsGone() {
+    assertThat(
+            jdbc.queryForList(
+                "SELECT indexname || ' ' || indexdef FROM pg_indexes"
+                    + " WHERE tablename = 'sms_recipient_sends' ORDER BY indexname",
+                String.class))
+        .satisfiesExactly(
+            fingerprint ->
+                assertThat(fingerprint)
+                    .startsWith("ix_sms_recipient_sends_fingerprint ")
+                    .endsWith("(recipient_fingerprint, written_at)"),
+            written ->
+                assertThat(written)
+                    .startsWith("ix_sms_recipient_sends_written ")
+                    .endsWith("(written_at)"));
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT to_regclass('ix_notification_messages_recipient') IS NULL", Boolean.class))
+        .isTrue();
   }
 
   static Stream<Violation> violations() {
@@ -458,10 +524,6 @@ class SchemaConstraintIT {
                 .with("appointment_id", APPOINTMENT_ID)
                 .with("response_status", "200")
                 .insert()),
-        check(
-            "idempotency_keys_completed_consistent",
-            "a status without an appointment",
-            idempotencyKey().with("response_status", "201")),
         new Violation(
             "idempotency_keys_completed_consistent",
             CHECK,
@@ -532,7 +594,31 @@ class SchemaConstraintIT {
         messageCheck(
             "notification_messages_sent_at_consistent",
             "a sent time on a pending message",
-            message().with("sent_at", "'2026-10-26 08:01Z'")));
+            message().with("sent_at", "'2026-10-26 08:01Z'")),
+        check(
+            "notification_messages_detached_cancellation_only",
+            "a confirmation with no appointment",
+            message().with("appointment_id", "NULL")),
+        new Violation(
+            "notification_messages_detached_cancellation_only",
+            CHECK,
+            "deleting an appointment that still has its confirmation",
+            bookedAppointment().insert(),
+            message().insert(),
+            "DELETE FROM appointments WHERE id = " + APPOINTMENT_ID),
+        // sms_recipient_sends
+        check(
+            "sms_recipient_sends_fingerprint_format",
+            "the mobile number itself",
+            recipientSend().with("recipient_fingerprint", FIRST_MOBILE)),
+        check(
+            "sms_recipient_sends_fingerprint_format",
+            "upper-case hex",
+            recipientSend().with("recipient_fingerprint", "repeat('A', 64)")),
+        check(
+            "sms_recipient_sends_fingerprint_format",
+            "a hash cut short",
+            recipientSend().with("recipient_fingerprint", "repeat('a', 63)")));
   }
 
   static Stream<Acceptance> acceptances() {
@@ -566,6 +652,12 @@ class SchemaConstraintIT {
                 .with("cancelled_at", "'2026-10-26 10:00+02'")
                 .insert(),
             appointment("APT-BBBB-BBBB").with("customer_mobile", SECOND_MOBILE).insert()),
+        new Acceptance(
+            "a completed key outlives the appointment it booked",
+            idempotencyKey().with("response_status", "201").insert()),
+        new Acceptance(
+            "a cancellation outlives its appointment",
+            message().with("appointment_id", "NULL").with("kind", "'CANCELLATION'").insert()),
         new Acceptance(
             "a completed appointment frees its seat",
             appointment("APT-AAAA-AAAA")
@@ -662,6 +754,17 @@ class SchemaConstraintIT {
         connection.rollback();
       }
     }
+  }
+
+  /** Each row of a two-column query as "first second", with SQL NULL as "null". */
+  private static List<String> rows(Statement statement, String sql) throws SQLException {
+    List<String> rows = new ArrayList<>();
+    try (ResultSet result = statement.executeQuery(sql)) {
+      while (result.next()) {
+        rows.add(result.getString(1) + " " + result.getString(2));
+      }
+    }
+    return rows;
   }
 
   private static Set<String> statusesIn(String predicate) {
@@ -862,5 +965,12 @@ class SchemaConstraintIT {
         .column("failure_reason", "NULL")
         .column("correlation_id", "'test'")
         .column("sent_at", "NULL");
+  }
+
+  /** One SMS in the daily cap's ledger: a fingerprint in lower-case hex, never a number. */
+  private static Row recipientSend() {
+    return Row.of("sms_recipient_sends")
+        .column("recipient_fingerprint", "repeat('a', 64)")
+        .column("written_at", "'2026-10-26 08:00Z'");
   }
 }

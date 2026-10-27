@@ -8,8 +8,10 @@
  * last four digits once.
  *
  * Until the appointment starts, the customer can cancel it (Tier 2). Cancelling asks first, inline, naming the
- * appointment; once cancelled, the page says so calmly and shows the cancellation SMS being sent, with the
- * confirmation that was stopped shown as not sent rather than as a failure.
+ * appointment. The server deletes the appointment as it cancels it, so the cancel's answer is the last it says: the
+ * page stops asking, and gives way to a final cancelled view that says the details are deleted and the cancellation
+ * SMS is on its way, names what was cancelled and offers to book again. The tab remembers the cancellation without
+ * the name or the number (`rememberedCancellation`), so a refresh shows the same view; any other tab finds nothing.
  *
  * @packageDocumentation
  */
@@ -23,13 +25,17 @@ import { ApiProblem } from '../api/client';
 import { problemMessage } from '../api/problemCopy';
 import {
   type Appointment,
-  isSupersededByCancellation,
   isTooLateToCancel,
   type Notification,
   useAppointment,
   useCancelAppointment,
 } from '../api/queries';
-import { lookupDigits } from '../booking/bookingSession';
+import {
+  lookupDigits,
+  type NamedCode,
+  type RememberedCancellation,
+  rememberedCancellation,
+} from '../booking/bookingSession';
 import { plural } from '../lib/text';
 import { formatDateLong, formatTime, formatTimeRange } from '../lib/time';
 import { Alert } from '../ui/Alert';
@@ -56,17 +62,41 @@ type CancelMutation = ReturnType<typeof useCancelAppointment>;
 
 function Confirmation({ reference }: { reference: string }) {
   const [digits, setDigits] = useState(() => lookupDigits(reference));
-  const appointment = useAppointment(reference, digits, { poll: true });
-  // Here rather than in the cancel section, which is gone once the appointment is cancelled, so the heading can take
-  // the focus that the confirm button had.
+  // A cancel made in this tab before, such as before a refresh. One made on this page is the mutation's answer.
+  const [remembered] = useState(() => rememberedCancellation(reference));
+  // Here rather than in the cancel section, which gives way to the cancelled view, so the heading can take the
+  // focus that the confirm button had.
   const cancel = useCancelAppointment();
+  // The server deletes the appointment as it cancels it, so from the moment the cancel is sent the page stops
+  // asking: a poll could only find nothing. It asks again if the cancel fails.
+  const appointment = useAppointment(reference, digits, {
+    poll: true,
+    enabled: !cancel.isPending && !cancel.isSuccess,
+  });
   // A failed poll keeps the appointment already shown; only a first load that fails shows the error.
   const opened = appointment.data;
+
+  let cancelled: Cancelled | undefined;
+  if (cancel.data !== undefined) {
+    cancelled = fromAnswer(cancel.data);
+  } else if (opened?.status === 'CANCELLED') {
+    cancelled = fromAnswer(opened);
+  } else if (
+    remembered !== undefined &&
+    opened === undefined &&
+    (digits === undefined || isAppointmentNotFound(appointment.error))
+  ) {
+    cancelled = fromMemory(remembered);
+  }
 
   let title = 'Your appointment';
   let lead: ReactNode = undefined;
   let body: ReactNode = <p className={styles.muted}>Opening your appointment…</p>;
-  if (digits === undefined) {
+  if (cancelled !== undefined) {
+    title = HEADING.CANCELLED;
+    lead = `Its details have been deleted. ${cancelled.sms}`;
+    body = <CancelledView cancelled={cancelled} />;
+  } else if (digits === undefined) {
     title = 'Open your appointment';
     lead = (
       <>
@@ -78,7 +108,6 @@ function Confirmation({ reference }: { reference: string }) {
     body = <DigitsForm reference={reference} onFound={setDigits} />;
   } else if (opened !== undefined) {
     title = HEADING[opened.status];
-    lead = opened.status === 'CANCELLED' ? cancelledLead(opened) : undefined;
     body = (
       <AppointmentView appointment={opened} reference={reference} digits={digits} cancel={cancel} />
     );
@@ -95,19 +124,21 @@ function Confirmation({ reference }: { reference: string }) {
 
   return (
     <div className={styles.page}>
-      {opened?.status === 'CONFIRMED' && (
+      {cancelled === undefined && opened?.status === 'CONFIRMED' && (
         <span className={styles.mark}>
           <CheckIcon size={24} />
         </span>
       )}
       {/*
         One heading for every state, so that when the digits form gives way to the appointment, or the confirm
-        button to the cancelled appointment, the focus the button had moves to the heading instead of being lost,
-        even in a tab that was opened on this page.
+        button to the cancelled view, the focus the button had moves to the heading instead of being lost, even in
+        a tab that was opened on this page.
       */}
       <PageHeading
         title={title}
-        focusKey={digits === undefined ? 'digits' : cancel.isSuccess ? 'cancelled' : 'opened'}
+        focusKey={
+          cancelled !== undefined ? 'cancelled' : digits === undefined ? 'digits' : 'opened'
+        }
         lead={lead}
       />
       {body}
@@ -123,6 +154,10 @@ const HEADING: Record<Appointment['status'], string> = {
   CANCELLED: 'This appointment was cancelled',
 };
 
+function isAppointmentNotFound(error: unknown): boolean {
+  return error instanceof ApiProblem && error.code === 'APPOINTMENT_NOT_FOUND';
+}
+
 // The latest message of a kind, if there were several.
 function latestMessage(
   appointment: Appointment,
@@ -131,19 +166,110 @@ function latestMessage(
   return appointment.notifications.findLast((n) => n.kind === kind);
 }
 
-// Under the heading of a cancelled appointment: when, in SAST, and that its time is free again.
-function cancelledLead({ cancelledAt }: Appointment): string {
-  const released = 'Its time is free again for someone else to book.';
-  return cancelledAt === null
-    ? released
-    : `Cancelled at ${formatTime(cancelledAt)} SAST on ${formatDateLong(cancelledAt)}. ${released}`;
+/** What the cancelled view shows: the server's last answer, or what this tab remembers after a refresh. */
+interface Cancelled extends RememberedCancellation {
+  /** Where the cancellation SMS is going, in a sentence. */
+  sms: string;
 }
 
-// The booking flow with this branch and service already chosen, so it opens on the date-and-time step. A branch
-// that no longer offers the service is caught there, with the API's own words for it.
-function bookAgainHref({ branch, service }: Appointment): string {
+// The cancel's answer, or an appointment the server still calls cancelled. The cancellation SMS has just been
+// queued, so it is on its way; only the answer knows the masked number it goes to.
+function fromAnswer(appointment: Appointment): Cancelled {
+  const recipient = latestMessage(appointment, 'CANCELLATION')?.recipientMasked;
+  return {
+    cancelledAt: appointment.cancelledAt,
+    branch: appointment.branch,
+    service: appointment.service,
+    slot: { startsAt: appointment.startsAt, endsAt: appointment.endsAt },
+    sms: `A cancellation SMS is on its way to ${recipient ?? 'the number you booked with'}.`,
+  };
+}
+
+// After a refresh: the tab kept no number, not even masked, and the server can no longer say how the SMS went.
+function fromMemory(remembered: RememberedCancellation): Cancelled {
+  return { ...remembered, sms: 'A cancellation SMS was sent to the number you booked with.' };
+}
+
+/**
+ * Booking again: the same service at the same branch, opening the booking flow on the date-and-time step, or
+ * anything else. A branch that no longer offers the service is caught on that step, with the API's own words for
+ * it.
+ */
+function BookAgain({ branch, service }: { branch: NamedCode; service: NamedCode }) {
   const search = new URLSearchParams({ branch: branch.code, service: service.code });
-  return `/book?${search.toString()}`;
+  return (
+    <>
+      <ButtonLink
+        to={`/book?${search.toString()}`}
+        variant="secondary"
+        fullWidth
+        // The visible words start the name, as they must; the rest says which service and where, for a screen
+        // reader's list of links, which reads each link without the card above it.
+        aria-label={`Book this service again: ${service.name} at ${branch.name}`}
+      >
+        Book this service again
+      </ButtonLink>
+      <ButtonLink to="/book" variant="secondary" fullWidth>
+        Book another appointment
+      </ButtonLink>
+    </>
+  );
+}
+
+/**
+ * The final view of an appointment once it is cancelled: what it was for, when it was cancelled, and the ways to
+ * book again. Nothing on it changes, so it has no live region: the server keeps nothing more to say about the
+ * appointment, and the cancellation SMS's delivery can no longer be watched.
+ */
+function CancelledView({ cancelled }: { cancelled: Cancelled }) {
+  const headingId = useId();
+  const { service, branch, slot, cancelledAt } = cancelled;
+
+  return (
+    <>
+      <Card as="section" aria-labelledby={headingId}>
+        <div className={styles.cardHead}>
+          <h2 id={headingId} className={styles.cardHeading}>
+            Your appointment
+          </h2>
+          <Badge tone="neutral">Cancelled</Badge>
+        </div>
+        <dl className={styles.facts}>
+          <div className={styles.fact}>
+            <dt className={styles.term}>Service</dt>
+            <dd className={styles.value}>{service.name}</dd>
+          </div>
+          <div className={styles.fact}>
+            <dt className={styles.term}>Branch</dt>
+            <dd className={styles.value}>{branch.name}</dd>
+          </div>
+          {slot !== null && (
+            <div className={styles.fact}>
+              <dt className={styles.term}>Date and time</dt>
+              <dd>
+                <span className={styles.value}>{formatDateLong(slot.startsAt)}</span>
+                <span className={styles.detail}>{formatTimeRange(slot.startsAt, slot.endsAt)}</span>
+              </dd>
+            </div>
+          )}
+          {cancelledAt !== null && (
+            <div className={styles.fact}>
+              <dt className={styles.term}>Cancelled</dt>
+              <dd>
+                <span className={styles.value}>
+                  {formatTime(cancelledAt)} SAST on {formatDateLong(cancelledAt)}
+                </span>
+                <span className={styles.detail}>
+                  Its time is free again for someone else to book.
+                </span>
+              </dd>
+            </div>
+          )}
+        </dl>
+      </Card>
+      <BookAgain branch={branch} service={service} />
+    </>
+  );
 }
 
 function AppointmentView({
@@ -158,30 +284,14 @@ function AppointmentView({
   cancel: CancelMutation;
 }) {
   const confirmation = latestMessage(appointment, 'CONFIRMATION');
-  const cancellation = latestMessage(appointment, 'CANCELLATION');
-  // The message the customer is waiting on: the cancellation once there is one.
-  const latest = cancellation ?? confirmation;
 
   return (
     <>
       <ReferenceCard reference={appointment.reference} />
-      {cancellation !== undefined && <SmsCard notification={cancellation} />}
       {confirmation !== undefined && <SmsCard notification={confirmation} />}
       <AppointmentCard appointment={appointment} />
-      <ButtonLink
-        to={bookAgainHref(appointment)}
-        variant="secondary"
-        fullWidth
-        // The visible words start the name, as they must; the rest says which service and where, for a screen
-        // reader's list of links, which reads each link without the card above it.
-        aria-label={`Book this service again: ${appointment.service.name} at ${appointment.branch.name}`}
-      >
-        Book this service again
-      </ButtonLink>
-      <ButtonLink to="/book" variant="secondary" fullWidth>
-        Book another appointment
-      </ButtonLink>
-      {latest !== undefined && latest.status !== 'FAILED' && (
+      <BookAgain branch={appointment.branch} service={appointment.service} />
+      {confirmation !== undefined && confirmation.status !== 'FAILED' && (
         <p className={styles.inboxLink}>
           <Link to="/messages">See the SMS in the simulated inbox</Link>
         </p>
@@ -264,45 +374,27 @@ function ReferenceCard({ reference }: { reference: string }) {
 
 // Why the SMS was not delivered, and what still holds, in the calm words of the design.
 function FailureNote({ notification }: { notification: Notification }) {
-  if (isSupersededByCancellation(notification)) {
-    return <p>Not sent: the appointment was cancelled before this SMS went out.</p>;
-  }
   const why =
     notification.failureReason === 'DELIVERY_FAILED'
       ? `We could not send the SMS after ${plural(notification.attempts, 'attempt')}.`
       : 'We could not send the SMS.';
-  return notification.kind === 'CANCELLATION' ? (
-    <p>
-      {why} <strong>Your appointment is still cancelled.</strong>
-    </p>
-  ) : (
+  return (
     <p>
       {why} <strong>Your booking still stands;</strong> keep your reference.
     </p>
   );
 }
 
-const SMS_TITLE: Record<Notification['kind'], string> = {
-  CONFIRMATION: 'Confirmation SMS',
-  CANCELLATION: 'Cancellation SMS',
-};
-
-// What is already saved while the SMS is on its way.
-const SAVED: Record<Notification['kind'], string> = {
-  CONFIRMATION: 'your booking is already saved',
-  CANCELLATION: 'your cancellation is already saved',
-};
-
+// The confirmation SMS. A cancelled appointment's messages are never shown: the cancelled view replaces this page.
 function SmsCard({ notification }: { notification: Notification }) {
   const [shown, setShown] = useState(true);
   const headingId = useId();
   const messageId = useId();
-  const superseded = isSupersededByCancellation(notification);
 
   return (
     <Card as="section" aria-labelledby={headingId}>
       <h2 id={headingId} className={styles.cardHeading}>
-        {SMS_TITLE[notification.kind]}
+        Confirmation SMS
       </h2>
       <div className={styles.smsRow}>
         <span className={styles.recipient}>
@@ -314,7 +406,7 @@ function SmsCard({ notification }: { notification: Notification }) {
 
       {notification.status === 'PENDING' && (
         <p className={styles.note}>
-          This usually takes a few seconds. You can leave this page: {SAVED[notification.kind]}.
+          This usually takes a few seconds. You can leave this page: your booking is already saved.
         </p>
       )}
 
@@ -350,11 +442,9 @@ function SmsCard({ notification }: { notification: Notification }) {
           <div className={styles.failure}>
             <FailureNote notification={notification} />
           </div>
-          {!superseded && (
-            <p className={styles.failureLink}>
-              <Link to="/messages">See what happened in the simulated inbox</Link>
-            </p>
-          )}
+          <p className={styles.failureLink}>
+            <Link to="/messages">See what happened in the simulated inbox</Link>
+          </p>
         </>
       )}
     </Card>
@@ -367,12 +457,9 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
 
   return (
     <Card as="section" aria-labelledby={headingId}>
-      <div className={styles.cardHead}>
-        <h2 id={headingId} className={styles.cardHeading}>
-          Your appointment
-        </h2>
-        {appointment.status === 'CANCELLED' && <Badge tone="neutral">Cancelled</Badge>}
-      </div>
+      <h2 id={headingId} className={styles.cardHeading}>
+        Your appointment
+      </h2>
       <dl className={styles.facts}>
         <div className={styles.fact}>
           <dt className={styles.term}>Service</dt>
@@ -394,9 +481,6 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
             </span>
             {appointment.status === 'CONFIRMED' && (
               <span className={styles.detail}>Please arrive 10 minutes early.</span>
-            )}
-            {appointment.status === 'CANCELLED' && (
-              <span className={styles.detail}>Cancelled: this time is free for someone else.</span>
             )}
           </dd>
         </div>
@@ -576,14 +660,13 @@ function CancelSection({
 
 function LookupFailed({ error, onRetry }: { error: Error; onRetry: () => void }) {
   const message = problemMessage(error);
-  const notFound = error instanceof ApiProblem && error.code === 'APPOINTMENT_NOT_FOUND';
 
   return (
     <Alert
       tone="error"
       title={message.title}
       actions={
-        notFound ? (
+        isAppointmentNotFound(error) ? (
           <ButtonLink to="/manage" variant="secondary" size="compact">
             Find your appointment
           </ButtonLink>
