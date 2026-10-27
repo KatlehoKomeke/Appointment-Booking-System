@@ -1,6 +1,7 @@
 # .github/workflows/ci.yml
 #
-# Builds and tests the application on every push to main and every pull request. Three jobs run in parallel:
+# Builds and tests the application on every push to main and every pull request, and deploys it from main. Four jobs
+# run in parallel:
 #
 # - api:   `./mvnw verify` on JDK 25. Compiler and Javadoc lint, unit tests, integration tests on a real
 #          PostgreSQL 17 (Testcontainers), the formatting check, the OpenAPI contract check (docs/openapi.yaml must be
@@ -15,8 +16,19 @@
 #          1280 px (failing on any CSP violation or console error), the smoke test again, and the 409 race
 #          (scripts/demo-409.sh), and checks that the logs hold no credentials. A failed run keeps the end-to-end
 #          report, its traces and the stack's logs as artifacts.
+# - infra: lints, type-checks and unit-tests the AWS CDK app in infra/, then synthesises every stack. It needs no AWS
+#          credentials: the tests assert on the generated CloudFormation, and synth never calls AWS.
 #
-# The workflow only reads the repository. It uses no secrets and has no access to AWS.
+# On a push to main, once all four are green, one more job runs (docs/adr/0007-continuous-deployment-from-main.md):
+#
+# - deploy: signs in to AWS through OpenID Connect (no stored keys) as the role in the aws-demo environment, builds
+#           the ARM64 image on an ARM runner, deploys the hosted demo's two stacks with `cdk deploy`, smoke-tests the
+#           live address, and only then records the commit in BranchbookRelease and reads it back. A red check above
+#           means no deployment.
+#
+# The first four jobs only read the repository and have no access to AWS. The pipeline never sets
+# BRANCHBOOK_ALERT_EMAIL, so it cannot synthesise or change BranchbookAccount, the stack that grants it access (see
+# infra/bin/branchbook.ts). Account IDs are masked in the public logs.
 
 name: ci
 
@@ -24,14 +36,16 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-# A newer push to the same branch or pull request cancels the run it makes obsolete.
+# A newer push to the same pull request or branch cancels the run it makes obsolete. On main, runs queue instead, so a
+# deployment in progress is never interrupted: at most one run waits, and a newer push replaces the waiting one.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   api:
@@ -213,3 +227,109 @@ jobs:
       - name: Stop the stack
         if: always()
         run: docker compose down --volumes
+
+  infra:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install the pinned dependencies
+        run: npm ci
+
+      - name: Lint, including TSDoc on every export
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run build
+
+      - name: Unit-test the synthesised templates
+        run: npm test -- --ci
+
+      - name: Synthesise every stack
+        # A placeholder address: the real one is supplied only when deploying, never committed. With the flag, it
+        # brings BranchbookAccount and the hosted demo's two stacks into the app.
+        env:
+          BRANCHBOOK_ALERT_EMAIL: alerts@example.com
+          BRANCHBOOK_HOSTED_DEMO: 'true'
+        run: npx cdk synth --quiet
+
+  deploy:
+    # A push to main, or a manual run; never a pull request. The aws-demo environment then admits only main and v*
+    # tags, so a manual run from any other ref stops here, before a token is issued.
+    if: github.event_name != 'pull_request'
+    needs: [api, web, stack, infra]
+    # The Fargate task is ARM64, so the image is built on an ARM runner: no emulation, and the same build as a
+    # developer's Apple-silicon machine.
+    runs-on: ubuntu-24.04-arm
+    environment: aws-demo
+    timeout-minutes: 40
+    permissions:
+      id-token: write   # lets the job request a GitHub OIDC token for AWS
+      contents: read
+    # Deployments queue rather than cancel each other, so a half-finished deployment is never interrupted.
+    concurrency:
+      group: deploy-aws
+      cancel-in-progress: false
+    defaults:
+      run:
+        working-directory: infra
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install the pinned dependencies
+        run: npm ci
+
+      - name: Sign in to AWS through OpenID Connect
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: deploy-${{ github.run_id }}
+          aws-region: af-south-1
+          mask-aws-account-id: true
+
+      # The data stack first, then the app stack, whose image is built here and pushed to the bootstrap repository.
+      # The alarms' e-mail address is personal data, so it comes from an environment secret when one is set; without
+      # it the alarms still exist, on a topic with no subscriber.
+      - name: Deploy the hosted demo
+        env:
+          BRANCHBOOK_HOSTED_DEMO: 'true'
+          BRANCHBOOK_DEMO_ALERT_EMAIL: ${{ secrets.BRANCHBOOK_DEMO_ALERT_EMAIL }}
+        run: npx cdk deploy BranchbookData BranchbookApp --require-approval never --ci --progress events
+
+      # The same checks a reviewer's `make smoke` runs, against the live address: the new task answers behind the
+      # load balancer, with every security header, before this commit is recorded as deployed.
+      - name: Smoke-test the hosted demo
+        working-directory: .
+        run: scripts/smoke.sh "https://$(node -p "require('./infra/cdk.json').context.demoDomain")"
+
+      - name: Record the deployed commit
+        run: npx cdk deploy BranchbookRelease --require-approval never --ci --progress events
+
+      - name: Verify the recorded commit
+        run: |
+          deployed="$(aws ssm get-parameter --name /branchbook/release --query Parameter.Value --output text)"
+          if [ "$deployed" != "$GITHUB_SHA" ]; then
+            echo "AWS records $deployed, expected $GITHUB_SHA" >&2
+            exit 1
+          fi
+          echo "AWS af-south-1 now records commit $deployed"

@@ -37,14 +37,25 @@ function context(key: string): string {
   throw new Error(`Missing or invalid context value "${key}" in infra/cdk.json`);
 }
 
+/**
+ * Reads an optional environment variable, treating an empty value as unset: a workflow passes a secret that nobody
+ * has set as an empty string, which must not become an e-mail address.
+ *
+ * @param name - the variable's name, for example `BRANCHBOOK_DEMO_ALERT_EMAIL`
+ */
+function optionalEnv(name: string): string | undefined {
+  const value = process.env[name];
+  return value === undefined || value.trim() === '' ? undefined : value;
+}
+
 // The account comes from the credentials in use, so no account ID is ever written to the repository.
 const account = process.env.CDK_DEFAULT_ACCOUNT;
 
 // BranchbookAccount defines the role the pipeline itself assumes, so the pipeline must never be able to change it.
 // It is therefore only part of the app when BRANCHBOOK_ALERT_EMAIL is set: on an administrator's machine, or with a
-// placeholder in the credential-free infra workflow. The deploy workflow never sets it, so CI cannot even
+// placeholder in the credential-free infra job. The deploy job never sets it, so the pipeline cannot even
 // synthesise this stack, let alone deploy it. The address is personal data and is never committed.
-const alertEmail = process.env.BRANCHBOOK_ALERT_EMAIL;
+const alertEmail = optionalEnv('BRANCHBOOK_ALERT_EMAIL');
 if (alertEmail !== undefined) {
   new AccountStack(app, 'BranchbookAccount', {
     env: { account, region: 'us-east-1' },
@@ -66,9 +77,9 @@ new ReleaseStack(app, 'BranchbookRelease', {
   version: process.env.GITHUB_SHA ?? 'local',
 });
 
-// The hosted demo (ADR-0006) is part of the app only when BRANCHBOOK_HOSTED_DEMO is set: by an administrator
-// deploying it from their own machine, or in the credential-free infra workflow. The deploy workflow never sets
-// it, so the pipeline, whose role may deploy BranchbookRelease alone, never touches these stacks.
+// The hosted demo (ADR-0006) is part of the app only when BRANCHBOOK_HOSTED_DEMO is set: in the pipeline's deploy
+// job, which deploys it on every push to main (ADR-0007), in the credential-free infra job, which only synthesises
+// it, or on an administrator's machine.
 if (process.env.BRANCHBOOK_HOSTED_DEMO === 'true') {
   const data = new DataStack(app, 'BranchbookData', {
     env: { account, region: 'af-south-1' },
@@ -83,8 +94,9 @@ if (process.env.BRANCHBOOK_HOSTED_DEMO === 'true') {
     smsCapKey: data.smsCapKey,
     domainName: context('demoDomain'),
     hostedZoneId: context('demoHostedZoneId'),
-    // Personal data, so never committed; the alarms still exist without it, on a topic with no subscriber.
-    alertEmail: process.env.BRANCHBOOK_DEMO_ALERT_EMAIL,
+    // Personal data, so never committed: an environment secret in the pipeline, if one is set. The alarms still
+    // exist without it, on a topic with no subscriber.
+    alertEmail: optionalEnv('BRANCHBOOK_DEMO_ALERT_EMAIL'),
     // BRANCHBOOK_SMS_AWS_DRY_RUN=true, the app's own setting's name, deploys a task that asks AWS to check each send
     // without sending it.
     smsDryRun: process.env.BRANCHBOOK_SMS_AWS_DRY_RUN === 'true',
