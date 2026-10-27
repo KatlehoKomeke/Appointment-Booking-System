@@ -82,8 +82,8 @@ one, its reason; AWS's message is never kept, because it can quote the number.
 | `AWS_CONFLICT_DESTINATION_COUNTRY_BLOCKED_BY_PROTECT_CONFIGURATION` | At once | The protect configuration does not allow the destination's country. | Nothing, for a number outside South Africa; otherwise check the protect configuration. |
 | `AWS_CONFLICT_DESTINATION_PHONE_NUMBER_OPTED_OUT` | At once | The recipient replied STOP, or is on the account's opt-out list. | Nothing: AWS will not send to them. |
 | `AWS_CONFLICT_` and another reason, or `AWS_CONFLICT` | At once | The account or one of its resources is in a state that forbids the send. | The reason names it. |
-| `AWS_QUOTA_MONTHLY_SPEND_LIMIT_REACHED_FOR_TEXT` | At once | The account's monthly SMS spend limit is used up; nothing more is sent this month. | Raise the limit through the Support case below, or wait for the next month. |
-| `AWS_QUOTA_` and another reason | Retried | Another AWS quota is reached. | The reason names it. |
+| `AWS_QUOTA_MONTHLY_SPEND_LIMIT_REACHED_FOR_TEXT`, or the same with `_FOR_MEDIA`, `_FOR_VOICE`, `_FOR_RCS` or `_FOR_NOTIFY` | At once | A monthly spend limit is used up, for SMS usually the text one; nothing more is sent this month. | Raise the limit through the Support case below, or wait for the next month. |
+| `AWS_QUOTA_` and any other reason | Retried | Another AWS quota is reached. | The reason names it. |
 | `AWS_VALIDATION_PRICE_OVER_THRESHOLD` | At once | The message would cost more than `BRANCHBOOK_SMS_AWS_MAX_PRICE` (US$0.20 by default). | Raise the setting only if the price is expected. |
 | `AWS_VALIDATION_` and another reason | At once | AWS refused the request, for example a setting it does not accept. | The reason names it; check the `BRANCHBOOK_SMS_AWS_*` settings. |
 | `AWS_ACCESS_DENIED` | At once | The task role may not call `sms-voice:SendTextMessage`, or the account is disabled for SMS. | Check the task role's policy in the CDK app. |
