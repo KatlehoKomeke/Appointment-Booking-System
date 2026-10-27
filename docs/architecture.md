@@ -2,7 +2,7 @@
 
 This document explains how BranchBook is built and why. The decisions behind it are recorded one per file in
 [docs/adr](adr/README.md); the business rules are in [domain-rules.md](domain-rules.md). The whole design,
-including the parts not built yet, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX).
+including the parts not built yet, is on the [architecture page](https://claude.ai/artifact/7CBAyTgkwWryvvxfH6HC84).
 
 **Status: design complete; milestones M0 to M6 are built, and M7, the final pass before v1.0.0, is under way.** M0
 is the skeleton: one jar that serves the app, PostgreSQL 17 migrated by Flyway, health probes and security headers.
