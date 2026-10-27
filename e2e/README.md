@@ -34,11 +34,13 @@ need no reset between runs: see [Running them again](#running-them-again).
 | Spec | Projects | Proves |
 |---|---|---|
 | [book-appointment.spec.ts](book-appointment.spec.ts) | mobile, desktop | The whole journey from the landing page through branch, service, date and time, details and review to the confirmation page. A landline is refused on its field with "We need a cellphone number to SMS your confirmation."; the confirmation shows an `APT-` reference and the SMS moving from Sending to "Sent at" within 15 s; the name and number never appear in the address at any step. On `/manage`, wrong digits get "We couldn't find an appointment with those details." and the right ones open the booking. axe finds no serious or critical WCAG 2.2 AA violation on the review step or the confirmation page. |
+| [cancel.spec.ts](cancel.spec.ts) | mobile, desktop | A customer opens the cancel dialog from the confirmation page, keeps the appointment and gets focus back on the Cancel button, then cancels. The page says "This appointment was cancelled" with "Its details have been deleted", offers no second cancel, and the time has one more seat free than before ([BR-14](../docs/domain-rules.md#br-14)). A refresh shows the same answer from what the tab remembers, and the API then answers 404 `APPOINTMENT_NOT_FOUND` even to the right last four digits. |
 | [keyboard.spec.ts](keyboard.spec.ts) | desktop | A booking made with Tab, Shift+Tab, Enter, Space and the arrow keys alone. The skip link is the first stop and moves focus to `main`, each step's heading takes focus, and every control tabbed to shows a focus outline. |
 | [failed-delivery.spec.ts](failed-delivery.spec.ts) | desktop | A booking for 082 555 0000, which the simulated gateway always refuses, shows "Not delivered" within 60 s once the dispatcher's five attempts are spent ([BR-17](../docs/domain-rules.md#br-17)), and says the booking still stands. |
 
 Every test also fails if the page breaks the Content Security Policy, throws an uncaught error, or writes an error
-to the console that the test did not declare; the 404 of a deliberately wrong lookup is declared.
+to the console that the test did not declare. Two 404s are declared: a deliberately wrong lookup, and a poll already
+on its way when an appointment is cancelled.
 
 The two projects are a 390 by 844 phone at twice the pixel density, and a 1280 by 800 desktop. Both run Chromium in
 the New York time zone, so a time shown in SAST proves the app does not use the device's zone

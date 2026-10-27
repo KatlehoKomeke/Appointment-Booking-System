@@ -228,8 +228,10 @@ adds `step=details`, then `step=review`. The name and number stay in the tab's s
   under a banner saying it is a demo operator view, switched off in production, where every message is simulated.
 - **Privacy notice.** The POPIA section 18 notice: Fynbos Bank (fictional demo) as the responsible party, the three
   fields collected and why, the hosted demo's deletion of each booking once its appointment is over, the deletion of a
-  cancelled booking at once, all but its cancellation SMS, which is kept until it has been sent, and the customer's
-  rights, including a complaint to the Information Regulator.
+  cancelled booking at once, all but its cancellation SMS, which is kept until it has been sent or has failed for good,
+  the two fingerprints that outlive a booking for about a day (the request's, against a double booking, and on the
+  hosted demo the number's keyed one, for the daily SMS limit), and the customer's rights, including a complaint to
+  the Information Regulator.
 
 Every page opens with the fictional-bank banner and the header, and ends with links to the inbox and the privacy
 notice.

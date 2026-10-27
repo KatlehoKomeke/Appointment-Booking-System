@@ -29,12 +29,12 @@ const SECTIONS = [
   {
     id: 'privacy-operator',
     heading: 'Who sends the SMS',
-    body: 'On the hosted demo, AWS End User Messaging, in Cape Town, sends each SMS for us as our operator. It receives only your number and the message, and keeps its own record of each message under its service terms. At most five messages a day go to one number.',
+    body: 'On the hosted demo, AWS End User Messaging, in Cape Town, sends each SMS for us as our operator. It receives only your number and the message, and keeps its own record of each message under its service terms. At most five messages a day go to one number. To count them, the hosted demo keeps a keyed fingerprint of the number, never the number itself, for about a day after each message.',
   },
   {
     id: 'privacy-retention',
     heading: 'How long we keep it',
-    body: "The hosted demo keeps a booking, with your name and number, until its appointment is over, and deletes it within the hour after it ends. The database's backups, which could still hold it, expire after 7 days. A copy run locally keeps them on that machine until you delete them. A booking you cancel is deleted at once; only the cancellation SMS is kept, until it has been sent.",
+    body: "The hosted demo keeps a booking, with your name and number, until its appointment is over, and deletes it within the hour after it ends. The database's backups, which could still hold it, expire after 7 days. A copy run locally keeps them on that machine until you delete them. A booking you cancel is deleted at once; only the cancellation SMS is kept, until it has been sent or has failed for good. For about a day after you book, a one-way fingerprint of the booking's details is kept, never the details themselves, so that the same booking sent twice is booked once.",
   },
   {
     id: 'privacy-rights',

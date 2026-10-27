@@ -314,7 +314,7 @@ export function isTooLateToCancel(error: unknown): boolean {
 /**
  * Cancels an appointment, proving the last four digits again as opening it did.
  *
- * The server deletes the appointment as it cancels it, keeping only the cancellation SMS until it is sent. Its answer,
+ * The server deletes the appointment as it cancels it, keeping only the cancellation SMS until it is final. Its answer,
  * the appointment as it was at that moment, is the last it says: from then on the appointment is not found, even with
  * the right digits, and a repeat cancel finds nothing either. A `503 TRY_AGAIN` wrote nothing, so it is retried once,
  * after the server's `Retry-After` capped at five seconds, as booking does.
