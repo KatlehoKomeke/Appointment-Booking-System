@@ -9,7 +9,7 @@ an SMS confirmation that cannot be lost: simulated locally, and a real SMS throu
 > affiliated with Capitec Bank or any other bank. Every branch, person and phone number in it is made up. Run locally
 > it sends nothing; the hosted demo texts the number you book with, unless it is a demo number, 082 555 0000 to 0199.
 
-![BranchBook at a glance: one Spring Boot jar serves the React app and the REST API over PostgreSQL 17. Built: the booking screens, branches, availability, the OpenAPI contract, booking and lookup with the confirmation SMS written in the booking transaction, and the dispatcher that sends it through a simulated SMS gateway. Planned: cancel (Tier 2). Code ships through GitHub Actions and OpenID Connect to AWS, where the hosted demo at branchbook.click is deployed by hand.](docs/assets/diagrams/system-at-a-glance.svg)
+![BranchBook at a glance, all built: one Spring Boot jar serves the React app and a REST API that books, looks up and cancels over PostgreSQL 17, texting through a simulated gateway or, on the hosted demo, AWS End User Messaging; code ships through GitHub Actions and OpenID Connect to AWS, where the demo is deployed by hand.](docs/assets/diagrams/system-at-a-glance.svg)
 
 One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Solid parts are built; dashed parts are planned, with their milestone ([key](docs/assets/diagrams/README.md#key)).
 
@@ -17,10 +17,10 @@ One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Soli
 
 | Area | Today |
 |---|---|
-| Stage | Milestones M0 to M5 built: the web app's five-step booking flow, confirmation page, `/manage` and simulated inbox; booking in one transaction that also writes the confirmation SMS; lookup with the reference and the last four digits; and a dispatcher that delivers the SMS through a simulated gateway, or through AWS End User Messaging SMS where a deployment asks, with the race proofs. |
+| Stage | Milestones M0 to M6 built: the web app's five-step booking flow, confirmation page, `/manage` and simulated inbox; booking in one transaction that also writes the confirmation SMS; lookup with the reference and the last four digits; a dispatcher that delivers the SMS through a simulated gateway, or through AWS End User Messaging SMS where a deployment asks, with the race proofs; and cancelling and retrying, in the API and the web app, with end-to-end tests in a real browser. M7, the final documentation and the release, is under way. |
 | Design | The whole design, including planned work, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX); its header names the commit it was last checked against. The repository records what is built and wins where the two disagree. |
 | Run locally | `make up`, then open http://localhost:8080 |
-| Hosted demo | https://branchbook.click, in AWS Cape Town (af-south-1) since 2026-10-26, open to anyone with no sign-in, and with the simulated inbox off so no visitor sees another's booking. Defined in AWS CDK and deployed by the administrator by hand; any South African mobile may book there, a number outside the demo block 082 555 0000 to 0199 is sent a real SMS through AWS End User Messaging SMS (best effort over a shared route, and only to verified numbers while the AWS account is in the SMS sandbox), and bookings are deleted 48 hours after they are made ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md), [infra/README.md](infra/README.md#the-hosted-demo)). |
+| Hosted demo | https://branchbook.click, in AWS Cape Town (af-south-1) since 2026-10-26, open to anyone with no sign-in, and with the simulated inbox off so no visitor sees another's booking. Any South African mobile may book there: a number outside the demo block 082 555 0000 to 0199 is sent a real SMS through AWS End User Messaging SMS, at most five a day to one number (best effort over a shared route, and only to verified numbers while the AWS account is in the SMS sandbox). Defined in AWS CDK and deployed by the administrator by hand; bookings are deleted 48 hours after they are made ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md), [infra/README.md](infra/README.md#the-hosted-demo)). |
 | Deployment | Every push to `main` deploys `BranchbookRelease`, a release record in af-south-1 that holds the deployed commit, through OpenID Connect with no stored keys, after the CDK app's own tests pass ([ADR-0007](docs/adr/0007-continuous-deployment-from-main.md), [docs/delivery.md](docs/delivery.md)). The application's CI runs alongside and does not gate it yet. The pipeline does not deploy the hosted demo. |
 
 ### Milestones
@@ -33,8 +33,8 @@ One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Soli
 | M3 | Booking transaction with idempotency, the PENDING confirmation SMS in the same transaction, lookup with the last four digits and its rate limit | Built |
 | M4 | Booking UI: the five-step flow, the confirmation page, read-only `/manage`, the simulated inbox | Built |
 | M5 | The dispatcher and simulated SMS gateway, delivery status, the simulated inbox, the race and idempotency proofs | Built |
-| M6 | Tier 2 if time allows, UI states and accessibility, web and end-to-end tests, CI completion | In progress: the Tier 2 API (cancel, retry, demo data, two metrics) and the end-to-end test built; the web cancel and retry screens to come |
-| M7 | Final documentation pass, clean-clone rehearsal, release tag | Planned |
+| M6 | Tier 2 if time allows, UI states and accessibility, web and end-to-end tests, CI completion | Built: cancel, retry, demo data and two metrics in the API and the web app; Playwright in CI at 390 and 1280 px |
+| M7 | Final documentation pass, clean-clone rehearsal, release tag | In progress: the rehearsal passed from a fresh clone; the tag follows |
 | AWS | Hosted demo: the deploy role, budget and release record, and the data and app stacks, deployed by hand on 2026-10-26 | Built |
 
 ## The full design
@@ -123,7 +123,7 @@ reaches a database adapter, or a transaction opened outside the application laye
 
 ### Versions
 
-Current at M4. `api/pom.xml`, the lockfiles, `Dockerfile` and `compose.yaml` are authoritative; Dependabot proposes updates weekly.
+Current at M6. `api/pom.xml`, the lockfiles, `Dockerfile` and `compose.yaml` are authoritative; Dependabot proposes updates weekly.
 
 <details><summary>Every pinned version</summary>
 
@@ -143,7 +143,7 @@ Current at M4. `api/pom.xml`, the lockfiles, `Dockerfile` and `compose.yaml` are
 | React, React Router | 19.3.1, 8.4.0 | `web/package-lock.json` |
 | TanStack Query, react-hook-form, zod | 5.104.2, 7.90.0, 4.6.6 | `web/package-lock.json` |
 | TypeScript | 6.0.3 | `web/` and `infra/` lockfiles |
-| Vite, Vitest | 8.3.5, 5.0.5 | `web/package-lock.json` |
+| Vite, Vitest; Playwright, axe | 8.3.5, 5.0.5; 1.64.0, 4.13.0 | `web/` and `e2e/` lockfiles |
 | openapi-typescript, openapi-fetch | 7.13.0, 0.17.0 | `web/package-lock.json` |
 | ESLint | 10.13.0 | `web/` and `infra/` lockfiles |
 | AWS CDK | `aws-cdk-lib` 2.274.0, CLI 2.1146.1 | `infra/package.json` |
@@ -157,8 +157,8 @@ The plan is about 35 focused hours, split into tiers so that a short week still 
 | Tier | Contents |
 |---|---|
 | Tier 1: never cut | Booking with every proof, lookup and the confirmation page, the read-only `/manage` lookup, the SMS outbox and dispatcher, the simulated inbox, the lookup rate limit, race tests, smoke scripts, the main end-to-end test |
-| Tier 2: if time allows | Cancellation, retrying a failed message from the inbox, demo data, custom metrics. API built in M6; the web cancel and retry screens to come |
-| Tier 3: cut by default | The email channel, more end-to-end tests, a README animation. A per-recipient SMS cap is built, for the real SMS |
+| Tier 2: if time allows | Cancellation, retrying a failed message from the inbox, demo data, custom metrics. Built in M6, in the API and the web app |
+| Tier 3: cut by default | The email channel and a README animation. Built after all: a per-recipient SMS cap (five a day) and more end-to-end tests |
 
 Deliberately out of scope, each with its reason in the ADRs: customer login, staff screens, rescheduling, reminders,
 an email provider, a message broker, microservices and Kubernetes manifests. A real SMS provider is now in (ADR-0003).
@@ -223,7 +223,7 @@ Development also needs JDK 25 and Node 24.
 make hooks     # once per clone: secret scan per commit; architecture-page reminder after a major one
 make dev-api   # the API on port 8080, with a throwaway PostgreSQL in Docker
 make dev-web   # the web app on port 5173 with hot reload, calling the API
-make test      # the API, web and docs checks CI runs; the stack's smoke test is `make up && make smoke`
+make test      # the API, web and docs checks CI runs; then `make up`, `make smoke` and `make e2e` for the stack
 make help      # every other task
 ```
 
@@ -233,11 +233,11 @@ Each part has its own guide: [api/README.md](api/README.md), [web/README.md](web
 
 ```text
 api/                     the Spring Boot application: the API, and serving the web app
-web/                     the React app
+web/, e2e/               the React app, and its end-to-end tests in a real browser
 infra/                   the AWS CDK app: the deploy role, budget, release record and hosted demo
 docs/                    architecture, delivery, decision records, domain rules, error codes, the API contract
 docs/assets/diagrams/    the SVG diagrams, their key and their rules
-scripts/                 smoke.sh, check-test-refs.sh, major-commits.sh
+scripts/                 smoke.sh, demo-409.sh, check-test-refs.sh, major-commits.sh
 .github/workflows/       ci, secret-scan, infra, deploy, aws-connection-check
 .github/dependabot.yml   weekly dependency updates
 .githooks/               pre-commit and post-commit, enabled by make hooks
@@ -283,10 +283,10 @@ holiday also closes the Monday after it (section 2(1)), derived in code: 10 Augu
 
 ## Security and privacy
 
-No secret is stored here. An opt-in pre-commit hook scans each commit, GitHub push protection checks each push, and
-a workflow scans the full history after every push. GitHub Actions reaches AWS through OpenID Connect, so no AWS key
-exists; the hosted demo reads its database credentials from AWS Secrets Manager. All data is
-synthetic. The details are in [SECURITY.md](SECURITY.md).
+No secret is stored here. A pre-commit hook scans each commit, push protection each push, and a workflow the full
+history after every push. GitHub Actions reaches AWS through OpenID Connect, so no AWS key exists, and the hosted demo
+reads its database credentials from Secrets Manager. Local data is synthetic; the hosted demo takes real names and
+numbers, texts South Africa only and deletes every booking after 48 hours. Details: [SECURITY.md](SECURITY.md).
 
 ## AI assistance
 

@@ -72,22 +72,38 @@ The GitHub settings behind layers 4 and 6 can be read with
    [infra/README.md](infra/README.md)).
 
 The demo has no sign-in, so it holds no password of its own: a sign-in prompt in front of a demo is a poor
-experience for everyone who opens it, reviewers included. The application limits what it keeps and sends instead:
-every booking is deleted 48 hours after it is made (`BRANCHBOOK_RETENTION_ENABLED`), live since 2026-10-26 (058e6fd),
-with the deletion running every hour. Any South African mobile may book (`BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` is
-off), and every number outside the published demo block, 082 555 0000 to 082 555 0199, is sent a real SMS through AWS
-End User Messaging SMS (`BRANCHBOOK_SMS_GATEWAY=aws`), within the controls under
-[Unauthenticated SMS sending](#known-risks); the block itself stays simulated, because anyone may type it and it may
-belong to a stranger. The simulated inbox is off on the hosted demo
-(`BRANCHBOOK_INBOX_ENABLED=false`), so other visitors cannot see anyone's booking; each booker still sees their own
-SMS and its status on the confirmation page. `BRANCHBOOK_INBOX_REDACT_REFERENCES=true` (off by default, and off in
-compose, `make dev-api` and every test but `InboxReferencesHiddenIT`) shows every reference in the inbox and its
-retry as `APT-****-****`, in the reference field, the body, the subject and the last error, so the hosted demo
-could switch the inbox back on without handing anyone another booking's reference.
+experience for everyone who opens it, reviewers included. Since 2026-10-27 it texts real SMS, so any South African
+mobile number may book, and the demo-numbers-only rule (`BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY`) is off. Every page
+asks visitors to use only their own number. What limits the personal data it holds, and who it can text:
+
+- **Every booking is deleted 48 hours after it is made** (`BRANCHBOOK_RETENTION_ENABLED`), live since 2026-10-26
+  (058e6fd); the deletion runs every hour.
+- **South Africa only.** The SMS go through AWS End User Messaging SMS in Cape Town (`BRANCHBOOK_SMS_GATEWAY=aws`),
+  with a protect configuration that blocks SMS to every country AWS lists except South Africa, and every voice and
+  MMS destination. The task role may call `sms-voice:SendTextMessage` through that protect configuration and nothing
+  else.
+- **At most five SMS a day to one number** (`BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP=5`), and WAF allows 10 booking and
+  cancel `POST`s per address in five minutes.
+- **The demo numbers are never texted.** 082 555 0000 to 082 555 0199 always stay on the simulated gateway, so the
+  README's examples never reach a stranger.
+- **No delivery events are logged.** No configuration set records them, because they carry the destination number
+  ([BR-19](docs/domain-rules.md#br-19)).
+- **The simulated inbox is off** (`BRANCHBOOK_INBOX_ENABLED=false`), so other visitors cannot see anyone's booking;
+  each booker still sees their own SMS and its status on the confirmation page.
+  `BRANCHBOOK_INBOX_REDACT_REFERENCES=true` (off by default, and off in compose, `make dev-api` and every test but
+  `InboxReferencesHiddenIT`) shows every reference in the inbox and its retry as `APT-****-****`, in the reference
+  field, the body, the subject and the last error, so the hosted demo could switch the inbox back on without handing
+  anyone another booking's reference.
+
+A new AWS account is in the SMS sandbox, where only verified destination numbers receive messages; until AWS grants
+production access, a text to any other number ends `FAILED`, and the booking still stands
+([infra/README.md](infra/README.md#real-sms)).
 
 The hosted demo's other controls, all in [infra/lib/app-stack.ts](infra/lib/app-stack.ts) and
-[infra/lib/data-stack.ts](infra/lib/data-stack.ts): AWS WAF on the load balancer blocks `/actuator` (403), allows 30
-booking `POST`s per address in five minutes and applies AWS's managed rules for known bad inputs and addresses;
+[infra/lib/data-stack.ts](infra/lib/data-stack.ts): AWS WAF on the load balancer blocks `/actuator` (403), after
+decoding and lowercasing the path, so `/%61ctuator` is blocked too, and applies AWS's managed rules for known bad
+inputs and addresses; the task serves only the `health` and `info` endpoints
+(`MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info`), so `/actuator/prometheus` is closed there even behind WAF;
 HTTPS uses ELB's recommended TLS 1.3 policy, plain HTTP is redirected to HTTPS, and HSTS keeps browsers there; the task
 accepts only the load balancer, and the database, in subnets with no route to the internet, accepts only the task,
 over TLS (`rds.force_ssl`), encrypted at rest. PostgreSQL's own log is not exported, because a constraint error's
@@ -209,12 +225,12 @@ These risks are accepted in v1, or reduced but not closed. Each has the control 
 
 | Risk | Today | Production control |
 |---|---|---|
-| **Unauthenticated SMS sending.** Anyone can book with any South African mobile number, which invites SMS pumping, harassment and slot squatting. Where `BRANCHBOOK_SMS_GATEWAY=aws`, as on the hosted demo, the confirmation and the cancellation are real SMS. | Reduced, not closed ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)). The controls: the published demo block is always simulated (`RoutingSmsGatewayTest.theDemoBlockIsAlwaysSimulated`); the protect configuration lets AWS send only to South Africa (`BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID`); the per-recipient daily cap writes any SMS past `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` in 24 hours FAILED with `RECIPIENT_DAILY_CAP`, never sent ([BR-17](docs/domain-rules.md#br-17), `RecipientDailyCapIT`); the hosted demo's WAF rate-limits booking and cancel `POST`s per address (the limit is in `infra/`); `MaxPrice` (`BRANCHBOOK_SMS_AWS_MAX_PRICE`, US$0.20 by default) refuses a dearer message; AWS's monthly SMS spend limit stops all sending once reached; and while the account is in the SMS sandbox, AWS texts only verified numbers. The residual risk: there is no one-time-code check, so anyone can make the app text any South African number, up to the cap a day (cancels racing each other can pass it by a message or two). | An OTP before an appointment counts as confirmed, per-recipient and per-prefix caps, CAPTCHA, blocking premium-rate prefixes, and cost alerts |
+| **Unauthenticated SMS sending.** Anyone can book with any South African mobile number, which invites SMS pumping, harassment and slot squatting. Where `BRANCHBOOK_SMS_GATEWAY=aws`, as on the hosted demo, the confirmation and the cancellation are real SMS. | Reduced, not closed ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)). The controls: the published demo block is always simulated (`RoutingSmsGatewayTest.theDemoBlockIsAlwaysSimulated`); the protect configuration lets AWS send only to South Africa (`BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID`); the per-recipient daily cap writes any SMS past `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` in 24 hours FAILED with `RECIPIENT_DAILY_CAP`, never sent ([BR-17](docs/domain-rules.md#br-17), `RecipientDailyCapIT`); the hosted demo's WAF allows 10 booking and cancel `POST`s per address in five minutes; `MaxPrice` (`BRANCHBOOK_SMS_AWS_MAX_PRICE`, US$0.20 by default) refuses a dearer message; AWS's monthly SMS spend limit stops all sending once reached; and while the account is in the SMS sandbox, AWS texts only verified numbers. The residual risk: there is no one-time-code check, so anyone can make the app text any South African number, up to the cap a day (cancels racing each other can pass it by a message or two). | An OTP before an appointment counts as confirmed, per-recipient and per-prefix caps, CAPTCHA, blocking premium-rate prefixes, and cost alerts |
 | **Learning that a number has a booking.** Booking with another person's number returns `409 DUPLICATE_APPOINTMENT` or `409 CUSTOMER_OVERLAP`, though never the reference, branch or time ([BR-23](docs/domain-rules.md#br-23)). | Accepted for the demo | OTP verification of the number before any answer |
 | **Reference enumeration.** Guessing references to find appointments. | Built in M3: eight characters from a 31-symbol alphabet, the same 404 for an unknown reference and for wrong digits, and the lookup rate limit ([BR-13](docs/domain-rules.md#br-13)) | Appointments bound to a verified customer through the bank's identity provider |
 | **Blocking someone's lookup.** Five wrong tries, lookups and cancels together, block a known reference for an hour, and the counts are kept in memory for one instance ([docs/architecture.md](docs/architecture.md#lookup)). | Accepted: a reference appears only in the customer's own SMS and pages | A shared rate-limit store, and identity-bound lookups |
 | **Cancelling with a leaked reference.** The reference and the last four digits that open an appointment also cancel it. | Accepted for the demo: the same credential and rate limit as a lookup ([BR-13](docs/domain-rules.md#br-13)), no cancel once the appointment has started, and a cancellation SMS to the booked number ([BR-14](docs/domain-rules.md#br-14)) | An OTP to the booked number before a cancel, and identity-bound appointments |
-| **Operational metrics on the public port.** `/actuator/prometheus` answers anyone who can reach the app, and shows its load and internals, though no personal data. | Accepted: compose binds the port to `127.0.0.1`, and the hosted demo's WAF blocks `/actuator` | Serve the actuator on a separate management port (`management.server.port`) reachable only from the monitoring network |
+| **Operational metrics on the public port.** `/actuator/prometheus` answers anyone who can reach the app, and shows its load and internals, though no personal data. | Accepted: compose binds the port to `127.0.0.1`; on the hosted demo, WAF blocks `/actuator`, decoded and lowercased first, and the task serves only health and info | Serve the actuator on a separate management port (`management.server.port`) reachable only from the monitoring network |
 | **The pipeline's access boundary.** IAM alone does not stop a change pushed to `main` from deploying with wider access. | One administrator collaborator and the `aws-demo` branch policy | The hardening options in [infra/README.md](infra/README.md#who-can-change-what-in-aws) |
 | **The hosted demo's database certificate is not verified.** `sslmode=require` encrypts the connection to RDS but does not check the server's certificate, so it does not stop an impostor inside the VPC. | Accepted for the demo: the database is reachable only from the task's security group, in subnets with no internet route | `sslmode=verify-full` with the RDS certificate bundle in the image |
-| **Opening another visitor's booking on the hosted demo.** The demo has no sign-in, and a demo number's last four digits are public, so anyone who learnt a booking's reference could open it and see the name typed into it, or cancel it. The simulated inbox would list every reference unless `BRANCHBOOK_INBOX_REDACT_REFERENCES` is on. | Reduced: the inbox is off on the hosted demo (`BRANCHBOOK_INBOX_ENABLED=false`), so `/api/v1/messages` answers 404 and a reference appears only on its booker's confirmation page; guessing one meets the lookup rate limit ([BR-13](docs/domain-rules.md#br-13)) | The inbox stays off (`branchbook.inbox.enabled` defaults to false), and lookups are bound to a verified customer |
+| **Opening another visitor's booking on the hosted demo.** The demo has no sign-in, and a demo number's last four digits are public, so anyone who learnt the reference of a booking made with one could open it and see the name typed into it, or cancel it. The simulated inbox would list every reference unless `BRANCHBOOK_INBOX_REDACT_REFERENCES` is on. | Reduced: the inbox is off on the hosted demo (`BRANCHBOOK_INBOX_ENABLED=false`), so `/api/v1/messages` answers 404 and a reference appears only on its booker's confirmation page; guessing one meets the lookup rate limit ([BR-13](docs/domain-rules.md#br-13)) | The inbox stays off (`branchbook.inbox.enabled` defaults to false), and lookups are bound to a verified customer |

@@ -225,7 +225,7 @@ adds `step=details`, then `step=review`. The name and number stay in the tab's s
 - **Manage.** The reference from the SMS and the last four digits of the cellphone number. A wrong reference and wrong
   digits get the same answer, so the page cannot be used to discover references.
 - **Simulated inbox.** Every message the outbox has produced, newest first, with its status, attempts and last error,
-  under a banner saying no real messages are sent and that this operator view is switched off in production.
+  under a banner saying it is a demo operator view, switched off in production, where every message is simulated.
 - **Privacy notice.** The POPIA section 18 notice: Fynbos Bank (fictional demo) as the responsible party, the three
   fields collected and why, the hosted demo's deletion of every booking after 48 hours, and the customer's rights,
   including a complaint to the Information Regulator.
@@ -341,7 +341,8 @@ its 31-character alphabet already leaves out characters that look alike
 ### Copy
 
 - **No real bank is named in the app.** Every page opens with "Fynbos Bank is fictional. BranchBook is an engineering
-  assessment, not a real bank's service. No real messages are sent." The non-affiliation statement lives in the root
+  assessment, not a real bank's service. The hosted demo texts the number you give, so use only your own; the demo
+  numbers 082 555 0000 to 082 555 0199 are never texted." The non-affiliation statement lives in the root
   [README](../README.md).
 - **Times are always South African Standard Time** on a 24-hour clock, written "09:30 to 09:45 SAST".
 - **Dates put the day first.** A summary reads "Tuesday 27 October 2026"; a heading under the week's range drops the
@@ -356,8 +357,11 @@ its 31-character alphabet already leaves out characters that look alike
   wrong; a number that is not a South African cellphone reads "We need a cellphone number to SMS your confirmation."
 - **Failure is stated calmly, with what still holds:** "We could not send the SMS after 5 attempts. Your booking still
   stands; keep your reference."
-- **Demo surfaces say so.** The Demo tag, the simulated inbox and its banner, and a line on `/manage` explaining that
-  this demo sends no real SMS.
+- **Demo surfaces say so.** The Demo tag; the simulated inbox and its banner, "Demo operator view.", which says every
+  message there is simulated, as on any local run; a line on `/manage` saying the demo numbers are never texted, so
+  their SMS is read on the appointment page or, on a local run, in the simulated inbox; and the privacy notice, which
+  names AWS End User Messaging in Cape Town as the operator that sends each SMS on the hosted demo, at most five a day
+  to one number.
 
 ### Decisions that differ from the first plan
 

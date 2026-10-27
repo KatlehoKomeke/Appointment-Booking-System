@@ -51,7 +51,7 @@ typed API client (M4), the branch, availability, booking and lookup API, the con
 simulated SMS gateway (M5), the cancel and retry API (M6), and PostgreSQL 17. The picture still draws cancel dashed;
 its API is built.*
 
-![BranchBook at a glance: one Spring Boot jar serves the React app and the REST API over PostgreSQL 17. Built: the booking screens, branches, availability, the OpenAPI contract, booking and lookup with the PENDING confirmation SMS, and the dispatcher that sends it through a simulated SMS gateway. Dashed and planned: cancel (Tier 2). Code ships through GitHub Actions and OpenID Connect to AWS, where the hosted demo at branchbook.click is deployed by hand.](assets/diagrams/system-at-a-glance.svg)
+![BranchBook at a glance, all built: one Spring Boot jar serves the React app and a REST API that books, looks up and cancels over PostgreSQL 17, texting through a simulated gateway or, on the hosted demo, AWS End User Messaging; code ships through GitHub Actions and OpenID Connect to AWS, where the demo is deployed by hand.](assets/diagrams/system-at-a-glance.svg)
 
 - **One deployable, one database.** The jar serves the single-page app and the REST API under `/api/v1`, so there
   is one origin and no CORS. Locally it is plain HTTP on `127.0.0.1`; in the hosted demo the load balancer ends
@@ -67,8 +67,9 @@ its API is built.*
   INFO line, because its numbers are not demo numbers (M6, [api/README.md](../api/README.md#demo-data)).
 - **Observable without personal data.** `/actuator/prometheus` serves Spring Boot's meters and two of BranchBook's
   (M6): `appointments_booked_total{outcome}`, every booking request by how it ended, and `outbox_pending`, the
-  messages still PENDING after the dispatcher's last tick ([runbook](runbook.md#read-the-metrics)). The hosted demo's
-  WAF blocks `/actuator`.
+  messages still PENDING after the dispatcher's last tick ([runbook](runbook.md#read-the-metrics)). It is open under
+  `make up`. The hosted demo's WAF blocks `/actuator`, and its task serves only health and info
+  (`MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info`).
 - **The real gateway sits behind a port.** The dispatcher sends through a `MessageGateway` port: the simulated SMS
   gateway by default, or, where `branchbook.sms.gateway` is `aws`, a router that keeps the published demo block
   simulated and sends every other number a real SMS through AWS End User Messaging SMS ([5](#5-the-confirmation-sms)).
@@ -247,7 +248,7 @@ one instance, with three consequences:
 - **A restart forgets them.** At worst an attacker gets five more tries per restart, out of 10,000 combinations.
 - **The bound could be flooded.** Evicting one reference's window would take failed lookups of about 100,000
   others, and Caffeine prefers to keep entries that are used often. A per-address limit on lookups at the edge
-  would close it; the hosted demo's web application firewall limits only booking `POST`s per address today.
+  would close it; the hosted demo's web application firewall limits only booking and cancel `POST`s per address today.
 
 Because the window is per reference, someone who knows a reference can block its lookup for an hour. A reference
 is printed only in the customer's own SMS and pages, and production would bind appointments to a verified identity
@@ -429,7 +430,8 @@ log and PostgreSQL's for their name, number and reference. How the data is prote
 ## 10. Deployment
 
 *Status: Built. The image and the local stack are built, every push to `main` deploys a release record to AWS, and
-the hosted demo runs in Cape Town (af-south-1), deployed by the administrator by hand since 2026-10-26.*
+the hosted demo runs in Cape Town (af-south-1), deployed by the administrator by hand since 2026-10-26, and texts
+real SMS since 2026-10-27.*
 
 ### 10.1 Locally: the image and the stack
 
@@ -465,7 +467,7 @@ gaps.
 
 ### 10.3 In AWS
 
-![BranchBook in AWS, all built: the administrator's BranchbookAccount in us-east-1 (GitHub OIDC provider, a narrow deploy role, a $90 budget), the pipeline's release record in Cape Town, and the hosted demo there, deployed by hand, where a reviewer's request runs through Route 53, WAF and a load balancer to one Fargate task and RDS PostgreSQL 17.](assets/diagrams/aws-footprint.svg)
+![BranchBook in AWS, all built: the administrator's account stack in us-east-1 (OIDC provider, narrow deploy role, $90 budget), the pipeline's release record in Cape Town, and the hand-deployed demo there, where Route 53, WAF and a load balancer front one Fargate task that uses RDS and texts only South African numbers through AWS End User Messaging.](assets/diagrams/aws-footprint.svg)
 
 The letter and numbers in the picture:
 
@@ -485,11 +487,20 @@ administrator deploys the other three by hand. There is no DNS stack: the hosted
 registration.
 
 A reviewer's request to https://branchbook.click: Route 53 resolves the name to the load balancer; AWS WAF, attached
-to the load balancer, blocks `/actuator` and rate-limits bookings, with no sign-in; the load balancer redirects plain
-HTTP to HTTPS, ends HTTPS and forwards to one ARM64 Fargate task on port 8080; and the task reaches RDS for
-PostgreSQL 17 over TLS, directly. The simulated inbox is off there, so no visitor sees another's booking
+to the load balancer, blocks `/actuator`, comparing the decoded, lowercased path, and allows 10 booking and cancel
+`POST`s per address in 5 minutes, with no sign-in; the load balancer redirects plain HTTP to HTTPS, ends HTTPS and
+forwards to one ARM64 Fargate task on port 8080, which serves only the health and info endpoints; and the task
+reaches RDS for PostgreSQL 17 over TLS, directly. The simulated inbox is off there, so no visitor sees another's
+booking, and every booking is deleted 48 hours after it is made
 ([ADR-0006, Notes](adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). The picture draws Route 53, then WAF, then the
-load balancer for readability; Route 53 only resolves the name. Resources, the request path step by step,
-deploying, teardown, trust and access are in [infra/README.md](../infra/README.md#the-hosted-demo).
+load balancer for readability; Route 53 only resolves the name.
+
+Since 2026-10-27 the hosted demo texts real SMS, and any South African mobile number may book. The task sends
+through AWS End User Messaging SMS in Cape Town, through a protect configuration that allows South Africa alone and
+no voice or MMS, at most five SMS a day to one number; the published demo numbers, 082 555 0000 to 082 555 0199,
+stay on the simulated gateway. No delivery events are logged, because they carry the number. While the AWS account
+is in the SMS sandbox, only verified numbers receive a text, and any other ends `FAILED` with the booking standing.
+Resources, the request path step by step, the SMS controls, deploying, teardown, trust and access are in
+[infra/README.md](../infra/README.md#the-hosted-demo).
 
 Next: [domain-rules.md](domain-rules.md) for the proofs; [delivery.md](delivery.md) for how it ships.
