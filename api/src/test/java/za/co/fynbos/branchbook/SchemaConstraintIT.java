@@ -240,7 +240,34 @@ class SchemaConstraintIT {
                         holiday().insert(),
                         bookedAppointment().insert(),
                         idempotencyKey().insert(),
-                        message().insert())));
+                        message().insert(),
+                        recipientSend().insert())));
+  }
+
+  /**
+   * BR-17, V7: the daily cap counts through the ledger's two indexes, and V5's index on the
+   * messages' recipients, which nothing reads any more, is gone.
+   */
+  @Test
+  void theCapsLedgerHasItsIndexesAndTheMessagesRecipientIndexIsGone() {
+    assertThat(
+            jdbc.queryForList(
+                "SELECT indexname || ' ' || indexdef FROM pg_indexes"
+                    + " WHERE tablename = 'sms_recipient_sends' ORDER BY indexname",
+                String.class))
+        .satisfiesExactly(
+            fingerprint ->
+                assertThat(fingerprint)
+                    .startsWith("ix_sms_recipient_sends_fingerprint ")
+                    .endsWith("(recipient_fingerprint, written_at)"),
+            written ->
+                assertThat(written)
+                    .startsWith("ix_sms_recipient_sends_written ")
+                    .endsWith("(written_at)"));
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT to_regclass('ix_notification_messages_recipient') IS NULL", Boolean.class))
+        .isTrue();
   }
 
   static Stream<Violation> violations() {
@@ -578,7 +605,20 @@ class SchemaConstraintIT {
             "deleting an appointment that still has its confirmation",
             bookedAppointment().insert(),
             message().insert(),
-            "DELETE FROM appointments WHERE id = " + APPOINTMENT_ID));
+            "DELETE FROM appointments WHERE id = " + APPOINTMENT_ID),
+        // sms_recipient_sends
+        check(
+            "sms_recipient_sends_fingerprint_format",
+            "the mobile number itself",
+            recipientSend().with("recipient_fingerprint", FIRST_MOBILE)),
+        check(
+            "sms_recipient_sends_fingerprint_format",
+            "upper-case hex",
+            recipientSend().with("recipient_fingerprint", "repeat('A', 64)")),
+        check(
+            "sms_recipient_sends_fingerprint_format",
+            "a hash cut short",
+            recipientSend().with("recipient_fingerprint", "repeat('a', 63)")));
   }
 
   static Stream<Acceptance> acceptances() {
@@ -925,5 +965,12 @@ class SchemaConstraintIT {
         .column("failure_reason", "NULL")
         .column("correlation_id", "'test'")
         .column("sent_at", "NULL");
+  }
+
+  /** One SMS in the daily cap's ledger: a fingerprint in lower-case hex, never a number. */
+  private static Row recipientSend() {
+    return Row.of("sms_recipient_sends")
+        .column("recipient_fingerprint", "repeat('a', 64)")
+        .column("written_at", "'2026-10-26 08:00Z'");
   }
 }

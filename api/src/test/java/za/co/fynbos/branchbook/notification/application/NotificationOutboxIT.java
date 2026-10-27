@@ -142,7 +142,8 @@ class NotificationOutboxIT {
 
   /**
    * BR-17: the per-recipient daily cap is off unless a deployment sets it, so a number outside the
-   * demo block is written every SMS it is owed. RecipientDailyCapIT shows the cap switched on.
+   * demo block is written every SMS it is owed, and nothing reaches the cap's ledger.
+   * RecipientDailyCapIT and RecipientCapLedgerIT show the cap switched on.
    */
   @Test
   void theDailyCapIsOffByDefault() {
@@ -161,6 +162,9 @@ class NotificationOutboxIT {
                 APPOINTMENT))
         .hasSize(6)
         .containsOnly("PENDING");
+    assertThat(jdbc.queryForObject("SELECT count(*) FROM sms_recipient_sends", Integer.class))
+        .as("the cap's ledger")
+        .isZero();
   }
 
   private static Confirmation confirmation() {

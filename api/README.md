@@ -103,7 +103,8 @@ environment supplies the rest:
 | `BRANCHBOOK_RETENTION_ENABLED` | `branchbook.retention.enabled`. Switches on the hourly retention job, which deletes every booking once its appointment is over, plus the delay below, with its messages and idempotency keys, keeping the hosted demo's promise; a booking for a future date is never touched ([SECURITY.md](../SECURITY.md#personal-information-popia)). `false` by default. | The hosted demo's ECS task definition sets it to `true`, and nothing else does. `compose.yaml`, `make dev-api` and the tests leave it off; the tests call `RetentionPurge` themselves |
 | `BRANCHBOOK_RETENTION_AFTER_END` | `branchbook.retention.after-end`. How long after its appointment ends a booking is deleted, as an ISO-8601 duration. `PT0S` by default; a negative value stops start-up. | Optional; the hosted demo leaves it at zero |
 | `BRANCHBOOK_SMS_GATEWAY` | `branchbook.sms.gateway`. `simulated`, the default, sends nothing. `aws` sends every number outside the published demo block, 082 555 0000 to 0199, a real transactional SMS through AWS End User Messaging SMS; the block stays simulated, because anyone may type it. The start-up log names the gateway, the region and whether a protect configuration and a cap are set. Credentials come from the SDK's default chain, in the hosted demo the ECS task role. | The hosted demo's task definition sets `aws`; `compose.yaml`, `make dev-api` and the tests leave it `simulated` |
-| `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` | `branchbook.sms.recipient-daily-cap`. The most SMS one number outside the demo block is written in any 24 hours, confirmations and cancellations together, counting those still stored; the next is FAILED with `RECIPIENT_DAILY_CAP`, never sent, and the booking or cancel still succeeds ([BR-17](../docs/domain-rules.md#br-17)). A cancelled booking's confirmations and a cancellation once final are deleted, so they stop counting. Cancels for one number at the same moment can pass it by a message or two. `0`, the default, is off; a negative value stops start-up. | The hosted demo's task definition; off elsewhere |
+| `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` | `branchbook.sms.recipient-daily-cap`. The most SMS one number outside the demo block is written in any 24 hours, confirmations and cancellations together; the next is FAILED with `RECIPIENT_DAILY_CAP`, never sent, and the booking or cancel still succeeds ([BR-17](../docs/domain-rules.md#br-17)). Each SMS is counted in the cap's ledger, `sms_recipient_sends`, which keeps a keyed fingerprint of the number for 24 hours, so a cancelled booking's confirmations and a cancellation once final still count after they are deleted. Cancels for one number at the same moment can pass it by a message or two. `0`, the default, is off, and the ledger then stays empty; a negative value stops start-up. | The hosted demo's task definition; off elsewhere |
+| `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY` | `branchbook.sms.recipient-cap-key`. The secret the cap's ledger keys each fingerprint with: HMAC-SHA256 of the number's E.164 form, so the ledger never holds the number and the fingerprint cannot be matched to one without the key. At least 32 characters, such as the output of `openssl rand -base64 48`, or start-up stops with a message that does not quote it; never logged or printed. Empty, the default, makes a random key at each start, so every number's count starts again when the application restarts, and logs one WARN at start-up while the cap is on. | A secret store, in a deployment that keeps counts across restarts; nothing sets it today, the hosted demo included |
 | `BRANCHBOOK_SMS_AWS_REGION` | `branchbook.sms.aws.region`. The region to send from, such as `af-south-1`. Empty by default, which leaves it to the SDK's default region chain; start-up fails if that finds none. | The hosted demo's task definition |
 | `BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID` | `branchbook.sms.aws.protect-configuration-id`. The protect configuration sent with every message, which in the hosted demo allows South Africa only. Empty sends none. | The hosted demo's task definition |
 | `BRANCHBOOK_SMS_AWS_CONFIGURATION_SET`, `BRANCHBOOK_SMS_AWS_ORIGINATION_IDENTITY` | `branchbook.sms.aws.configuration-set` and `.origination-identity`. Sent only where set. With no origination identity, AWS picks the route, a shared one for South Africa, which supports no sender IDs. | Optional |
@@ -390,9 +391,9 @@ api/
     │   │   └── infrastructure/          JPA and SQL adapters, the constraint translator, the key purge, the retention job
     │   ├── notification/                the confirmation and cancellation SMS, and the simulated inbox
     │   │   ├── api/                     the inbox and retry endpoints, which exist only while switched on
-    │   │   ├── application/             the outbox writer, the dispatcher, the message reads, the inbox and the retry
+    │   │   ├── application/             the outbox writer, the dispatcher, the message reads, the inbox and the retry, the cap's fingerprints
     │   │   ├── domain/                  plain Java: NotificationTemplates, Gsm7
-    │   │   └── infrastructure/          SQL for notification_messages
+    │   │   └── infrastructure/          SQL for notification_messages and the cap's ledger, the ledger's purge, the SMS gateways
     │   └── shared/                      cross-cutting concerns
     │       ├── problem/                 RFC 9457 error responses
     │       ├── correlation/             correlation ids
@@ -402,7 +403,7 @@ api/
     │       └── web/                     serving the React app; the OpenAPI description
     ├── main/resources/
     │   ├── application.yml              configuration, one comment per property
-    │   └── db/migration/                Flyway migrations V1 to V4, one header comment each
+    │   └── db/migration/                Flyway migrations V1 to V7, one header comment each
     └── test/java/za/co/fynbos/branchbook/
         └── support/                     @IntegrationTest, MutableClock, DatabaseReset, Bookings, the container
 ```

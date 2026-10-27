@@ -1,8 +1,8 @@
 # Runbook
 
 How to look after a running BranchBook: whether it is healthy, what happened to a message, what an AWS refusal
-means and how to let the hosted demo send real SMS, how to replay one that failed, whether the hosted demo's retention
-purge ran, and how to follow one request through the logs. The commands
+means and how to let the hosted demo send real SMS, how to replay one that failed, what the daily cap's ledger holds,
+whether the hosted demo's retention purge ran, and how to follow one request through the logs. The commands
 are for the local stack that `make up` starts; `make psql` opens a SQL prompt on its database. Every number in this
 file is a synthetic demo number.
 
@@ -41,10 +41,10 @@ A message is in one of three states:
     with the booking, so only an appointment cancelled before cancels deleted bookings (V6), or set CANCELLED by
     hand, can leave one.
   - `RECIPIENT_DAILY_CAP`: the number had already been written as many SMS in the last 24 hours as
-    `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` allows, counting those still stored, so this one was written FAILED and never
-    sent. The booking or the cancel went through. It is never retried; the number gets SMS again once its older
-    messages are a day old. A cancellation the cap stops is never stored at all: the cancel's response shows it
-    FAILED with this reason.
+    `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` allows, counted in the cap's ledger, deleted messages included
+    ([below](#the-daily-caps-ledger)), so this one was written FAILED and never sent. The booking or the cancel went
+    through. It is never retried; the number gets SMS again once its oldest counted SMS is a day old. A cancellation
+    the cap stops is never stored at all: the cancel's response shows it FAILED with this reason.
 
 A cancellation SMS is never kept in a final state. A cancel deletes the booking at once, so the cancellation has no
 appointment and shows `APT-****-****` as its reference in the inbox; once it is SENT, or FAILED for good, the
@@ -162,7 +162,10 @@ while, each with no appointment:
 - its cancellation SMS, PENDING, which holds the number and the text until the dispatcher sends it or gives up on
   it, within about 35 seconds while the dispatcher runs, and then deletes it;
 - its idempotency key, which holds no personal data, until the hourly key purge removes it 24 hours after the
-  booking, so a retry of that booking is `422 IDEMPOTENCY_KEY_REUSED` rather than a new booking.
+  booking, so a retry of that booking is `422 IDEMPOTENCY_KEY_REUSED` rather than a new booking;
+- where the daily cap is on, one row in the cap's ledger for each SMS the booking was written, which holds a keyed
+  fingerprint of the number and nothing that names the booking, until the ledger's purge removes it 24 hours after
+  its SMS ([below](#the-daily-caps-ledger)).
 
 The log line `cancel.deleted appointmentId=...` marks each cancel. To check that nothing else is left:
 
@@ -187,6 +190,56 @@ The second is always 0. The third is 0 while the dispatcher runs: a
 cancellation still waiting after five minutes means the dispatcher has stopped, and the retention purge does not
 reach a message with no appointment, so start the dispatcher again rather than deleting the row, or the customer is
 never told.
+
+## The daily cap's ledger
+
+Where `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` is above 0, as on the hosted demo, every SMS written to a number outside
+the demo block adds one row to `sms_recipient_sends` ([BR-17](domain-rules.md#br-17)), in the transaction that
+writes the message. A row holds two things: `recipient_fingerprint`, HMAC-SHA256 of the number's E.164 form under
+`BRANCHBOOK_SMS_RECIPIENT_CAP_KEY`, in lower-case hex, and `written_at`. There is no number, name, reference, text,
+or link to a booking or a message. The cap counts a fingerprint's rows of the last 24 hours, so a confirmation a
+cancel deleted, or a cancellation the dispatcher deleted once final, still counts; an SMS the cap stopped adds no
+row. With the cap off the table stays empty.
+
+To see how near numbers are to the cap, without seeing a number:
+
+```sql
+SELECT left(recipient_fingerprint, 12) AS fingerprint, count(*) AS sms, max(written_at) AS last_sms
+FROM sms_recipient_sends
+WHERE written_at > now() - interval '24 hours'
+GROUP BY recipient_fingerprint
+ORDER BY sms DESC
+LIMIT 20;
+```
+
+A fingerprint whose `sms` has reached the cap gets no SMS until its oldest row is 24 hours old. Deleting a
+fingerprint's rows lifts the cap for that number at once; nothing else in the application reads them.
+
+The ledger's purge deletes the rows once they are 24 hours old: a minute after start-up, then every hour, whether
+the cap is on or not. Each run writes one INFO line with how many rows it deleted, and nothing else:
+
+```text
+cap_ledger.purged count=12
+```
+
+`count=0` is normal while the cap is off or the demo is quiet. No such line at all means the job is not running. Right
+after a run this is 0:
+
+```sql
+SELECT count(*) FROM sms_recipient_sends WHERE written_at <= now() - interval '24 hours';
+```
+
+**The key.** With no `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY`, as on the hosted demo today, the application makes a random
+key at each start, and while the cap is on the start-up log says so once, at WARN:
+
+```text
+Recipient daily cap: branchbook.sms.recipient-cap-key is not set, so the ledger's fingerprints use a random key made at start-up, and every number's count starts again from zero whenever the application restarts.
+```
+
+The rows from before a restart then match no number, so they stop counting, and the purge removes them within a day.
+To keep counts across restarts, set the variable from a secret store to at least 32 characters, such as the output
+of `openssl rand -base64 48`; a shorter one stops start-up. The key is never logged or printed. Changing it has the
+same effect as a restart: every count starts again.
 
 <a id="did-the-48-hour-purge-run"></a>
 

@@ -5,7 +5,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import za.co.fynbos.branchbook.notification.domain.NotificationChannel;
 import za.co.fynbos.branchbook.notification.domain.NotificationMessage;
 
 /** Where messages are stored: the {@code notification_messages} table. */
@@ -43,19 +42,6 @@ public interface NotificationMessageRepository {
    * @return the message, or empty if no message has that id
    */
   Optional<NotificationMessage> lockById(UUID id);
-
-  /**
-   * Counts the messages on one channel to one recipient written after the given instant, for the
-   * per-recipient daily cap (BR-17). A message the cap itself stopped is not counted, so a number
-   * that keeps being refused is not held back for longer than a day by its own refusals.
-   *
-   * @param recipient the recipient, in the form the messages store it (E.164 for an SMS)
-   * @param channel the channel
-   * @param since the start of the window, from the application's clock; a message written at it or
-   *     earlier is not counted
-   * @return how many messages count towards the cap
-   */
-  long countTowardsDailyCap(String recipient, NotificationChannel channel, Instant since);
 
   /**
    * Counts the messages still waiting to be delivered, whether due now or backing off, for the

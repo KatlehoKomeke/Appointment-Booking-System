@@ -5,7 +5,10 @@
  *   <li>{@link za.co.fynbos.branchbook.notification.application.NotificationOutbox} writes the
  *       confirmation SMS inside the booking transaction, and the cancellation SMS inside the cancel
  *       transaction after deleting every confirmation of the appointment, implementing booking's
- *       {@code ConfirmationOutbox} port.
+ *       {@code ConfirmationOutbox} port. Where the per-recipient daily cap is on, it counts each
+ *       number's SMS in the {@link
+ *       za.co.fynbos.branchbook.notification.application.RecipientSendLedger}, by the keyed
+ *       fingerprint {@code RecipientFingerprints} makes, never by the number.
  *   <li>{@link za.co.fynbos.branchbook.notification.application.MessageQueries} reads an
  *       appointment's messages back with the recipient masked, implementing booking's {@code
  *       AppointmentNotifications} port.
@@ -26,7 +29,7 @@
  *       start-up a public base URL that could push a confirmation or a cancellation over one SMS
  *       segment.
  *   <li>{@link za.co.fynbos.branchbook.notification.application.SmsProperties} chooses the gateway,
- *       simulated or AWS, and sets the per-recipient daily cap.
+ *       simulated or AWS, and sets the per-recipient daily cap and the key of its ledger.
  * </ul>
  *
  * <p>Whatever this module needs to know about an appointment it asks booking's {@code

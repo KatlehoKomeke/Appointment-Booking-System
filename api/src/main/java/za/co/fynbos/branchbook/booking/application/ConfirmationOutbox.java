@@ -26,8 +26,8 @@ public interface ConfirmationOutbox {
    * waited for first, so a confirmation is delivered before its cancellation, or never. It then
    * writes the cancellation as a PENDING message against the appointment, which the appointment's
    * delete detaches and the dispatcher deletes once it is final. Where the number has reached the
-   * daily cap, counted before the confirmations go, the cancellation is final at once, never sent,
-   * so it is not stored at all.
+   * notification module's daily cap, which still counts the confirmations deleted here, the
+   * cancellation is final at once, never sent, so it is not stored at all.
    *
    * @param cancellation what the message must say and where it goes
    * @return the cancellation SMS as the cancel's response shows it: PENDING, or FAILED with {@code
