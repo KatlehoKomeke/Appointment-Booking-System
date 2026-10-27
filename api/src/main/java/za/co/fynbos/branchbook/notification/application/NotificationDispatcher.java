@@ -26,11 +26,14 @@ import za.co.fynbos.branchbook.shared.correlation.CorrelationIds;
  * due row with {@code FOR UPDATE SKIP LOCKED}, hand it to the gateway, mark the outcome, commit. So
  * a crash re-sends at most the one message in flight, and two dispatchers never hold the same row.
  * A refused message is tried again after 2, 4, 8 and 16 seconds, measured from the instant the tick
- * was given, and the fifth refusal marks it FAILED with {@code DELIVERY_FAILED}. If marking a
- * message fails, it is set FAILED with {@code DISPATCH_ERROR} and {@code MARK_FAILED} in a
- * transaction of its own, so a poisoned row is sent at most once more and never loops, and the rest
- * of the batch carries on. An appointment never depends on its messages: delivery changes only the
- * message.
+ * was given, and the fifth refusal marks it FAILED with {@code DELIVERY_FAILED}. A refusal the
+ * gateway calls permanent, such as AWS's for a number the SMS sandbox has not verified, marks it
+ * FAILED with {@code DELIVERY_FAILED} on that attempt, since sending it again cannot succeed; a
+ * gateway that throws counts as a retryable refusal. Either way {@code last_error} holds the
+ * refusal's code. If marking a message fails, it is set FAILED with {@code DISPATCH_ERROR} and
+ * {@code MARK_FAILED} in a transaction of its own, so a poisoned row is sent at most once more and
+ * never loops, and the rest of the batch carries on. An appointment never depends on its messages:
+ * delivery changes only the message.
  *
  * <p>A cancellation outlives its appointment, which the cancel deleted, only until it is final
  * (BR-14). So where a confirmation would be marked SENT, FAILED with {@code DELIVERY_FAILED}, or
@@ -50,7 +53,10 @@ import za.co.fynbos.branchbook.shared.correlation.CorrelationIds;
  * the next tick asks again.
  *
  * <p>Log lines carry the message's own correlation id, so they sit beside the booking that wrote
- * it, and name the message by id; never the recipient, the body or the reference.
+ * it, and name the message by id; never the recipient, the body or the reference. {@code
+ * outbox.retry} and {@code outbox.failed} also give the refusal's code, such as {@code
+ * AWS_THROTTLED}: a fixed string the gateway builds from what went wrong, never a provider's
+ * message, so the log says why a send failed.
  */
 @Service
 public class NotificationDispatcher {
@@ -60,7 +66,7 @@ public class NotificationDispatcher {
   /** The most messages one tick handles, so one tick never runs for long. */
   static final int BATCH = 20;
 
-  /** The attempt that, refused, marks a message FAILED. */
+  /** The attempt whose refusal, even a retryable one, marks a message FAILED. */
   static final int MAX_ATTEMPTS = 5;
 
   /** What a message that could not be marked records as its last error. */
@@ -159,11 +165,15 @@ public class NotificationDispatcher {
             deleteFinal(message);
           }
         }
-        case Refused refused when attempts >= MAX_ATTEMPTS -> {
+        case Refused refused when refused.permanent() || attempts >= MAX_ATTEMPTS -> {
           if (keptOnceFinal(message)) {
             messages.markFailed(message.id(), attempts, "DELIVERY_FAILED", refused.errorCode());
           }
-          log.warn("outbox.failed messageId={} attempts={}", message.id(), attempts);
+          log.warn(
+              "outbox.failed messageId={} attempts={} code={}",
+              message.id(),
+              attempts,
+              refused.errorCode());
           if (!keptOnceFinal(message)) {
             deleteFinal(message);
           }
@@ -172,10 +182,11 @@ public class NotificationDispatcher {
           Duration wait = backoffAfter(attempts);
           messages.markRetry(message.id(), attempts, now.plus(wait), refused.errorCode());
           log.info(
-              "outbox.retry messageId={} attempts={} retryInSeconds={}",
+              "outbox.retry messageId={} attempts={} retryInSeconds={} code={}",
               message.id(),
               attempts,
-              wait.toSeconds());
+              wait.toSeconds(),
+              refused.errorCode());
         }
       }
     }
@@ -196,12 +207,14 @@ public class NotificationDispatcher {
     log.info("outbox.deleted messageId={} kind={}", message.id(), message.kind());
   }
 
-  /** A gateway that throws is treated as one that refused, so the message is tried again. */
+  /**
+   * A gateway that throws is treated as one that refused retryably, so the message is tried again.
+   */
   private Delivery send(NotificationMessage message) {
     try {
       return gateway.send(OutgoingMessage.of(message));
     } catch (RuntimeException failure) {
-      return new Refused(GATEWAY_ERROR);
+      return Refused.retryable(GATEWAY_ERROR);
     }
   }
 

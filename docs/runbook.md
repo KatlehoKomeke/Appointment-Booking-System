@@ -29,11 +29,12 @@ curl -s 'localhost:8080/api/v1/messages?limit=20'
 A message is in one of three states:
 
 - **PENDING**: waiting for its next attempt at `nextAttemptAt`. A refused attempt is retried after 2, 4, 8 and 16
-  seconds; `attempts` and `lastError` say how far it got.
+  seconds, unless the refusal is permanent; `attempts` and `lastError` say how far it got.
 - **SENT**: the gateway accepted it at `sentAt`.
 - **FAILED**: it will not be tried again on its own. `failureReason` says why:
-  - `DELIVERY_FAILED`: the gateway refused all five attempts. The simulated gateway refuses every number ending in
-    `0000`, such as 082 555 0000, so this is how a failed delivery is shown.
+  - `DELIVERY_FAILED`: the gateway refused all five attempts, or refused one permanently, as AWS refuses a number it
+    will not text ([the AWS codes](#what-the-aws-codes-mean)); `lastError` holds the code. The simulated gateway
+    refuses every number ending in `0000`, such as 082 555 0000, five times, so this is how a failed delivery is shown.
   - `DISPATCH_ERROR` with `lastError` `MARK_FAILED`: the gateway was called, but the outcome could not be recorded,
     so the message was set FAILED rather than risk sending it again and again. It may have been delivered once.
   - `SUPERSEDED_BY_CANCELLATION`: a confirmation the dispatcher found, when it claimed it, to belong to a cancelled
@@ -69,24 +70,40 @@ LIMIT 20;
 
 Where `BRANCHBOOK_SMS_GATEWAY=aws`, as on the hosted demo, every number outside the published demo block, 082 555 0000
 to 0199, is sent through AWS End User Messaging SMS, and the start-up log has one line naming the gateway, the
-region and whether a protect configuration and a daily cap are set. A refusal is retried like any other, so a
-message refused five times is FAILED with `DELIVERY_FAILED`, and `lastError` holds the last code. Each code is the
-exception's type and, where AWS gives one, its reason; AWS's message is never kept, because it can quote the number.
+region and whether a protect configuration and a daily cap are set. A refusal that sending again cannot cure, marked
+*At once* below, makes the message FAILED with `DELIVERY_FAILED` on that attempt. Any other, marked *Retried*, is
+tried again after 2, 4, 8 and 16 seconds, as the simulated gateway's refusal is, and the fifth makes it FAILED with
+`DELIVERY_FAILED`. Either way `lastError` holds the last code. Each code is the exception's type and, where AWS gives
+one, its reason; AWS's message is never kept, because it can quote the number.
 
-| `lastError` | What happened | What to do |
-|---|---|---|
-| `AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED` | The account is in the SMS sandbox and the number is not a verified destination. | Verify the number, or leave the sandbox (below). |
-| `AWS_CONFLICT_DESTINATION_COUNTRY_BLOCKED_BY_PROTECT_CONFIGURATION` | The protect configuration does not allow the destination's country. | Nothing, for a number outside South Africa; otherwise check the protect configuration. |
-| `AWS_CONFLICT_DESTINATION_PHONE_NUMBER_OPTED_OUT` | The recipient replied STOP, or is on the account's opt-out list. | Nothing: AWS will not send to them. |
-| `AWS_QUOTA_MONTHLY_SPEND_LIMIT_REACHED_FOR_TEXT` | The account's monthly SMS spend limit is used up; nothing more is sent this month. | Raise the limit through the Support case below, or wait for the next month. |
-| `AWS_QUOTA_` and another reason | Another AWS quota is reached. | The reason names it. |
-| `AWS_VALIDATION_PRICE_OVER_THRESHOLD` | The message would cost more than `BRANCHBOOK_SMS_AWS_MAX_PRICE` (US$0.20 by default). | Raise the setting only if the price is expected. |
-| `AWS_VALIDATION_` and another reason | AWS refused the request, for example a setting it does not accept. | The reason names it; check the `BRANCHBOOK_SMS_AWS_*` settings. |
-| `AWS_ACCESS_DENIED` | The task role may not call `sms-voice:SendTextMessage`, or the account is disabled for SMS. | Check the task role's policy in the CDK app. |
-| `AWS_RESOURCE_NOT_FOUND` | A protect configuration, configuration set or origination identity named in the settings does not exist. | Correct the setting. |
-| `AWS_THROTTLED`, `AWS_INTERNAL` | AWS is busy or failed; the next attempt usually succeeds. | Nothing, unless every message shows it. |
-| `AWS_UNREACHABLE` | The SDK could not complete the call: the network, a 10-second timeout, or no credentials or region. | Check the task's network route to AWS and its role. |
-| `AWS_ERROR` | Any other AWS error. | Search the AWS Health Dashboard; the code carries nothing more. |
+| `lastError` | Fails | What happened | What to do |
+|---|---|---|---|
+| `AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED` | At once | The account is in the SMS sandbox and the number is not a verified destination. | Verify the number, or leave the sandbox (below). |
+| `AWS_CONFLICT_DESTINATION_COUNTRY_BLOCKED_BY_PROTECT_CONFIGURATION` | At once | The protect configuration does not allow the destination's country. | Nothing, for a number outside South Africa; otherwise check the protect configuration. |
+| `AWS_CONFLICT_DESTINATION_PHONE_NUMBER_OPTED_OUT` | At once | The recipient replied STOP, or is on the account's opt-out list. | Nothing: AWS will not send to them. |
+| `AWS_CONFLICT_` and another reason, or `AWS_CONFLICT` | At once | The account or one of its resources is in a state that forbids the send. | The reason names it. |
+| `AWS_QUOTA_MONTHLY_SPEND_LIMIT_REACHED_FOR_TEXT` | At once | The account's monthly SMS spend limit is used up; nothing more is sent this month. | Raise the limit through the Support case below, or wait for the next month. |
+| `AWS_QUOTA_` and another reason | Retried | Another AWS quota is reached. | The reason names it. |
+| `AWS_VALIDATION_PRICE_OVER_THRESHOLD` | At once | The message would cost more than `BRANCHBOOK_SMS_AWS_MAX_PRICE` (US$0.20 by default). | Raise the setting only if the price is expected. |
+| `AWS_VALIDATION_` and another reason | At once | AWS refused the request, for example a setting it does not accept. | The reason names it; check the `BRANCHBOOK_SMS_AWS_*` settings. |
+| `AWS_ACCESS_DENIED` | At once | The task role may not call `sms-voice:SendTextMessage`, or the account is disabled for SMS. | Check the task role's policy in the CDK app. |
+| `AWS_RESOURCE_NOT_FOUND` | At once | A protect configuration, configuration set or origination identity named in the settings does not exist. | Correct the setting. |
+| `AWS_THROTTLED`, `AWS_INTERNAL` | Retried | AWS is busy or failed; the next attempt usually succeeds. | Nothing, unless every message shows it. |
+| `AWS_UNREACHABLE` | Retried | The SDK could not complete the call: the network, a 10-second timeout, or no credentials or region. | Check the task's network route to AWS and its role. |
+| `AWS_ERROR` | Retried | Any other AWS error. | Search the AWS Health Dashboard; the code carries nothing more. |
+
+The log gives the same code without a query. The dispatcher's `outbox.retry` and `outbox.failed` lines name the
+message by its id, never its number, and end with the code. A code marked *At once* ends the message on the attempt
+that met it, usually the first; any other shows on `outbox.retry` until the fifth attempt's `outbox.failed`:
+
+```text
+outbox.retry messageId=... attempts=1 retryInSeconds=2 code=AWS_THROTTLED
+outbox.failed messageId=... attempts=1 code=AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED
+```
+
+Locally, `docker compose logs app | grep outbox.failed` lists them; on the hosted demo, search CloudWatch Logs for
+`outbox.failed`. The inbox or the SQL above shows the message by that id. Replaying a message that failed at once
+([below](#replay-a-failed-message)) sends it again, so fix the cause first, or it fails at once again.
 
 A message AWS accepted is SENT with AWS's `MessageId` as its provider id. SENT means AWS took it, not that the phone
 received it: South Africa supports no sender IDs, so with no origination identity AWS sends over a shared route, best
@@ -100,8 +117,8 @@ configuration, the task role's permission and the settings, but not these.
 1. **In the sandbox, verify each number that should receive SMS.** A new account is in the SMS sandbox: it sends only
    to verified destination numbers, at most 10, and spends at most US$1 a month. In AWS End User Messaging SMS, open
    *Phone numbers > Verified destination numbers* (or the sandbox page), add the number, and enter the code AWS texts
-   to it. A booking for any other number is FAILED with `AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED` after
-   five attempts.
+   to it. A booking for any other number is FAILED with `AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED` on
+   its first attempt.
 2. **To text any South African number, open a Support case for production access.** In the same console, request
    production access (a case with AWS Support) for af-south-1, naming the use (transactional appointment
    confirmations), the expected volume and South Africa as the only destination. In the same case, or another, ask
@@ -150,7 +167,7 @@ WHERE m.id = '00000000-0000-0000-0000-000000000000'
 It reports `UPDATE 1` when the message was replayed, and `UPDATE 0` when the guard refused it. The dispatcher picks
 the message up within 2 seconds. Should a confirmation of a cancelled appointment ever be set PENDING by other
 means, the dispatcher marks it `SUPERSEDED_BY_CANCELLATION` instead of sending it. A message to 082 555 0000 will
-fail again, by design.
+fail again, by design, and one AWS refused at once fails again at once until its cause is fixed.
 
 ## What a cancel leaves behind
 

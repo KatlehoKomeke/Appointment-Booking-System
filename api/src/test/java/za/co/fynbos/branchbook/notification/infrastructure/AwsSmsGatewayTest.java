@@ -1,12 +1,14 @@
 package za.co.fynbos.branchbook.notification.infrastructure;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Named.named;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.util.Arrays;
 import java.util.UUID;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
@@ -14,6 +16,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
+import software.amazon.awssdk.core.exception.ApiCallTimeoutException;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.services.pinpointsmsvoicev2.PinpointSmsVoiceV2Client;
@@ -40,10 +43,11 @@ import za.co.fynbos.branchbook.notification.application.SmsProperties;
 import za.co.fynbos.branchbook.notification.domain.NotificationChannel;
 
 /**
- * FR-15, BR-19: the AWS gateway sends a transactional SMS with the deployment's MaxPrice and only
- * the optional settings that are set, maps AWS's MessageId to an accepted delivery, and maps each
- * refusal to a fixed code built from the exception's type and typed reason, never its message. The
- * client is a Mockito mock, so nothing reaches AWS.
+ * FR-15, BR-17, BR-19: the AWS gateway sends a transactional SMS with the deployment's MaxPrice and
+ * only the optional settings that are set, maps AWS's MessageId to an accepted delivery, and maps
+ * each refusal to a fixed code built from the exception's type and typed reason, never its message,
+ * and to whether sending it again could succeed. The client is a Mockito mock, so nothing reaches
+ * AWS.
  */
 class AwsSmsGatewayTest {
 
@@ -127,8 +131,8 @@ class AwsSmsGatewayTest {
 
     Delivery delivery = new AwsSmsGateway(client, NOTHING_OPTIONAL).send(MESSAGE);
 
-    assertThat(delivery).isEqualTo(new Refused(code));
-    assertThat(((Refused) delivery).errorCode()).matches("AWS_[A-Z0-9_]+");
+    assertThat(delivery).isInstanceOf(Refused.class);
+    assertThat(((Refused) delivery).errorCode()).isEqualTo(code).matches("AWS_[A-Z0-9_]+");
   }
 
   static Stream<Arguments> refusals() {
@@ -169,6 +173,74 @@ class AwsSmsGatewayTest {
         arguments(SdkClientException.create(QUOTED), "AWS_UNREACHABLE"),
         arguments(PinpointSmsVoiceV2Exception.builder().message(QUOTED).build(), "AWS_ERROR"),
         arguments(SdkException.create(QUOTED, null), "AWS_ERROR"));
+  }
+
+  /**
+   * BR-17: a refusal is permanent, so the dispatcher fails the message at once, only where sending
+   * it again cannot succeed: every conflict, such as the sandbox's unverified number, access
+   * denied, every validation error, a missing resource, and a monthly spend limit. Throttling,
+   * AWS's own failure, the network, every other quota and any other error may pass, so they are
+   * retried. Every quota reason the SDK knows is tried, so a new spend limit cannot pass as
+   * retryable.
+   */
+  @ParameterizedTest(name = "{0}: permanent {1}")
+  @MethodSource("permanence")
+  void aRefusalIsPermanentOnlyWhereSendingAgainCannotSucceed(
+      SdkException thrown, boolean permanent) {
+    when(client.sendTextMessage(any(SendTextMessageRequest.class))).thenThrow(thrown);
+
+    Delivery delivery = new AwsSmsGateway(client, NOTHING_OPTIONAL).send(MESSAGE);
+
+    assertThat(delivery).isInstanceOf(Refused.class);
+    assertThat(((Refused) delivery).permanent()).isEqualTo(permanent);
+  }
+
+  static Stream<Arguments> permanence() {
+    Stream<Arguments> kinds =
+        Stream.of(
+            arguments(
+                named(
+                    "conflict, not verified",
+                    ConflictException.builder()
+                        .reason(ConflictExceptionReason.DESTINATION_PHONE_NUMBER_NOT_VERIFIED)
+                        .build()),
+                true),
+            arguments(
+                named(
+                    "conflict, opted out",
+                    ConflictException.builder()
+                        .reason(ConflictExceptionReason.DESTINATION_PHONE_NUMBER_OPTED_OUT)
+                        .build()),
+                true),
+            arguments(named("conflict, no reason", ConflictException.builder().build()), true),
+            arguments(named("access denied", AccessDeniedException.builder().build()), true),
+            arguments(
+                named(
+                    "validation, over MaxPrice",
+                    ValidationException.builder()
+                        .reason(ValidationExceptionReason.PRICE_OVER_THRESHOLD)
+                        .build()),
+                true),
+            arguments(named("validation, no reason", ValidationException.builder().build()), true),
+            arguments(named("not found", ResourceNotFoundException.builder().build()), true),
+            arguments(named("throttled", ThrottlingException.builder().build()), false),
+            arguments(named("internal", InternalServerException.builder().build()), false),
+            arguments(named("unreachable", SdkClientException.create("test")), false),
+            arguments(named("call timeout", ApiCallTimeoutException.create(10_000)), false),
+            arguments(named("other AWS", PinpointSmsVoiceV2Exception.builder().build()), false),
+            arguments(named("other SDK", SdkException.create("test", null)), false),
+            arguments(
+                named("quota, no reason", ServiceQuotaExceededException.builder().build()), false));
+    Stream<Arguments> quotas =
+        Arrays.stream(ServiceQuotaExceededExceptionReason.values())
+            .map(
+                reason ->
+                    arguments(
+                        named(
+                            "quota, " + reason.name(),
+                            ServiceQuotaExceededException.builder().reason(reason).build()),
+                        reason.name().startsWith("MONTHLY_SPEND_LIMIT_REACHED_")));
+    return Stream.concat(kinds, quotas);
   }
 
   @Test

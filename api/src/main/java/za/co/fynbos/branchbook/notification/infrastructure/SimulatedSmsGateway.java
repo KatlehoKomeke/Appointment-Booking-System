@@ -10,7 +10,8 @@ import za.co.fynbos.branchbook.notification.application.OutgoingMessage;
  * The simulated SMS gateway (FR-15): nothing is ever sent. It takes {@code simulated-latency} to
  * answer, accepts every message with a made-up provider id, and refuses every message to a number
  * ending in {@code 0000}, such as the demo number 082 555 0000, so a failed delivery can be shown.
- * It logs nothing; the dispatcher logs the outcome by message id.
+ * That refusal is retryable, so the demo shows all five attempts and the backoff between them. It
+ * logs nothing; the dispatcher logs the outcome by message id.
  *
  * <p>It is not a bean of its own: {@link SmsGatewayConfiguration} hands it to the dispatcher for
  * every number where {@code branchbook.sms.gateway} is {@code simulated}, the default, and for the
@@ -36,11 +37,11 @@ class SimulatedSmsGateway implements MessageGateway {
         Thread.sleep(latency);
       } catch (InterruptedException interrupted) {
         Thread.currentThread().interrupt();
-        return new Refused("INTERRUPTED");
+        return Refused.retryable("INTERRUPTED");
       }
     }
     if (message.recipient().endsWith(FAILING_SUFFIX)) {
-      return new Refused(SIMULATED_FAILURE);
+      return Refused.retryable(SIMULATED_FAILURE);
     }
     return new Accepted("sim-" + UUID.randomUUID());
   }

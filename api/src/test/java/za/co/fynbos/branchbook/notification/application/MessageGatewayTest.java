@@ -21,8 +21,9 @@ class MessageGatewayTest {
 
   @Test
   void longErrorCodeIsCutToItsColumn() {
-    assertThat(new MessageGateway.Refused("e".repeat(700)).errorCode()).hasSize(500);
-    assertThat(new MessageGateway.Refused("SIMULATED_FAILURE").errorCode())
+    assertThat(MessageGateway.Refused.retryable("e".repeat(700)).errorCode()).hasSize(500);
+    assertThat(MessageGateway.Refused.permanent("e".repeat(700)).errorCode()).hasSize(500);
+    assertThat(MessageGateway.Refused.retryable("SIMULATED_FAILURE").errorCode())
         .isEqualTo("SIMULATED_FAILURE");
   }
 }
