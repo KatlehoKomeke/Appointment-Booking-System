@@ -135,7 +135,7 @@ reference data, the slot rules are the ones the API enforces, the error copy is 
 [docs/errors.md](../docs/errors.md), and every person and number is synthetic.
 
 The images below are exported from the design canvas, which is not public, so this section is the design's record in
-the repository. The [architecture page](https://claude.ai/artifact/7CBAyTgkwWryvvxfH6HC84) describes the front end in
+the repository. The [architecture page](https://katlehokomeke.github.io/Appointment-Booking-System/) describes the front end in
 words: its routes, components, state and API calls. Where the two differ, this section records the design.
 
 ### Screens

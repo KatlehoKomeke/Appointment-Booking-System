@@ -87,4 +87,4 @@ request through the code and the schema. [delivery.md](delivery.md) follows a co
 [domain-rules.md](domain-rules.md) lists every rule with its status and proof, [errors.md](errors.md) every error
 code, [runbook.md](runbook.md) what to do when something is wrong, and [porting.md](porting.md) how the design maps to
 .NET or Vue. The decisions are in [adr/](adr/README.md), and the whole design, including what was planned and how the
-build departed from it, is on the [architecture page](https://claude.ai/artifact/7CBAyTgkwWryvvxfH6HC84).
+build departed from it, is on the [architecture page](https://katlehokomeke.github.io/Appointment-Booking-System/).
