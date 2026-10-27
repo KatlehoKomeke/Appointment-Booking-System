@@ -51,7 +51,7 @@ deletes the booking at once ([6](#6-appointment-lifecycle)).
 screens (M6), the branch, availability, booking and lookup API, the confirmation SMS with its dispatcher and
 simulated SMS gateway (M5), the cancel and retry API (M6), the real SMS gateway (after M6), and PostgreSQL 17.*
 
-![BranchBook at a glance, all built: one Spring Boot jar serves the React app and a REST API that books, looks up and cancels over PostgreSQL 17, texting through a simulated gateway or, on the hosted demo, AWS End User Messaging; code ships through GitHub Actions and OpenID Connect to AWS, where the demo is deployed by hand.](assets/diagrams/system-at-a-glance.svg)
+![BranchBook at a glance, all built: one Spring Boot jar serves the React app and a REST API that books, looks up and cancels over PostgreSQL 17, texting through a simulated gateway or, on the hosted demo, AWS End User Messaging; code ships through GitHub Actions and OpenID Connect to AWS, where the pipeline deploys the demo on every push to main.](assets/diagrams/system-at-a-glance.svg)
 
 - **One deployable, one database.** The jar serves the single-page app and the REST API under `/api/v1`, so there
   is one origin and no CORS. Locally it is plain HTTP on `127.0.0.1`; in the hosted demo the load balancer ends
@@ -460,9 +460,9 @@ log and PostgreSQL's for their name, number and reference. How the data is prote
 
 ## 10. Deployment
 
-*Status: Built. The image and the local stack are built, every push to `main` deploys a release record to AWS, and
-the hosted demo runs in Cape Town (af-south-1), deployed by the administrator by hand since 2026-10-26, and texts
-real SMS since 2026-10-27.*
+*Status: Built. The image and the local stack are built, every push to `main` deploys the hosted demo and the release
+record to AWS once every check passes, and the demo runs in Cape Town (af-south-1), first deployed by hand on
+2026-10-26, texting real SMS since 2026-10-27.*
 
 ### 10.1 Locally: the image and the stack
 
@@ -488,33 +488,38 @@ follow its start-up order:
 
 ### 10.2 From a commit to AWS
 
-![From a commit to Cape Town: an opt-in pre-commit hook refuses secret files and runs gitleaks, push protection checks the push, and main, which requires no checks, starts ci, secret-scan, infra (on infra changes) and deploy side by side. deploy does not wait for ci. It passes the aws-demo gate, exchanges an OIDC token at STS, deploys BranchbookRelease through the bootstrap roles and verifies the commit; an administrator deploys BranchbookAccount.](assets/diagrams/delivery-pipeline.svg)
+![From a commit to Cape Town: an opt-in pre-commit hook refuses secret files and runs gitleaks, push protection checks the push, and main, which requires every check, runs ci's api, web, stack and infra jobs side by side. Once all four pass, deploy, on an ARM runner, passes the aws-demo gate, signs in at STS, builds the image and deploys BranchbookData and BranchbookApp through the bootstrap roles, smoke-tests the live address, then records and verifies the commit in BranchbookRelease; an administrator deploys BranchbookAccount by hand.](assets/diagrams/delivery-pipeline.svg)
 
-Every push to `main` starts `ci`, `secret-scan` and `deploy` side by side, and `infra` joins when `infra/` changes;
-`deploy` runs the CDK app's tests, signs in to AWS through OpenID Connect, deploys `BranchbookRelease` and reads
-the recorded commit back. `deploy` does not wait for `ci` yet, and `main` requires no passing checks;
-[delivery.md](delivery.md) walks through each numbered step, what each workflow proves and what would close the
-gaps.
+Every push to `main` starts `ci` and `secret-scan`. `ci`'s `api`, `web`, `stack` and `infra` jobs run side by side
+with no AWS access; once all four pass, its `deploy` job signs in to AWS through OpenID Connect on an ARM runner,
+builds the image, deploys the hosted demo's two stacks, smoke-tests https://branchbook.click, then deploys
+`BranchbookRelease` and reads the recorded commit back. `main` requires those four checks and `gitleaks` before a
+push or merge, so a red check means no deployment; [delivery.md](delivery.md) walks through each numbered step, what
+each workflow proves and the gaps that remain.
 
 ### 10.3 In AWS
 
-![BranchBook in AWS, all built: the administrator's account stack in us-east-1 (OIDC provider, narrow deploy role, $90 budget), the pipeline's release record in Cape Town, and the hand-deployed demo there, where Route 53, WAF and a load balancer front one Fargate task that uses RDS and texts only South African numbers through AWS End User Messaging.](assets/diagrams/aws-footprint.svg)
+![BranchBook in AWS, all built: the administrator's account stack in us-east-1 (OIDC provider, narrow deploy role, $90 budget), and in Cape Town the three stacks the pipeline deploys on every push to main: the release record and the demo, where Route 53, WAF and a load balancer front one Fargate task that uses RDS and texts only South African numbers through AWS End User Messaging.](assets/diagrams/aws-footprint.svg)
 
 The letter and numbers in the picture:
 
 - **A.** An administrator deploys `BranchbookAccount` to us-east-1 by hand with `cdk deploy`. The pipeline never
   deploys this stack.
-- **1.** On every push to `main`, the `deploy` job in `deploy.yml` enters the `aws-demo` environment and signs in
-  through OpenID Connect and AWS STS as `branchbook-github-deploy`. No access key is stored.
-- **2.** That role assumes the CDK bootstrap roles (`cdk-hnb659fds-*`) in af-south-1.
-- **3.** CloudFormation updates the `BranchbookRelease` stack.
-- **4.** The job reads `/branchbook/release` back and fails unless it equals `GITHUB_SHA`.
+- **1.** On every push to `main`, once its four checks pass, the `deploy` job in `ci.yml` enters the `aws-demo`
+  environment and signs in through OpenID Connect and AWS STS as `branchbook-github-deploy`. No access key is stored.
+- **2.** That role assumes the CDK bootstrap roles (`cdk-hnb659fds-*`) in af-south-1, which publish the ARM64 image
+  built on the runner and the templates.
+- **3.** CloudFormation updates `BranchbookData`, then `BranchbookApp`, and the job smoke-tests
+  https://branchbook.click.
+- **4.** CloudFormation updates `BranchbookRelease`, which records `GITHUB_SHA`.
+- **5.** The job reads `/branchbook/release` back and fails unless it equals `GITHUB_SHA`.
 
 Four stacks are built: `BranchbookAccount` in us-east-1 (the GitHub OIDC provider, the deploy role and the
 budget), and in Cape Town (`af-south-1`) `BranchbookRelease`, the release record, and the hosted demo's
-`BranchbookData` and `BranchbookApp` ([ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md)). The pipeline deploys
-`BranchbookRelease` alone, with no stored keys ([ADR-0007](adr/0007-continuous-deployment-from-main.md)); the
-administrator deploys the other three by hand. There is no DNS stack: the hosted zone came with the domain's Route 53
+`BranchbookData` and `BranchbookApp` ([ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md)). The pipeline deploys the
+three Cape Town stacks on every push to `main`, with no stored keys
+([ADR-0007](adr/0007-continuous-deployment-from-main.md)); the administrator deploys `BranchbookAccount` by hand, and
+deployed the demo by hand first, on 2026-10-26. There is no DNS stack: the hosted zone came with the domain's Route 53
 registration.
 
 A reviewer's request to https://branchbook.click: Route 53 resolves the name to the load balancer; AWS WAF, attached

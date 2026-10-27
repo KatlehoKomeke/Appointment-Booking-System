@@ -94,18 +94,16 @@ gateway. The lookup limit counts wrong tries in memory, for that one instance
 
 ## The pipeline deploys the application
 
-**Today.** `deploy` deploys only `BranchbookRelease`, the release record. The administrator deploys the hosted demo
-by hand, from whatever commit is checked out. `deploy` does not wait for `ci`, and `main` requires no passing check
+**Today.** `ci`'s `deploy` job deploys the hosted demo on every push to `main`, after `api`, `web`, `stack` and
+`infra` pass: it builds the ARM64 image on an ARM runner, smoke-tests https://branchbook.click and only then writes
+the release record, so the record names a version that works ([ADR-0007](adr/0007-continuous-deployment-from-main.md)).
+`main` requires those checks and `gitleaks`, not strictly, and no review
 ([delivery.md, Known gaps](delivery.md#known-gaps)).
 
 **In production:**
 
-- `main` protected, with `ci` and `secret-scan` as required checks, one approving review, and a `CODEOWNERS` file
-  covering `.github/` and `infra/` ([CONTRIBUTING.md](../CONTRIBUTING.md#workflow)).
-- One job that, after `ci` passes, builds the ARM64 image on an ARM runner, deploys `BranchbookData` and
-  `BranchbookApp`, runs [smoke.sh](../scripts/smoke.sh) against the new version, and only then writes the release
-  record, so the record names a version that works
-  ([ADR-0007](adr/0007-continuous-deployment-from-main.md)).
+- `main` with strict checks, one approving review, and a `CODEOWNERS` file covering `.github/` and `infra/`
+  ([CONTRIBUTING.md](../CONTRIBUTING.md#workflow)).
 - Releases from a `v*` tag after a change review, the choice ADR-0007 names as safer for a bank, through a staging
   environment first.
 - The bootstrap's execution role narrowed by a custom policy or a permissions boundary
@@ -167,7 +165,7 @@ The hosted demo is open on purpose ([ADR-0006, Notes](adr/0006-hosted-demo-on-aw
 | Real SMS through AWS End User Messaging on AWS's shared route, to South Africa only, at most five a day to one number; the demo numbers stay on the simulated gateway (since 2026-10-27) | A visitor sees the real message, and the README's examples never text a stranger | The bank's own origination identity, delivery receipts recorded without the number, and per-prefix caps |
 | No delivery events logged | They carry the destination number ([BR-19](domain-rules.md#br-19)), so `SENT` means only that AWS accepted the message | Receipts matched on `provider_message_id`, as under [A real SMS provider](#a-real-sms-provider) |
 | WAF allows 10 booking and cancel `POST`s per address in 5 minutes | Each sends a real SMS, and no one signs in | Kept, beside the caps above and CAPTCHA |
-| Deployed by hand, to be torn down on 2026-11-30 | An optional extra for the review window | Deployed by the pipeline, and kept running |
+| Deployed by the pipeline on every push to `main`, to be torn down on 2026-11-30 | An optional extra for the review window, always at the latest commit | Released from a reviewed tag through a staging environment, and kept running |
 
 Next: [SECURITY.md](../SECURITY.md) for the controls in place; [porting.md](porting.md) for the same design on
 another stack.

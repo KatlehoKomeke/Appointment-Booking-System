@@ -3,13 +3,13 @@
 Branch appointment booking for a South African bank: customers choose a branch, a service and a time, and receive
 an SMS confirmation that cannot be lost: simulated locally, and a real SMS through AWS on the hosted demo.
 
-[![ci](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/workflows/ci.yml) [![secret-scan](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/workflows/secret-scan.yml/badge.svg?branch=main)](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/workflows/secret-scan.yml) [![deploy](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/workflows/deploy.yml/badge.svg?branch=main)](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/workflows/deploy.yml)
+[![ci](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/workflows/ci.yml) [![secret-scan](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/workflows/secret-scan.yml/badge.svg?branch=main)](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/workflows/secret-scan.yml)
 
 > **Fynbos Bank is fictional.** This repository is an engineering assessment submitted to Capitec Bank. It is not
 > affiliated with Capitec Bank or any other bank. Every branch, person and phone number in it is made up. Run locally
 > it sends nothing; the hosted demo texts the number you book with, unless it is a demo number, 082 555 0000 to 0199.
 
-![BranchBook at a glance, all built: one Spring Boot jar serves the React app and a REST API that books, looks up and cancels over PostgreSQL 17, texting through a simulated gateway or, on the hosted demo, AWS End User Messaging; code ships through GitHub Actions and OpenID Connect to AWS, where the demo is deployed by hand.](docs/assets/diagrams/system-at-a-glance.svg)
+![BranchBook at a glance, all built: one Spring Boot jar serves the React app and a REST API that books, looks up and cancels over PostgreSQL 17, texting through a simulated gateway or, on the hosted demo, AWS End User Messaging; code ships through GitHub Actions and OpenID Connect to AWS, where the pipeline deploys the demo on every push to main.](docs/assets/diagrams/system-at-a-glance.svg)
 
 ## Status
 
@@ -18,14 +18,14 @@ an SMS confirmation that cannot be lost: simulated locally, and a real SMS throu
 | Stage | Milestones M0 to M6 built: the web app's five-step booking flow, confirmation page, `/manage` and simulated inbox; booking in one transaction that also writes the confirmation SMS; lookup with the reference and the last four digits; a dispatcher that delivers the SMS through a simulated gateway, or through AWS End User Messaging SMS where a deployment asks, with the race proofs; and cancelling and retrying, in the API and the web app, with end-to-end tests in a real browser. M7, the final documentation and the release, is under way. |
 | Design | The whole design, including planned work, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX); its header names the commit it was last checked against. The repository records what is built and wins where the two disagree. |
 | Run locally | `make up`, then open http://localhost:8080 |
-| Hosted demo | https://branchbook.click, in AWS Cape Town (af-south-1) since 2026-10-26, open to anyone with no sign-in, and with the simulated inbox off so no visitor sees another's booking. Any South African mobile may book there: a number outside the demo block 082 555 0000 to 0199 is sent a real SMS through AWS End User Messaging SMS, at most five a day to one number (best effort over a shared route, and only to verified numbers while the AWS account is in the SMS sandbox). Defined in AWS CDK and deployed by the administrator by hand; each booking is deleted within the hour after its appointment ends, or at once when it is cancelled ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md), [infra/README.md](infra/README.md#the-hosted-demo)). |
-| Deployment | Every push to `main` deploys `BranchbookRelease`, a release record in af-south-1 that holds the deployed commit, through OpenID Connect with no stored keys, after the CDK app's own tests pass ([ADR-0007](docs/adr/0007-continuous-deployment-from-main.md), [docs/delivery.md](docs/delivery.md)). The application's CI runs alongside and does not gate it yet. The pipeline does not deploy the hosted demo. |
+| Hosted demo | https://branchbook.click, in AWS Cape Town (af-south-1) since 2026-10-26, open to anyone with no sign-in, and with the simulated inbox off so no visitor sees another's booking. Any South African mobile may book there: a number outside the demo block 082 555 0000 to 0199 is sent a real SMS through AWS End User Messaging SMS, at most five a day to one number (best effort over a shared route, and only to verified numbers while the AWS account is in the SMS sandbox). Defined in AWS CDK and deployed by the pipeline on every push to `main`, first by hand on 2026-10-26; each booking is deleted within the hour after its appointment ends, or at once when it is cancelled ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md), [infra/README.md](infra/README.md#the-hosted-demo)). |
+| Deployment | Every push to `main` runs `ci`. Once its `api`, `web`, `stack` and `infra` jobs pass, its `deploy` job builds the image, deploys the hosted demo's two stacks through OpenID Connect with no stored keys, smoke-tests https://branchbook.click and only then records the commit in `BranchbookRelease`, the release record in af-south-1. A red check means no deployment ([ADR-0007](docs/adr/0007-continuous-deployment-from-main.md), [docs/delivery.md](docs/delivery.md)). |
 
 ### Milestones
 
 | Milestone | Scope | Status |
 |---|---|---|
-| M0 | Scaffold, `make up`, CI, continuous deployment | Built |
+| M0 | Scaffold, `make up`, CI, continuous deployment | Built; since the pipeline took over the hosted demo, `ci` deploys it too |
 | M1 | Schema and named constraints, reference data, public holidays, branch API, ArchUnit rules | Built |
 | M2 | `SlotCalendar`, the availability API, the committed OpenAPI contract | Built |
 | M3 | Booking transaction with idempotency, the PENDING confirmation SMS in the same transaction, lookup with the last four digits and its rate limit | Built |
@@ -33,7 +33,7 @@ an SMS confirmation that cannot be lost: simulated locally, and a real SMS throu
 | M5 | The dispatcher and simulated SMS gateway, delivery status, the simulated inbox, the race and idempotency proofs | Built |
 | M6 | Tier 2 if time allows, UI states and accessibility, web and end-to-end tests, CI completion | Built: cancel, retry, demo data and two metrics in the API and the web app; Playwright in CI at 390 and 1280 px |
 | M7 | Final documentation pass, clean-clone rehearsal, release tag | In progress: the rehearsal passed from a fresh clone; the tag follows |
-| AWS | Hosted demo: the deploy role, budget and release record, and the data and app stacks, deployed by hand on 2026-10-26 | Built |
+| AWS | Hosted demo: the deploy role, budget and release record, and the data and app stacks, first deployed by hand on 2026-10-26 and by the pipeline on every push to `main` since it took over | Built |
 
 ## The full design
 
@@ -92,15 +92,15 @@ reaches a database adapter, or a transaction opened outside the application laye
 
 ## How it is tested and delivered
 
-![From a commit to Cape Town: an opt-in pre-commit hook refuses secret files and runs gitleaks, push protection checks the push, and main, which requires no checks, starts ci, secret-scan, infra (on infra changes) and deploy side by side. deploy does not wait for ci. It passes the aws-demo gate, exchanges an OIDC token at STS, deploys BranchbookRelease through the bootstrap roles and verifies the commit; an administrator deploys BranchbookAccount.](docs/assets/diagrams/delivery-pipeline.svg)
+![From a commit to Cape Town: an opt-in pre-commit hook refuses secret files and runs gitleaks, push protection checks the push, and main, which requires every check, runs ci's api, web, stack and infra jobs side by side. Once all four pass, deploy, on an ARM runner, passes the aws-demo gate, signs in at STS, builds the image and deploys BranchbookData and BranchbookApp through the bootstrap roles, smoke-tests the live address, then records and verifies the commit in BranchbookRelease; an administrator deploys BranchbookAccount by hand.](docs/assets/diagrams/delivery-pipeline.svg)
 
 - **Before a commit:** an opt-in pre-commit hook (`make hooks`) refuses secret-bearing files and runs gitleaks.
-- **On every push to `main`:** `ci` (the API, the web app, and the stack under Docker Compose with a smoke test),
-  `secret-scan` and `deploy` start side by side; `infra` joins when `infra/` changes. Pull requests run `ci`,
-  `secret-scan` and, for `infra/` changes, `infra`.
-- **Deploying:** `deploy` runs the CDK app's tests, signs in through OpenID Connect, deploys `BranchbookRelease` and
-  reads the recorded commit back. The hosted demo is deployed by hand, not by `deploy`.
-- **Not gated yet:** `deploy` does not wait for `ci`, and `main` requires no passing checks (it refuses only force-pushes and deletion) ([known gaps](docs/delivery.md#known-gaps)). Each numbered step in the image is explained in [docs/delivery.md](docs/delivery.md#at-a-glance).
+- **On every push to `main` and every pull request:** `ci` runs `api`, `web`, `stack` (the image under Docker
+  Compose, smoke-tested, with Playwright in a real browser) and `infra` (the CDK app's tests and a synth) side by
+  side, and `secret-scan` scans the full history. `main` requires all five checks to pass before a push or merge.
+- **Deploying:** on a push to `main`, once the four jobs pass, `ci`'s `deploy` job builds the ARM64 image, signs in
+  through OpenID Connect, deploys the hosted demo, smoke-tests https://branchbook.click and only then records the
+  commit, so a red check means no deployment. Each step: [docs/delivery.md](docs/delivery.md#at-a-glance).
 
 ## Technology
 
@@ -230,7 +230,7 @@ infra/                   the AWS CDK app: the deploy role, budget, release recor
 docs/                    architecture, delivery, decision records, domain rules, error codes, the API contract
 docs/assets/diagrams/    the SVG diagrams, their key and their rules
 scripts/                 smoke.sh, demo-409.sh, check-test-refs.sh, major-commits.sh
-.github/                 the workflows ci, secret-scan, infra, deploy and aws-connection-check; dependabot.yml
+.github/                 the workflows ci (checks, then deploys), secret-scan and aws-connection-check; dependabot.yml
 .githooks/ .gitleaks.toml the hooks (make hooks) and the secret-scanning rules they share with CI
 Dockerfile, compose.yaml the image (web build, API build, runtime) and the local stack behind make up
 Makefile                 one entry point for every task

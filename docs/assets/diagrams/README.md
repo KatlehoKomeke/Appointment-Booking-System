@@ -49,20 +49,20 @@ files live in `.github/workflows/`.
 
 | Diagram | Watch paths | Expected to change at | Verified at |
 | --- | --- | --- | --- |
-| system-at-a-glance | the module packages, their controllers and their scheduled jobs; `web/src/`; `api/src/main/resources/application.yml`; `compose.yaml`; `infra/bin/branchbook.ts`; `infra/lib/app-stack.ts` (the task's settings); `infra/cdk.json` | when a module, a background job or the SMS gateway changes | `4d4ba68` |
+| system-at-a-glance | the module packages, their controllers and their scheduled jobs; `web/src/`; `api/src/main/resources/application.yml`; `compose.yaml`; `infra/bin/branchbook.ts`; `infra/lib/app-stack.ts` (the task's settings); `infra/cdk.json` | when a module, a background job, the SMS gateway or the path to AWS changes | `21798b6` |
 | request-flow | `scheduling/`; `catalogue/application/BranchCalendarProvider.java`; `catalogue/infrastructure/`; `booking/infrastructure/JdbcBookedIntervals.java`; `shared/correlation/`; `shared/security/`; `shared/problem/` | when the availability path changes | `85cd726` |
 | module-map | the top-level packages; `ArchitectureTest.java` in `api/src/test/` | when a module or a dependency between modules changes | `85cd726` |
 | booking-transaction | `booking/application/`; `V2__schema.sql` | when the booking transaction's steps change | `85cd726` |
 | confirmation-states | `notification/`; the `notification_messages` table in `V2__schema.sql` and `V6__cancel_deletes_the_booking.sql` | when the outbox, the dispatcher or the daily cap changes | `4d4ba68` |
 | appointment-lifecycle | `booking/domain/AppointmentStatus.java`; `booking/application/CancelAppointmentHandler.java` | when a status or a transition changes | `85cd726` |
 | data-model | `api/src/main/resources/db/migration/`; the writers in `booking/application/` and `notification/application/` | With a new migration | `4d4ba68` |
-| local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; the `Makefile` up and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box) | when a route, a management endpoint or the compose stack changes | `4d4ba68` |
-| delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/bin/branchbook.ts`; the `main` ruleset and the `aws-demo` environment | when `deploy` waits for `ci`; after M6 | `85cd726` |
-| push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured only when the job structure changes | `85cd726` (measured at `c5feafe`) |
-| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/cdk.json` | when a stack changes; when the pipeline deploys the demo | `4d4ba68` |
-| keyless-deploy | `deploy.yml`; `infra/lib/account-stack.ts` | on hardening; after M6 | `85cd726` |
-| access-boundary | `infra/lib/account-stack.ts`; `infra/bin/branchbook.ts`; `deploy.yml`; `aws-connection-check.yml`; the `aws-demo` environment; the bootstrap commands in infra/README.md | on hardening; after M6 | `85cd726` |
-| secret-layers | `.gitignore`; `.githooks/pre-commit`; `.gitleaks.toml`; `secret-scan.yml`; `ci.yml` (job `stack`); `infra/lib/data-stack.ts` and `infra/lib/app-stack.ts` (the generated secrets and the task's secrets); the repository's security settings | when a layer is added or changes | `4d4ba68` |
+| local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; the `Makefile` up and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box) | when a route, a management endpoint or the compose stack changes | `21798b6` |
+| delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/bin/branchbook.ts`; the `main` ruleset and the `aws-demo` environment | when a workflow, a job, a hook or a GitHub setting changes | `21798b6` |
+| push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured after the first run of the pipeline with `deploy` inside `ci` | `85cd726` (measured at `c5feafe`, before the `deploy` job joined `ci`) |
+| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/cdk.json` | when a stack, or who deploys it, changes | `21798b6` |
+| keyless-deploy | `ci.yml` (job `deploy`); `infra/lib/account-stack.ts` | on hardening; when the `deploy` job's steps change | `21798b6` |
+| access-boundary | `infra/lib/account-stack.ts`; `infra/bin/branchbook.ts`; `ci.yml` (job `deploy`); `aws-connection-check.yml`; the `aws-demo` environment; the `main` ruleset; the bootstrap commands in infra/README.md | on hardening; when a guard changes | `21798b6` |
+| secret-layers | `.gitignore`; `.githooks/pre-commit`; `.gitleaks.toml`; `secret-scan.yml`; `ci.yml` (job `stack`); `infra/lib/data-stack.ts` and `infra/lib/app-stack.ts` (the generated secrets and the task's secrets); the repository's security settings | when a layer is added or changes | `21798b6` |
 | diagram key | the rules on this page | only with the visual language | `85cd726` |
 
 The post-commit hook (`make hooks`) prints a reminder after a major commit, as `scripts/major-commits.sh` defines it:
@@ -98,8 +98,9 @@ no commit at all.
 - **Edges:** a thin grey arrow is a flow; the heavier green arrow is the main path, one per diagram; a dashed arrow is
   a planned flow whose label ends with its milestone; a red arrow crossed at its midpoint is refused or not allowed;
   a dotted line is a health check or a note leader. Where two lines cross, the lower one breaks.
-- **Pills:** `reports; blocks nothing` (warn) marks a check that runs but cannot stop anything; `refused` (red) marks a
-  refused outcome.
+- **Pills:** `reports; blocks nothing` (warn) marks a check that runs but cannot stop anything; `cannot block a push`
+  (warn) marks a check that runs after the push and can stop only a merge, because `main` requires it; `refused` (red)
+  marks a refused outcome.
 - **AWS tiles:** a 4 px stripe on the left edge names the service category.
 
 ## Rules
@@ -386,7 +387,7 @@ milestone has built:
 - Update the alt text, the `<desc>`, the numbered list beside the image, and `Verified at` in the header comment and
   the index.
 
-The changes each milestone brings. M3 to M6 have landed; after M6, only delivery-pipeline still draws planned work:
+The changes each milestone brings. Everything below has landed; no diagram draws planned work any more:
 
 | Milestone | Diagrams |
 | --- | --- |
@@ -394,5 +395,5 @@ The changes each milestone brings. M3 to M6 have landed; after M6, only delivery
 | M4 (landed) | system-at-a-glance (the booking screens) |
 | M5 (landed) | module-map, confirmation-states, system-at-a-glance (the dispatcher, the gateway and `notification`), data-model (the notification status line) |
 | Tier 2 (landed in M6) | appointment-lifecycle, system-at-a-glance (cancel), local-runtime (the cancel route) |
-| After M6 | delivery-pipeline, access-boundary, local-runtime (the Fargate task, landed), secret-layers (Secrets Manager, landed) |
+| After M6 (landed) | delivery-pipeline (the pipeline deploys the hosted demo, landed), access-boundary (landed), local-runtime (the Fargate task, landed), secret-layers (Secrets Manager, landed) |
 | A new migration | data-model |

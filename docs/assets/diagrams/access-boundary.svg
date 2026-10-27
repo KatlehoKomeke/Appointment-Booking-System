@@ -1,13 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 792" width="960" height="792" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
   <title id="title">Who can change what in AWS</title>
-  <desc id="desc">Who can change what in AWS. Everything shown is built. Left, the administrator, by hand. Step A: the IAM user branchbook-admin signs in with aws login and runs the CDK app with BRANCHBOOK_ALERT_EMAIL set, so the app includes BranchbookAccount; that switch is enforced by code and workflow. cdk deploy goes through the us-east-1 CDK bootstrap roles, cdk-hnb659fds-*-us-east-1, to the stack BranchbookAccount in us-east-1, which holds the OIDC provider, the budget and the deploy role branchbook-github-deploy. Right, the pipeline, on every push to main: deploy.yml, job deploy, passes four guards in order; aws-connection-check.yml, run by hand, also declares aws-demo. Step 1, environment aws-demo: only branch main and v* tags may use it; enforced by a GitHub setting. Step 2, the trust policy, an exact match (StringEquals): aud must equal sts.amazonaws.com, and sub must name this repository by its ID and the environment aws-demo; enforced by IAM. Step 3, the deploy role: its sessions last at most 1 hour, and its policy has two statements, AssumeCdkBootstrapRolesOnly, which allows sts:AssumeRole on cdk-hnb659fds-*, and ReadReleaseRecordOnly, which allows ssm:GetParameter on /branchbook/release; enforced by IAM. Step 4, the CDK app without BRANCHBOOK_ALERT_EMAIL: deploy.yml never sets it, so the app holds only BranchbookRelease; enforced by code and workflow. Step 5: via the af-south-1 bootstrap roles and CloudFormation, the pipeline deploys BranchbookRelease in af-south-1, the SSM parameter /branchbook/release holding the deployed commit. A red arrow with a cross runs from step 4 to BranchbookAccount: not allowed, because BranchbookAccount is not in the pipeline’s CDK app. Gap, not prevented by IAM today: AssumeCdkBootstrapRolesOnly allows cdk-hnb659fds-*, which also matches the us-east-1 bootstrap roles; the cfn-exec bootstrap role keeps CDK’s default AdministratorAccess, because the documented bootstrap omits --cloudformation-execution-policies; main requires no review, so a workflow pushed to main that set BRANCHBOOK_ALERT_EMAIL could deploy BranchbookAccount; what limits this today is one collaborator, who is an admin, and the aws-demo branch policy. Legend: built, main path, refused or not allowed, gap or caveat; the pill on each guard names what enforces it: IAM, a GitHub setting, or code and workflow.</desc>
+  <desc id="desc">Who can change what in AWS. Everything shown is built. Left, the administrator, by hand. Step A: the IAM user branchbook-admin signs in with aws login and runs the CDK app with BRANCHBOOK_ALERT_EMAIL set, so the app includes BranchbookAccount; that switch is enforced by code and workflow. cdk deploy goes through the us-east-1 CDK bootstrap roles, cdk-hnb659fds-*-us-east-1, to the stack BranchbookAccount in us-east-1, which holds the OIDC provider, the budget and the deploy role branchbook-github-deploy. Right, the pipeline, on every push to main: ci.yml, job deploy, passes four guards in order; aws-connection-check.yml, run by hand, also declares aws-demo. Step 1, environment aws-demo: only branch main and v* tags may use it; enforced by a GitHub setting. Step 2, the trust policy, an exact match (StringEquals): aud must equal sts.amazonaws.com, and sub must name this repository by its ID and the environment aws-demo; enforced by IAM. Step 3, the deploy role: its sessions last at most 1 hour, and its policy has two statements, AssumeCdkBootstrapRolesOnly, which allows sts:AssumeRole on cdk-hnb659fds-*, and ReadReleaseRecordOnly, which allows ssm:GetParameter on /branchbook/release; enforced by IAM. Step 4, the CDK app without BRANCHBOOK_ALERT_EMAIL: ci.yml never sets it, so the app never holds BranchbookAccount; enforced by code and workflow. Step 5: via the af-south-1 bootstrap roles and CloudFormation, the pipeline deploys BranchbookData, BranchbookApp and BranchbookRelease in af-south-1: the hosted demo, then /branchbook/release, the SSM parameter holding the deployed commit. A red arrow with a cross runs from step 4 to BranchbookAccount: not allowed, because BranchbookAccount is not in the pipeline’s CDK app. Gap, not prevented by IAM today: AssumeCdkBootstrapRolesOnly allows cdk-hnb659fds-*, which also matches the us-east-1 bootstrap roles; the cfn-exec bootstrap role keeps CDK’s default AdministratorAccess, because the documented bootstrap omits --cloudformation-execution-policies; main requires no review, so a workflow pushed to main that set BRANCHBOOK_ALERT_EMAIL could deploy BranchbookAccount; what limits this today is one collaborator, who is an admin, and the aws-demo branch policy. Legend: built, main path, refused or not allowed, gap or caveat; the pill on each guard names what enforces it: IAM, a GitHub setting, or code and workflow.</desc>
   <!--
     Diagram id: access-boundary
     Shown in: infra/README.md (Who can change what in AWS)
     Sources: infra/bin/branchbook.ts (BRANCHBOOK_ALERT_EMAIL switch, stacks and Regions);
       infra/lib/account-stack.ts (OIDC provider, trust policy, AssumeCdkBootstrapRolesOnly, ReadReleaseRecordOnly,
       1 h sessions, budget); infra/lib/release-stack.ts (/branchbook/release); infra/test/account-stack.test.ts;
-      .github/workflows/deploy.yml (job deploy, environment aws-demo, never sets BRANCHBOOK_ALERT_EMAIL);
+      .github/workflows/ci.yml (job deploy, environment aws-demo, never sets BRANCHBOOK_ALERT_EMAIL, deploys
+      BranchbookData, BranchbookApp and BranchbookRelease);
       .github/workflows/aws-connection-check.yml (also declares aws-demo); infra/README.md (BranchbookAccount
       deployed by an administrator by hand, branchbook-admin, aws login, the documented cdk bootstrap, which omits
       cloudformation-execution-policies);
@@ -19,7 +20,7 @@
         gh api repos/KatlehoKomeke/Appointment-Booking-System/branches/main/protection -q '.url'   (404: no classic rule; the ruleset applies)
         gh api repos/KatlehoKomeke/Appointment-Booking-System/rulesets -q 'length'      (1: Protect main)
         gh api repos/KatlehoKomeke/Appointment-Booking-System/collaborators -q '[.[] | .permissions.admin]'
-    Verified at 85cd726 (2026-10-26)
+    Verified at 21798b6 (2026-10-27)
     Conventions: docs/assets/diagrams/README.md
     Planned elements carry class="planned" data-milestone. This diagram has none: everything shown is built.
   -->
@@ -102,10 +103,10 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
   </g>
   <g id="track-pipeline">
     <text class="g" x="376" y="36">Pipeline · every push to main</text>
-    <g id="file-deploy-yml">
+    <g id="file-ci-yml">
       <path class="box" d="M384.5,48.5 H925.5 L935.5,58.5 V100.5 A8,8 0 0 1 927.5,108.5 H384.5 A8,8 0 0 1 376.5,100.5 V56.5 A8,8 0 0 1 384.5,48.5 Z"/>
       <path class="box" d="M925.5,48.5 V58.5 H935.5 Z"/>
-      <text class="s" x="388" y="74"><tspan class="t mono">deploy.yml</tspan> · job <tspan class="t mono">deploy</tspan></text>
+      <text class="s" x="388" y="74"><tspan class="t mono">ci.yml</tspan> · job <tspan class="t mono">deploy</tspan>, after api, web, stack and infra pass</text>
       <text class="s" x="388" y="92"><tspan class="s mono">aws-connection-check.yml</tspan> (manual) also declares <tspan class="s mono">aws-demo</tspan></text>
     </g>
     <g id="gate-environment-aws-demo">
@@ -146,7 +147,7 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
       <text class="badge-t" x="400" y="425" text-anchor="middle">4</text>
       <text class="t" x="420" y="425">CDK app without</text>
       <text class="t mono" x="420" y="444">BRANCHBOOK_ALERT_EMAIL</text>
-      <text class="s" x="420" y="462"><tspan class="s mono">deploy.yml</tspan> never sets it, so the app holds only <tspan class="s mono">BranchbookRelease</tspan></text>
+      <text class="s" x="420" y="462"><tspan class="s mono">ci.yml</tspan> never sets it, so the app never holds <tspan class="s mono">BranchbookAccount</tspan></text>
       <rect class="pill-warn" x="780" y="411" width="144" height="20" rx="10"/>
       <text class="pill-warn-t" x="852" y="425" text-anchor="middle">code and workflow</text>
     </g>
@@ -155,8 +156,8 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
       <path class="box-ok" d="M377,545.5 H935"/>
       <circle class="badge" cx="400" cy="531" r="10"/>
       <text class="badge-t" x="400" y="535" text-anchor="middle">5</text>
-      <text class="s" x="420" y="536"><tspan class="t mono">BranchbookRelease</tspan> · af-south-1</text>
-      <text class="s" x="420" y="567"><tspan class="s mono">/branchbook/release</tspan> · SSM parameter holding the deployed commit</text>
+      <text class="s" x="420" y="536"><tspan class="t mono">BranchbookData</tspan>, <tspan class="t mono">BranchbookApp</tspan> and <tspan class="t mono">BranchbookRelease</tspan> · af-south-1</text>
+      <text class="s" x="420" y="567">the hosted demo, then <tspan class="s mono">/branchbook/release</tspan>, the deployed commit</text>
     </g>
     <g id="edges-pipeline">
       <path class="edge-acc" d="M656,109 V129" marker-end="url(#ah-acc)"/>

@@ -13,12 +13,14 @@ Nothing installs the hooks for you: until you run `make hooks`, your commits are
 
 ## Workflow
 
-- **How changes land today.** This is a one-person repository: commits are pushed straight to `main`, with
-  `make test` run first, and each push runs the workflows described in [docs/delivery.md](docs/delivery.md). `main`
-  refuses force-pushes and deletion but requires no passing checks, so a red check blocks nothing; [docs/delivery.md](docs/delivery.md#known-gaps) states
-  that gap and what would close it.
-- **With a team.** `main` would be protected, requiring the `api`, `web` and `stack` jobs of `ci` and the `gitleaks`
-  job of `secret-scan`, one approving review, linear history, and a CODEOWNERS file covering `.github/` and `infra/`.
+- **How changes land today.** This is a one-person repository: each change arrives on a short-lived branch and is
+  merged through a pull request, with `make test` run first, and each push runs the workflows described in
+  [docs/delivery.md](docs/delivery.md). `main` refuses force-pushes and deletion, and requires the `api`, `web`,
+  `stack` and `infra` jobs of `ci` and the `gitleaks` job of `secret-scan` to pass before a push or merge, so a red
+  check keeps a change off `main`; the checks are not strict, and no review is required
+  ([docs/delivery.md](docs/delivery.md#known-gaps)).
+- **With a team.** `main` would also require one approving review, strict checks, linear history, and a CODEOWNERS
+  file covering `.github/` and `infra/`.
   Work would arrive on `feat/<topic>`, `fix/<topic>`, `docs/<topic>` or `chore/<topic>` branches, merged through a
   pull request that uses [.github/pull_request_template.md](.github/pull_request_template.md): intent, proof, risk and
   what to review closely.
@@ -27,7 +29,8 @@ Nothing installs the hooks for you: until you run `make hooks`, your commits are
   convention. Keep every commit buildable on its own: CI builds only the head of each push, so run `make test` before
   pushing. History is never squashed into one commit, and never contains "wip" commits.
 - **Releases.** A `vX.Y.Z` release tag is planned for M7 ([Milestones](README.md#milestones)). No workflow deploys
-  on a tag push; the `aws-demo` environment admits `v*` tags, so `deploy` can be started by hand from one.
+  on a tag push. `ci` can be started by hand from a `v*` tag, and because `aws-demo` admits `v*` tags its `deploy`
+  job would then deploy that tag, until the next push to `main` ([docs/delivery.md](docs/delivery.md#known-gaps)).
 
 ## Documentation standards
 
