@@ -72,14 +72,14 @@ describe('DataStack', () => {
 });
 
 describe('AppStack', () => {
-  test('runs one ARM64 Fargate task of 0.5 vCPU and 1 GB', () => {
+  test('runs two ARM64 Fargate tasks of 0.5 vCPU and 1 GB, so one can fail or be replaced', () => {
     app.hasResourceProperties('AWS::ECS::TaskDefinition', {
       Cpu: '512',
       Memory: '1024',
       RuntimePlatform: { CpuArchitecture: 'ARM64', OperatingSystemFamily: 'LINUX' },
     });
     app.hasResourceProperties('AWS::ECS::Service', {
-      DesiredCount: 1,
+      DesiredCount: 2,
       DeploymentConfiguration: Match.objectLike({ DeploymentCircuitBreaker: { Enable: true, Rollback: true } }),
     });
   });

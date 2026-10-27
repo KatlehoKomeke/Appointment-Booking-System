@@ -78,9 +78,10 @@ export interface AppStackProps extends StackProps {
  *    sign-in: anyone with the address can try the demo. It texts the confirmation for real, to South African numbers
  *    only, at most five a day to one number, and deletes each booking once its appointment is over.
  * 3. The load balancer ends HTTPS with an ACM certificate, redirects plain HTTP to it, and health-checks `/readyz`.
- * 4. One ARM64 Fargate task (0.5 vCPU, 1 GB) serves the request on port 8080. It accepts traffic only from the load
- *    balancer, and runs in a public subnet so it reaches ECR, Secrets Manager and AWS End User Messaging without a
- *    NAT gateway. It may send SMS through the stack's protect configuration and nothing else.
+ * 4. One of two ARM64 Fargate tasks (0.5 vCPU, 1 GB each), spread across the two zones, serves the request on port
+ *    8080. Each accepts traffic only from the load balancer, and runs in a public subnet so it reaches ECR, Secrets
+ *    Manager and AWS End User Messaging without a NAT gateway. It may send SMS through the stack's protect
+ *    configuration and nothing else.
  * 5. The task reaches RDS on port 5432 over TLS, directly, with no RDS Proxy; the database accepts only the task.
  *
  * The image is built from the repository's Dockerfile for ARM64 when the stack is deployed. Application logs are
@@ -217,7 +218,10 @@ export class AppStack extends Stack {
     const service = new ecs.FargateService(this, 'Service', {
       cluster,
       taskDefinition: task,
-      desiredCount: 1,
+      // Two tasks, which ECS spreads across the two zones, so one can fail or be replaced while the other serves.
+      // Nothing depends on a single task: the lookup counts (V8), the dispatcher's claims (FOR UPDATE SKIP LOCKED)
+      // and the daily cap's ledger all live in PostgreSQL, and the hourly jobs delete only what is due.
+      desiredCount: 2,
       assignPublicIp: true,
       vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
       securityGroups: [taskSecurityGroup],
