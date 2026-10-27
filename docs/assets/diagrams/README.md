@@ -26,10 +26,10 @@ The rows run in reading order: the system, the application, the local stack, del
 | --- | --- | --- | --- |
 | [system-at-a-glance](system-at-a-glance.svg) | SVG | What BranchBook is, what runs inside it, which parts exist today, and how code reaches AWS | [README.md](../../../README.md) (hero); [architecture.md, section 2](../../architecture.md#2-system-context-and-containers) |
 | request-flow | Mermaid | What code runs, in what order, for a real request today | [architecture.md, section 2.1](../../architecture.md#21-one-request-through-the-jar) |
-| module-map | Mermaid | Which modules exist, which depend on which today, and which dependencies are planned | [architecture.md, section 3](../../architecture.md#3-modules-and-the-dependency-rule) |
-| booking-transaction | Mermaid | In what order a booking will take its locks and write its rows, and which part already exists | [architecture.md, section 4](../../architecture.md#4-the-booking-transaction) |
-| confirmation-states | Mermaid | Which states a confirmation message can be in, and how it moves between them | [architecture.md, section 5](../../architecture.md#5-the-confirmation-sms) |
-| appointment-lifecycle | Mermaid | Which states an appointment can take, and which transitions the API will expose | [architecture.md, section 6](../../architecture.md#6-appointment-lifecycle) |
+| module-map | Mermaid | Which modules exist, and which depend on which | [architecture.md, section 3](../../architecture.md#3-modules-and-the-dependency-rule) |
+| booking-transaction | Mermaid | In what order a booking takes its locks and writes its rows | [architecture.md, section 4](../../architecture.md#4-the-booking-transaction) |
+| confirmation-states | Mermaid | Which states a confirmation or cancellation SMS can be in, and how it moves between them | [architecture.md, section 5](../../architecture.md#5-the-confirmation-sms) |
+| appointment-lifecycle | Mermaid | Which states an appointment can take, and which transition the API exposes | [architecture.md, section 6](../../architecture.md#6-appointment-lifecycle) |
 | [data-model](data-model.svg) | SVG | Which tables exist, which module owns each, how they relate, and what the database itself guarantees | [architecture.md, section 7](../../architecture.md#7-data-model) |
 | [local-runtime](local-runtime.svg) | SVG | What `make up` builds and starts, how it knows the stack is ready, and where else the same image runs | [architecture.md, section 10.1](../../architecture.md#101-locally-the-image-and-the-stack) |
 | [delivery-pipeline](delivery-pipeline.svg) | SVG | What happens between `git commit` and AWS: which checks run where, which of them block, what deploys, and where the gaps are | [README.md](../../../README.md#how-it-is-tested-and-delivered); [delivery.md](../../delivery.md#at-a-glance); [architecture.md, section 10.2](../../architecture.md#102-from-a-commit-to-aws) |
@@ -49,20 +49,20 @@ files live in `.github/workflows/`.
 
 | Diagram | Watch paths | Expected to change at | Verified at |
 | --- | --- | --- | --- |
-| system-at-a-glance | the module packages, their controllers and their scheduled jobs; `web/src/`; `api/src/main/resources/application.yml`; `compose.yaml`; `infra/bin/branchbook.ts`; `infra/lib/app-stack.ts` (the task's settings); `infra/cdk.json` | when a module, a background job or the SMS gateway changes | `feat/real-sms` |
+| system-at-a-glance | the module packages, their controllers and their scheduled jobs; `web/src/`; `api/src/main/resources/application.yml`; `compose.yaml`; `infra/bin/branchbook.ts`; `infra/lib/app-stack.ts` (the task's settings); `infra/cdk.json` | when a module, a background job or the SMS gateway changes | `4d4ba68` |
 | request-flow | `scheduling/`; `catalogue/application/BranchCalendarProvider.java`; `catalogue/infrastructure/`; `booking/infrastructure/JdbcBookedIntervals.java`; `shared/correlation/`; `shared/security/`; `shared/problem/` | when the availability path changes | `85cd726` |
-| module-map | the top-level packages; `ArchitectureTest.java` in `api/src/test/` | M3, M5 | `85cd726` |
-| booking-transaction | `booking/application/`; `V2__schema.sql` | M3 | `85cd726` |
-| confirmation-states | `notification/`; the `notification_messages` table in `V2__schema.sql` | M5 | `85cd726` |
-| appointment-lifecycle | `booking/domain/AppointmentStatus.java` | Tier 2 | `85cd726` |
-| data-model | `api/src/main/resources/db/migration/`; the writers in `booking/application/` and `notification/application/` | With a new migration | `3985f40` |
-| local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; the `Makefile` up and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box) | when a route, a management endpoint or the compose stack changes | `feat/real-sms` |
+| module-map | the top-level packages; `ArchitectureTest.java` in `api/src/test/` | when a module or a dependency between modules changes | `85cd726` |
+| booking-transaction | `booking/application/`; `V2__schema.sql` | when the booking transaction's steps change | `85cd726` |
+| confirmation-states | `notification/`; the `notification_messages` table in `V2__schema.sql` and `V6__cancel_deletes_the_booking.sql` | when the outbox, the dispatcher or the daily cap changes | `4d4ba68` |
+| appointment-lifecycle | `booking/domain/AppointmentStatus.java`; `booking/application/CancelAppointmentHandler.java` | when a status or a transition changes | `85cd726` |
+| data-model | `api/src/main/resources/db/migration/`; the writers in `booking/application/` and `notification/application/` | With a new migration | `4d4ba68` |
+| local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; the `Makefile` up and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box) | when a route, a management endpoint or the compose stack changes | `4d4ba68` |
 | delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/bin/branchbook.ts`; the `main` ruleset and the `aws-demo` environment | when `deploy` waits for `ci`; after M6 | `85cd726` |
 | push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured only when the job structure changes | `85cd726` (measured at `c5feafe`) |
-| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/cdk.json` | when a stack changes; when the pipeline deploys the demo | `feat/real-sms` |
+| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/cdk.json` | when a stack changes; when the pipeline deploys the demo | `4d4ba68` |
 | keyless-deploy | `deploy.yml`; `infra/lib/account-stack.ts` | on hardening; after M6 | `85cd726` |
 | access-boundary | `infra/lib/account-stack.ts`; `infra/bin/branchbook.ts`; `deploy.yml`; `aws-connection-check.yml`; the `aws-demo` environment; the bootstrap commands in infra/README.md | on hardening; after M6 | `85cd726` |
-| secret-layers | `.gitignore`; `.githooks/pre-commit`; `.gitleaks.toml`; `secret-scan.yml`; `ci.yml` (job `stack`); the repository's security settings | after M6 | `85cd726` |
+| secret-layers | `.gitignore`; `.githooks/pre-commit`; `.gitleaks.toml`; `secret-scan.yml`; `ci.yml` (job `stack`); `infra/lib/data-stack.ts` and `infra/lib/app-stack.ts` (the generated secrets and the task's secrets); the repository's security settings | when a layer is added or changes | `4d4ba68` |
 | diagram key | the rules on this page | only with the visual language | `85cd726` |
 
 The post-commit hook (`make hooks`) prints a reminder after a major commit, as `scripts/major-commits.sh` defines it:
@@ -77,7 +77,8 @@ no commit at all.
 
 ![Diagram key: solid boxes are built, a warn tag marks partly built, dashed boxes with a milestone tag are planned; a green line is the main path, a dashed line a planned flow, a red crossed line a refused path, a dotted line a health check; coloured stripes mark AWS service categories.](_template.svg)
 
-- **Built:** a solid outline, a surface fill and ink text. An optional pill reads `built · M1`, `built · M2` or `built · M3`.
+- **Built:** a solid outline, a surface fill and ink text. An optional pill names the milestone or who deploys it, such
+  as `built · M3` or `built · by hand`.
 - **Built, highlighted:** a green fill and outline (`box-ok`), on one node per diagram at most.
 - **Partly built:** a solid box with the warn pill `partly built`. Its missing part is a dashed chip that names its
   milestone, such as `booking screens · planned · M4`.
@@ -106,7 +107,8 @@ no commit at all.
 ### Canvas and files
 
 - One file per diagram: `docs/assets/diagrams/<id>.svg`, at most 40 KB.
-- `viewBox="0 0 960 H"` with `width="960"` and `height="H"`. H is a multiple of 8 and at most 800.
+- `viewBox="0 0 960 H"` with `width="960"` and `height="H"`. H is a multiple of 8 and at most 800. The one exception
+  is [data-model.svg](data-model.svg), at 872: its nine tables do not fit in 800.
 - Every file paints its own card: `<rect class="card" x="0.5" y="0.5" width="959" height="H-1" rx="16"/>`. Content
   stays between x 24 and x 936.
 - An 8 px grid with integer coordinates; a 1 px stroke sits on a .5 coordinate so it renders crisp. Padding is 24 px
@@ -384,13 +386,13 @@ milestone has built:
 - Update the alt text, the `<desc>`, the numbered list beside the image, and `Verified at` in the header comment and
   the index.
 
-The changes expected so far, and the one milestone that has landed:
+The changes each milestone brings. M3 to M6 have landed; after M6, only delivery-pipeline still draws planned work:
 
 | Milestone | Diagrams |
 | --- | --- |
 | M3 (landed) | module-map, booking-transaction; system-at-a-glance (book and look up, `booking` built, `notification` partly built, the booking write, the key purge job); data-model (booking's writes, the PENDING row); local-runtime (the appointment routes) |
-| M4 | system-at-a-glance (the booking screens) |
-| M5 | module-map, confirmation-states, system-at-a-glance (the dispatcher, the gateway and `notification`), data-model (the notification status line) |
-| Tier 2 | appointment-lifecycle, system-at-a-glance (cancel), local-runtime (the cancel route) |
-| After M6 | delivery-pipeline, access-boundary, local-runtime (the Fargate task), secret-layers (Secrets Manager) |
+| M4 (landed) | system-at-a-glance (the booking screens) |
+| M5 (landed) | module-map, confirmation-states, system-at-a-glance (the dispatcher, the gateway and `notification`), data-model (the notification status line) |
+| Tier 2 (landed in M6) | appointment-lifecycle, system-at-a-glance (cancel), local-runtime (the cancel route) |
+| After M6 | delivery-pipeline, access-boundary, local-runtime (the Fargate task, landed), secret-layers (Secrets Manager, landed) |
 | A new migration | data-model |

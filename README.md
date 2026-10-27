@@ -11,8 +11,6 @@ an SMS confirmation that cannot be lost: simulated locally, and a real SMS throu
 
 ![BranchBook at a glance, all built: one Spring Boot jar serves the React app and a REST API that books, looks up and cancels over PostgreSQL 17, texting through a simulated gateway or, on the hosted demo, AWS End User Messaging; code ships through GitHub Actions and OpenID Connect to AWS, where the demo is deployed by hand.](docs/assets/diagrams/system-at-a-glance.svg)
 
-One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Solid parts are built; dashed parts are planned, with their milestone ([key](docs/assets/diagrams/README.md#key)).
-
 ## Status
 
 | Area | Today |
@@ -20,7 +18,7 @@ One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Soli
 | Stage | Milestones M0 to M6 built: the web app's five-step booking flow, confirmation page, `/manage` and simulated inbox; booking in one transaction that also writes the confirmation SMS; lookup with the reference and the last four digits; a dispatcher that delivers the SMS through a simulated gateway, or through AWS End User Messaging SMS where a deployment asks, with the race proofs; and cancelling and retrying, in the API and the web app, with end-to-end tests in a real browser. M7, the final documentation and the release, is under way. |
 | Design | The whole design, including planned work, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX); its header names the commit it was last checked against. The repository records what is built and wins where the two disagree. |
 | Run locally | `make up`, then open http://localhost:8080 |
-| Hosted demo | https://branchbook.click, in AWS Cape Town (af-south-1) since 2026-10-26, open to anyone with no sign-in, and with the simulated inbox off so no visitor sees another's booking. Any South African mobile may book there: a number outside the demo block 082 555 0000 to 0199 is sent a real SMS through AWS End User Messaging SMS, at most five a day to one number (best effort over a shared route, and only to verified numbers while the AWS account is in the SMS sandbox). Defined in AWS CDK and deployed by the administrator by hand; each booking is deleted once its appointment is over ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md), [infra/README.md](infra/README.md#the-hosted-demo)). |
+| Hosted demo | https://branchbook.click, in AWS Cape Town (af-south-1) since 2026-10-26, open to anyone with no sign-in, and with the simulated inbox off so no visitor sees another's booking. Any South African mobile may book there: a number outside the demo block 082 555 0000 to 0199 is sent a real SMS through AWS End User Messaging SMS, at most five a day to one number (best effort over a shared route, and only to verified numbers while the AWS account is in the SMS sandbox). Defined in AWS CDK and deployed by the administrator by hand; each booking is deleted within the hour after its appointment ends, or at once when it is cancelled ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md), [infra/README.md](infra/README.md#the-hosted-demo)). |
 | Deployment | Every push to `main` deploys `BranchbookRelease`, a release record in af-south-1 that holds the deployed commit, through OpenID Connect with no stored keys, after the CDK app's own tests pass ([ADR-0007](docs/adr/0007-continuous-deployment-from-main.md), [docs/delivery.md](docs/delivery.md)). The application's CI runs alongside and does not gate it yet. The pipeline does not deploy the hosted demo. |
 
 ### Milestones
@@ -39,21 +37,16 @@ One Spring Boot jar over PostgreSQL 17, delivered by GitHub Actions to AWS. Soli
 
 ## The full design
 
-<a href="https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX"><picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-page-dark.png">
-  <img src="docs/assets/architecture-page-light.png" width="100%" alt="The BranchBook architecture page: the title, a one-paragraph summary of the design and the brief it answers">
-</picture></a>
+<a href="https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-page-dark.png"><img src="docs/assets/architecture-page-light.png" width="100%" alt="The BranchBook architecture page: the title, a one-paragraph summary of the design and the brief it answers"></picture></a>
 
 **[BranchBook architecture](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX)** holds the whole design, including planned work: each section is marked built, partly built or planned, with every departure from the plan.
 
 ## Reviewing this repository
 
-1. **This page** (2 min): Status, Milestones, the brief map and the guarantees.
-2. **[docs/architecture.md](docs/architecture.md)** (5 min): the system, one real request, the modules, the booking transaction, the schema.
-3. **[docs/delivery.md](docs/delivery.md)** (3 min): from a commit to AWS, what each workflow proves, the known gaps.
-4. **[infra/README.md](infra/README.md)** (3 min): what exists in AWS, how GitHub reaches it without keys, who can change what.
-5. **The code behind the claims** (2 min): [V2__schema.sql](api/src/main/resources/db/migration/V2__schema.sql), [SchemaConstraintIT](api/src/test/java/za/co/fynbos/branchbook/SchemaConstraintIT.java), [SlotCalendar](api/src/main/java/za/co/fynbos/branchbook/scheduling/domain/SlotCalendar.java),
-   [BookAppointmentHandler](api/src/main/java/za/co/fynbos/branchbook/booking/application/BookAppointmentHandler.java), [ArchitectureTest](api/src/test/java/za/co/fynbos/branchbook/ArchitectureTest.java), [account-stack.test.ts](infra/test/account-stack.test.ts).
+**Ten minutes:** [docs/tour.md](docs/tour.md): what it is, how to run it, the six decisions that shape it and what each
+costs, and where to look in the code. **Then:** [docs/architecture.md](docs/architecture.md) walks one request through
+the code and the schema, [docs/delivery.md](docs/delivery.md) follows a commit to AWS, and
+[infra/README.md](infra/README.md) lists what exists in AWS and who can change it.
 
 Every document, with its status: [docs/README.md](docs/README.md). Decisions: [docs/adr](docs/adr/README.md). Policies: [SECURITY.md](SECURITY.md) and [CONTRIBUTING.md](CONTRIBUTING.md). The UI design: [web/README.md](web/README.md#ui-design). To run it: [Getting started](#getting-started).
 
@@ -69,7 +62,7 @@ Every document, with its status: [docs/README.md](docs/README.md). Decisions: [d
 | for customers | No login. A customer opens an appointment with its reference and the last four digits of the mobile number used to book: the read-only `/manage` page, over `GET /api/v1/appointments/{reference}`.<br>**Proof:** [`AppointmentApiIT.getWithWrongLast4Returns404NotForbidden`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven), [`AppointmentApiIT.sixthWrongLast4WithinHourReturns429`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven) |
 | to schedule | The web app's five-step flow (branch, service, date and time, your details, review) books through `POST /api/v1/appointments`. Slots respect trading hours, public holidays, a two-hour lead time, a 30-day horizon and each service's capacity.<br>**Proof:** [`ConcurrentBookingIT.twentyRacersForOneSeatProduceExactlyOne201`](api/src/test/java/za/co/fynbos/branchbook/booking/application/ConcurrentBookingIT.java) (proven), [`SlotCalendarTest.excludesSlotsStartingWithinTwoHoursOfNow`](api/src/test/java/za/co/fynbos/branchbook/scheduling/domain/SlotCalendarTest.java) (proven), [`AppointmentApiIT.postWhenSlotFullReturns409WithThreeAlternatives`](api/src/test/java/za/co/fynbos/branchbook/booking/api/AppointmentApiIT.java) (proven) |
 | branch appointments | Six fictional branches in six provinces, each with its own trading hours and per-service capacity, seeded by Flyway ([Reference data](#reference-data)).<br>**Proof:** [`SlotCalendarTest.saturdayFortyFiveMinuteLastStartIs1145`](api/src/test/java/za/co/fynbos/branchbook/scheduling/domain/SlotCalendarTest.java) (proven), [`PublicHolidayCalendarTest.sundayHoliday9Aug2026IsObservedOnMonday10Aug`](api/src/test/java/za/co/fynbos/branchbook/catalogue/domain/PublicHolidayCalendarTest.java) (proven) |
-| communicates a simulated confirmation | The booking transaction writes the SMS to an outbox table, so it commits with the booking or not at all. A dispatcher delivers it through a simulated gateway, retrying after 2, 4, 8 and 16 seconds, and the confirmation page shows its status live (M4). Where `BRANCHBOOK_SMS_GATEWAY=aws`, as on the hosted demo, every number outside the published demo block is sent a real SMS through AWS End User Messaging SMS in af-south-1; the block stays simulated.<br>**Proof:** [`ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically`](api/src/test/java/za/co/fynbos/branchbook/notification/application/ConfirmationOutboxIT.java) (proven), [`NotificationDispatcherIT.retriesWithBackoffThenMarksFailedAfterFiveAttempts`](api/src/test/java/za/co/fynbos/branchbook/notification/application/NotificationDispatcherIT.java) (proven), [`BookAppointmentIT.failureAfterTheSmsIsWrittenRollsTheSmsBackWithTheBooking`](api/src/test/java/za/co/fynbos/branchbook/booking/application/BookAppointmentIT.java) (proven), [`RoutingSmsGatewayTest.theDemoBlockIsAlwaysSimulated`](api/src/test/java/za/co/fynbos/branchbook/notification/infrastructure/RoutingSmsGatewayTest.java) (proven) |
+| communicates a simulated confirmation | The booking transaction writes the SMS to an outbox table, so it commits with the booking or not at all. A dispatcher delivers it through a simulated gateway, retrying after 2, 4, 8 and 16 seconds a failure that sending again may cure, or failing at once one it cannot, and the confirmation page shows its status live (M4). Where `BRANCHBOOK_SMS_GATEWAY=aws`, as on the hosted demo, every number outside the published demo block is sent a real SMS through AWS End User Messaging SMS in af-south-1; the block stays simulated.<br>**Proof:** [`ConfirmationOutboxIT.bookingAndPendingMessagesCommitAtomically`](api/src/test/java/za/co/fynbos/branchbook/notification/application/ConfirmationOutboxIT.java) (proven), [`NotificationDispatcherIT.retriesWithBackoffThenMarksFailedAfterFiveAttempts`](api/src/test/java/za/co/fynbos/branchbook/notification/application/NotificationDispatcherIT.java) (proven), [`BookAppointmentIT.failureAfterTheSmsIsWrittenRollsTheSmsBackWithTheBooking`](api/src/test/java/za/co/fynbos/branchbook/booking/application/BookAppointmentIT.java) (proven), [`RoutingSmsGatewayTest.theDemoBlockIsAlwaysSimulated`](api/src/test/java/za/co/fynbos/branchbook/notification/infrastructure/RoutingSmsGatewayTest.java) (proven) |
 | front end and back end | A React 19 app served by one Spring Boot jar, over PostgreSQL 17; `make up` starts both.<br>**Proof:** `book-appointment.spec.ts` (proven), which CI's `stack` job runs in a real browser against the image and PostgreSQL, between two runs of [smoke.sh](scripts/smoke.sh) |
 
 ## What makes it correct
@@ -78,7 +71,7 @@ Every document, with its status: [docs/README.md](docs/README.md). Decisions: [d
   (BR-8), and booking takes the lowest free seat under a row lock in a fixed lock order (BR-7, BR-22): twenty racers
   for one seat give exactly one booking, and `make demo-409` shows it ([ADR-0002](docs/adr/0002-double-booking-prevention.md)).
 - **Retries are safe.** *Built (BR-12).* An `Idempotency-Key` replays the same booking for 24 hours, even for two
-  retries that arrive together, and the same key with other details is refused.
+  retries that arrive together, and the same key is refused with other details or after its booking is cancelled.
 - **The confirmation cannot be lost.** *Built.* The SMS commits with the booking or not at all (BR-16), and a
   dispatcher delivers it with retries, one transaction per message (BR-17, [ADR-0003](docs/adr/0003-transactional-outbox-for-confirmations.md)).
 - **A reference cannot be guessed or fished for.** *Built (BR-11, BR-13).* Eight random characters without
@@ -88,8 +81,7 @@ Every document, with its status: [docs/README.md](docs/README.md). Decisions: [d
   numbers (BR-19), and times stored in UTC, sent with +02:00 and shown in SAST on any device (BR-20).
 - **It collects as little as possible.** *Built.* A name and a mobile number, kept out of the booking's URL,
   and a test checks that neither reaches the application's log or PostgreSQL's (BR-19, [SECURITY.md](SECURITY.md)).
-
-Every rule, with its status and the test that proves it, is in [docs/domain-rules.md](docs/domain-rules.md).
+  Every rule, with its status and the test that proves it, is in [docs/domain-rules.md](docs/domain-rules.md).
 
 ## How it is built
 
@@ -123,7 +115,7 @@ reaches a database adapter, or a transaction opened outside the application laye
 
 ### Versions
 
-Current at M6. `api/pom.xml`, the lockfiles, `Dockerfile` and `compose.yaml` are authoritative; Dependabot proposes updates weekly.
+Current at M7. `api/pom.xml`, the lockfiles, `Dockerfile` and `compose.yaml` are authoritative; Dependabot proposes updates weekly.
 
 <details><summary>Every pinned version</summary>
 
@@ -132,7 +124,7 @@ Current at M6. `api/pom.xml`, the lockfiles, `Dockerfile` and `compose.yaml` are
 | Java | 25 LTS; Eclipse Temurin 25.0.4.1 in the image | `api/pom.xml`, `Dockerfile` |
 | Spring Boot | 4.1.1, with Spring Framework 7.0.9 and Spring Security 7.1.1 | `api/pom.xml` |
 | Hibernate ORM, Flyway | 7.4.5, 12.4.0 | managed by Spring Boot |
-| libphonenumber | 9.0.41, to tell a mobile number from a landline | `api/pom.xml` |
+| libphonenumber, AWS SDK for Java v2 | 9.0.41, to tell a mobile number from a landline; 2.55.15, the `software.amazon.awssdk` BOM, for the real SMS | `api/pom.xml` |
 | Caffeine | 3.2.4, the bounded cache behind the lookup limit | managed by Spring Boot |
 | PostgreSQL | 17.11; JDBC driver 42.7.13 | `compose.yaml`, `TestcontainersConfiguration` |
 | JUnit, Testcontainers | 6.0.3, 2.0.5 | managed by Spring Boot |
@@ -158,7 +150,7 @@ The plan is about 35 focused hours, split into tiers so that a short week still 
 |---|---|
 | Tier 1: never cut | Booking with every proof, lookup and the confirmation page, the read-only `/manage` lookup, the SMS outbox and dispatcher, the simulated inbox, the lookup rate limit, race tests, smoke scripts, the main end-to-end test |
 | Tier 2: if time allows | Cancellation, retrying a failed message from the inbox, demo data, custom metrics. Built in M6, in the API and the web app |
-| Tier 3: cut by default | The email channel and a README animation. Built after all: a per-recipient SMS cap (five a day) and more end-to-end tests |
+| Tier 3: cut by default | The email channel and a README animation. Built after all: a per-recipient SMS cap (five a day on the hosted demo, off by default) and more end-to-end tests |
 
 Deliberately out of scope, each with its reason in the ADRs: customer login, staff screens, rescheduling, reminders,
 an email provider, a message broker, microservices and Kubernetes manifests. A real SMS provider is now in (ADR-0003).
@@ -177,7 +169,7 @@ make smoke    # check the running app over HTTP
 make down     # stop everything and delete the local database
 ```
 
-`make up` prints the address: http://localhost:8080 unless you change it. If port 8080 is taken, choose another
+`make up` prints the address: http://127.0.0.1:8080 unless you change it. If port 8080 is taken, choose another
 with `APP_PORT=18080 make up`, or in a `.env` file copied from [.env.example](.env.example). Without make, run
 `docker compose up --build --wait`.
 
@@ -238,10 +230,8 @@ infra/                   the AWS CDK app: the deploy role, budget, release recor
 docs/                    architecture, delivery, decision records, domain rules, error codes, the API contract
 docs/assets/diagrams/    the SVG diagrams, their key and their rules
 scripts/                 smoke.sh, demo-409.sh, check-test-refs.sh, major-commits.sh
-.github/workflows/       ci, secret-scan, infra, deploy, aws-connection-check
-.github/dependabot.yml   weekly dependency updates
-.githooks/               pre-commit and post-commit, enabled by make hooks
-.gitleaks.toml           the secret-scanning rules shared by the hook and the workflow
+.github/                 the workflows ci, secret-scan, infra, deploy and aws-connection-check; dependabot.yml
+.githooks/ .gitleaks.toml the hooks (make hooks) and the secret-scanning rules they share with CI
 Dockerfile, compose.yaml the image (web build, API build, runtime) and the local stack behind make up
 Makefile                 one entry point for every task
 ```
@@ -290,10 +280,20 @@ numbers, texts South Africa only and deletes each booking once it is over. Detai
 
 ## AI assistance
 
-I used an AI assistant (Claude, by Anthropic) for research, for design review and for drafting documentation. Every
-decision is recorded with its reasoning in [docs/adr](docs/adr/README.md). Nothing is committed that I have not
-reviewed and cannot explain. The final version of this section will give concrete examples of suggestions I
-accepted and rejected.
+I built BranchBook with an AI coding assistant, Claude (Anthropic), working in Claude Code. It drafted most of the
+code, tests and documentation to my direction; I set the scope, made the design decisions, recorded with their
+reasoning in [docs/adr](docs/adr/README.md), and reviewed every change before it merged. Every change passes the same
+gates, whoever wrote it: tests in two time zones, a real browser under the strict CSP, and the secret scan.
+
+- **Accepted:** registering a short domain, `branchbook.click`, rather than loosening the rule that keeps the
+  confirmation SMS to one segment (BR-18) to fit a longer CloudFront address.
+- **Rejected:** deleting each hosted booking 48 hours after it was made, whether or not its appointment had passed. A
+  booking is now kept until its appointment is over, then deleted within the hour, and a cancelled one is deleted at
+  once. Also rejected: a sign-in in front of the hosted demo, which would have stopped every visitor at a login screen.
+
+The gates catch what neither of us saw. The first real-browser pass logged `CSP-VIOLATION script-src eval` on every
+page with a form: zod 4 probing for `new Function` under the strict policy. Parsing without compiling fixed it
+(3985f40).
 
 ## Licence
 

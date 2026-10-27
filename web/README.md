@@ -1,15 +1,16 @@
 # BranchBook web app
 
-The React app customers use to book and look up branch appointments, and to cancel them if Tier 2 is built
-([Scope](../README.md#scope)). In production it is not deployed on
+The React app customers use to book and look up branch appointments, and to cancel them (Tier 2,
+[Scope](../README.md#scope)). In production it is not deployed on
 its own: the Dockerfile builds it and places the output inside the Spring Boot jar, which serves the app and the API
 from one origin ([docs/architecture.md, section 2](../docs/architecture.md#2-system-context-and-containers)).
 
 **Status (M6):** built to the [UI design](#ui-design): the five booking steps, the confirmation page with the SMS's
 live delivery status, `/manage` and the simulated inbox, with the landing page, the privacy notice, a not-found page
-and an error page. Each page but the landing page loads when it is first opened, and the confirmation page offers to
-book the same service again. From Tier 2, the appointment page cancels an appointment until it starts, and the inbox
-retries a message the dispatcher gave up on; neither is drawn yet (see the end of the [UI design](#ui-design)).
+and an error page. Each page but the landing, not-found and error pages loads when it is first opened, and the
+confirmation page offers to book the same service again. From Tier 2, the appointment page cancels an appointment
+until it starts, and the inbox retries a message the dispatcher gave up on; neither is drawn yet (see the end of the
+[UI design](#ui-design)).
 Playwright tests the flow end to end in a real browser ([e2e/](../e2e/README.md)).
 
 ## Stack
@@ -17,8 +18,9 @@ Playwright tests the flow end to end in a real browser ([e2e/](../e2e/README.md)
 React 19 and TypeScript (strict) on Vite, with React Router for the routes, TanStack Query for the API cache and
 polling, and react-hook-form with zod for the forms. Styles are CSS Modules over the design tokens. Vitest with
 Testing Library runs the tests in jsdom against a fake API in MSW, which is a test dependency only, so no service
-worker ships. Each library is pinned to a release at least two weeks old. Exact versions are in
-[package.json](package.json) and the lockfile, and the main ones in the root [README](../README.md#versions).
+worker ships. Each library is pinned to a release at least two weeks old. The ranges are in
+[package.json](package.json), the exact versions in the lockfile, and the main ones in the root
+[README](../README.md#versions).
 
 ## Commands
 
@@ -61,10 +63,10 @@ day.closedReason; // 'CLOSED_DAY' | 'PUBLIC_HOLIDAY' | null
 stable `code` (typed as the union of the codes the contract lists) and the `correlationId`. Screens choose their wording from `code`, never from the problem's `detail`.
 A network failure is not an `ApiProblem`, so a screen can tell "offline" from "refused".
 
-[src/api/queries.ts](src/api/queries.ts) wraps the calls in TanStack Query hooks, and
-[src/api/problemCopy.ts](src/api/problemCopy.ts) holds the customer copy for every code. The confirmation page and
-the inbox poll every 2 s while a message is PENDING. Booking sends an `Idempotency-Key` that survives a refresh and
-changes with the details, and retries a `503 TRY_AGAIN` once, with the same key, after `Retry-After`.
+[src/api/queries.ts](src/api/queries.ts) wraps the calls in TanStack Query hooks, [src/api/inbox.ts](src/api/inbox.ts)
+those of the simulated inbox, and [src/api/problemCopy.ts](src/api/problemCopy.ts) holds the customer copy for every
+code. The confirmation page and the inbox poll every 2 s while a message is PENDING. Booking sends an
+`Idempotency-Key` that survives a refresh and changes with the details, and retries a `503 TRY_AGAIN` once, with the same key, after `Retry-After`.
 
 `schema.d.ts` is generated and committed, never edited by hand; ESLint and Prettier skip it, and `npm run
 check:api` (in CI and `make test`) fails if regenerating it would change anything. After an API change, `make contract` in the repository root refreshes the contract
@@ -101,11 +103,12 @@ web/
     ├── main.tsx       loads the font and the global styles, and mounts the app
     ├── App.tsx        the router and the API cache around routes.tsx
     ├── routes.tsx     every page, inside the shell, with the error page
+    ├── app/           the API cache's settings: when a query retries, how long an answer is reused
     ├── ui/            the design tokens, global styles, the shell and the shared components
     ├── booking/       the five steps at /book: the URL state, session storage, the idempotency key, each step
     ├── pages/         landing, confirmation, manage, inbox, privacy, not found, error
     ├── api/           the typed client, the query hooks and the copy by code; schema.d.ts is generated
-    ├── lib/           SAST formatting, the cellphone parser, safe session storage, zod's settings
+    ├── lib/           SAST formatting, the cellphone parser, safe session storage, shared copy, zod's settings
     └── test/          the fake API (MSW), its fixtures from the seed data, and the render helpers
 ```
 
@@ -220,8 +223,8 @@ adds `step=details`, then `step=review`. The name and number stay in the tab's s
 - **Confirmation.** A real page, not a toast: the reference large with a Copy button, the SMS's delivery status, which
   moves from Sending to Sent by itself within a few seconds, the appointment in the same order as the review step, and
   what to bring. Once the SMS is sent, its text can be read.
-- **Not delivered.** When delivery fails five times and the dispatcher gives up, the page says so calmly: the booking
-  still stands, and the customer keeps the reference.
+- **Not delivered.** When the dispatcher gives up, after five failed attempts or a refusal it cannot cure, the page says
+  so calmly: the booking still stands, and the customer keeps the reference.
 - **Manage.** The reference from the SMS and the last four digits of the cellphone number. A wrong reference and wrong
   digits get the same answer, so the page cannot be used to discover references.
 - **Simulated inbox.** Every message the outbox has produced, newest first, with its status, attempts and last error,
@@ -391,9 +394,9 @@ be undone, with "Yes, cancel it" and "Keep my appointment" (Escape keeps it too)
 the appointment is deleted as it is cancelled: "This appointment was cancelled", "Its details have been deleted." with
 the masked number the cancellation SMS is on its way to, the service, branch, date and time it was for under a
 "Cancelled" badge, when it was cancelled, and the two ways to book again, but no reference, no Cancel button and no
-delivery status, which can no longer be watched (the tab remembers the cancellation without the name, the number or
-the time it was for, so a refresh shows the same page without that time, saying the SMS was sent to the number booked
-with, while any other tab finds nothing); retrying a message (Tier 2), a compact Retry on a failed message in the inbox,
+delivery status, which can no longer be watched (the tab remembers the cancellation and the time it was for, without
+the name or the number, so a refresh shows the same page, saying the SMS was sent to the number booked with, while
+any other tab finds nothing); retrying a message (Tier 2), a compact Retry on a failed message in the inbox,
 named for that message, whose answer is said in a status region in its card; a reference the inbox redacts, shown as
 plain text rather than a link; and, from Tier 1, asking for the last four digits when
 the confirmation page is opened in a new tab; the `/manage` lock after five wrong tries, whose `429` can also carry

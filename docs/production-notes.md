@@ -30,7 +30,7 @@ learning from a `409` that a number has a booking, and blocking someone's lookup
   customer rather than to a reference and four digits.
 - Per-recipient and per-prefix SMS caps, CAPTCHA on booking, premium-rate prefixes blocked, and alerts on SMS spend.
   The per-recipient cap exists: where `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` is above 0 (5 on the hosted demo, off by
-  default), a sixth SMS to one number in 24 hours is written `FAILED` with `RECIPIENT_DAILY_CAP` and never sent
+  default), a sixth SMS to one number in 24 hours is marked `FAILED` with `RECIPIENT_DAILY_CAP` and never sent
   ([architecture.md, section 5](architecture.md#5-the-simulated-confirmation)).
 
 ## A real SMS provider
@@ -86,8 +86,9 @@ gateway. The lookup limit counts wrong tries in memory, for that one instance
 - At least two tasks across two Availability Zones, scaling on load, in private subnets that reach AWS through VPC
   endpoints.
 - What already works with several tasks: the dispatcher claims with `FOR UPDATE SKIP LOCKED`, so two tasks never
-  send the same message, and idempotency keys and seat locks live in PostgreSQL. The hourly key purge deletes only
-  expired keys and the daily holiday check only logs, so running them on every task is harmless.
+  send the same message, and idempotency keys, seat locks and the daily cap's ledger live in PostgreSQL, the ledger
+  under one key from Secrets Manager. The hourly purges of expired keys, ended appointments and day-old ledger rows
+  delete only what is due, and the daily holiday check only logs, so running them on every task is harmless.
 - What has to change: the lookup counts move to a shared store, a PostgreSQL table or a Redis-compatible cache, or
   each task allows five tries of its own. WAF also limits lookups per address, as it limits booking `POST`s today.
 
@@ -135,9 +136,12 @@ tracing and no outbox alarm: the outbox is read through the simulated inbox wher
 ## Retention and POPIA
 
 **Today.** Collection is minimal: a name and a South African mobile number
-([SECURITY.md](../SECURITY.md#personal-information-popia)). The hosted demo deletes each booking once its appointment
-is over (`BRANCHBOOK_RETENTION_ENABLED`); its backups expire after 7
-days, and its logs, which hold no personal data, after 7 days. A local copy keeps its data until `make down`.
+([SECURITY.md](../SECURITY.md#personal-information-popia)). The hosted demo deletes each booking within the hour
+after its appointment ends (`BRANCHBOOK_RETENTION_ENABLED`); its backups expire after 7 days, and its logs, which
+hold no personal data, after 7 days. A cancel deletes the booking at once, in every deployment: only its cancellation
+SMS outlives it, until it is sent or has failed for good, beside an unkeyed hash of the request under its
+`Idempotency-Key` and, where the cap is on, the cap's keyed fingerprints of the number, each for about 24 hours after
+it was written. A local copy keeps its data until `make down`.
 
 **In production:**
 

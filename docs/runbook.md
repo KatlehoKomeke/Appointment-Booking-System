@@ -174,15 +174,17 @@ fail again, by design, and one AWS refused at once fails again at once until its
 A cancel deletes the booking in its own transaction, the moment the customer cancels
 ([BR-14](domain-rules.md#br-14)): the appointment and every confirmation SMS of it, whatever its status. No cancelled
 booking stays in the database, and no cancellation SMS stays once it is final. Two things outlive the booking for a
-while, each with no appointment:
+while, each with no appointment, and a third where the daily cap is on:
 
 - its cancellation SMS, PENDING, which holds the number and the text until the dispatcher sends it or gives up on
-  it, within about 35 seconds while the dispatcher runs, and then deletes it;
+  it, within about 35 seconds while the dispatcher runs, or about 2 seconds where AWS refuses it for good, and then
+  deletes it;
 - its idempotency key, which holds no name or number, only an unkeyed SHA-256 of the request's details, until the
-  hourly key purge removes it 24 hours after the booking, so a retry of that booking is `422 IDEMPOTENCY_KEY_REUSED` rather than a new booking;
+  key expires 24 hours after the booking and the hourly purge removes it, up to about an hour later, so a retry of
+  that booking is `422 IDEMPOTENCY_KEY_REUSED` rather than a new booking;
 - where the daily cap is on, one row in the cap's ledger for each SMS the booking was written, which holds a keyed
-  fingerprint of the number and nothing that names the booking, until the ledger's purge removes it 24 hours after
-  its SMS ([below](#the-daily-caps-ledger)).
+  fingerprint of the number and nothing that names the booking, until the ledger's hourly purge removes it, once it is
+  24 hours old ([below](#the-daily-caps-ledger)).
 
 The log line `cancel.deleted appointmentId=...` marks each cancel. To check that nothing else is left:
 
@@ -246,8 +248,8 @@ after a run this is 0:
 SELECT count(*) FROM sms_recipient_sends WHERE written_at <= now() - interval '24 hours';
 ```
 
-**The key.** With no `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY`, as on the hosted demo today, the application makes a random
-key at each start, and while the cap is on the start-up log says so once, at WARN:
+**The key.** With no `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY`, the application makes a random key at each start, and while
+the cap is on the start-up log says so once, at WARN:
 
 ```text
 Recipient daily cap: branchbook.sms.recipient-cap-key is not set, so the ledger's fingerprints use a random key made at start-up, and every number's count starts again from zero whenever the application restarts.
@@ -255,8 +257,9 @@ Recipient daily cap: branchbook.sms.recipient-cap-key is not set, so the ledger'
 
 The rows from before a restart then match no number, so they stop counting, and the purge removes them within a day.
 To keep counts across restarts, set the variable from a secret store to at least 32 characters, such as the output
-of `openssl rand -base64 48`; a shorter one stops start-up. The key is never logged or printed. Changing it has the
-same effect as a restart: every count starts again.
+of `openssl rand -base64 48`; a shorter one stops start-up. The hosted demo does: its task gets the key from the
+`branchbook/sms-cap-key` secret in AWS Secrets Manager. The key is never logged or printed. Changing it has the same
+effect as a restart: every count starts again.
 
 <a id="did-the-48-hour-purge-run"></a>
 
@@ -350,7 +353,7 @@ it says nothing about a dispatcher that is not running: the SQL count below is t
 |---|---|---|
 | `NaN` | No tick has run since the app started: the dispatcher is switched off, and every confirmation stays PENDING. | Check that `BRANCHBOOK_DISPATCHER_ENABLED` is not `false`, and the SQL count below. |
 | 0, or back to 0 between bursts of bookings | Delivery is keeping up. | Nothing. |
-| A few that clear within 30 seconds | Messages backing off after a refusal (2, 4, 8, 16 seconds). A number ending 0000 does this on purpose, so the demo data's third booking shows here briefly after `make up`. | Nothing; a message refused five times turns FAILED and leaves the count. |
+| A few that clear within 30 seconds | Messages backing off after a refusal (2, 4, 8, 16 seconds). A number ending 0000 does this on purpose, so the demo data's third booking shows here briefly after `make up`. | Nothing; a message refused five times, or once for good, turns FAILED and leaves the count. |
 | Climbing, and never back down | The dispatcher runs but is not keeping up. | Check the log for `outbox.tick_failed` or `outbox.claim_failed`. The SQL below says which messages wait and why. |
 | Frozen, at 0 or any other value, while `appointments_booked_total{outcome="confirmed"}` rises | The dispatcher's thread has stopped after at least one tick, or only the count fails: then the log has `outbox.pending_not_counted` and the gauge keeps its last value. | Compare it with the SQL count below; then as for a climbing count. |
 

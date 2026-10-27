@@ -531,8 +531,11 @@ export function appointment(overrides: Partial<Appointment> = {}): Appointment {
 export const CANCELLED_AT = NOW;
 
 /**
- * An appointment as the API answers once it is cancelled: CANCELLED, no longer cancellable, its confirmation marked
- * FAILED with SUPERSEDED_BY_CANCELLATION unless it was already sent (BR-24), and a cancellation SMS queued, PENDING.
+ * A cancelled appointment: CANCELLED, no longer cancellable, and a cancellation SMS queued, PENDING. The base's
+ * confirmations stay, each marked FAILED with SUPERSEDED_BY_CANCELLATION unless it was already sent (BR-24), as an
+ * appointment cancelled before cancels deleted their bookings, or by hand, still answers. The cancel's own answer
+ * holds only the cancellation SMS, since the cancel deletes the confirmations with the appointment (BR-14); the
+ * cancelled view reads only that SMS, so the extra confirmations change nothing on screen.
  *
  * @param base - the appointment before it was cancelled; by default the demo booking with its SMS still PENDING
  * @param overrides - fields to replace

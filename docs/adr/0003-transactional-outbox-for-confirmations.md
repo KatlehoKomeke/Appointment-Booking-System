@@ -73,10 +73,23 @@ stands, with one change:
   SMS in af-south-1, which the CDK stack allows the task role to call; the block stays simulated, because anyone may
   type it. As the Consequences expected, the provider is one more `MessageGateway` and configuration, built with the
   AWS SDK for Java v2 and the JDK's own HTTP client ([architecture.md, section 5](../architecture.md#5-the-confirmation-sms)).
-- **Refusals are fixed codes.** The SDK does not retry, so the dispatcher's backoff is the only retry policy; a
-  refusal records the exception's type and typed reason, such as `AWS_THROTTLED`, never AWS's message
+- **Refusals are fixed codes.** The SDK does not retry, so the dispatcher's backoff is the only retry policy, and it
+  applies only to a refusal that sending again may cure; a refusal records the exception's type and typed reason,
+  such as `AWS_THROTTLED`, never AWS's message
   ([docs/runbook.md](../runbook.md#what-the-aws-codes-mean)). AWS's `MessageId` is the provider id. Delivery is still
   at least once: a call that times out after AWS took the message is sent again.
 - **`RECIPIENT_DAILY_CAP` is produced.** Where `branchbook.sms.recipient-daily-cap` is above 0, a message past the cap
   for its number in 24 hours is written FAILED with that reason and never sent; the booking or the cancel succeeds
   ([BR-17](../domain-rules.md#br-17), `RecipientDailyCapIT`).
+
+**2026-10-27, a cancel deletes the booking.** A cancel no longer supersedes its booking's unsent confirmation: in one
+transaction it deletes every confirmation of the appointment, writes the cancellation SMS and deletes the appointment,
+so a customer still never receives a confirmation after cancelling. The dispatcher deletes the cancellation SMS once it
+is sent or has failed for good, and marks a confirmation `SUPERSEDED_BY_CANCELLATION` only for an appointment
+cancelled before this change, or by hand ([BR-14](../domain-rules.md#br-14), [BR-24](../domain-rules.md#br-24)).
+
+**2026-10-27, a permanent refusal is not retried.** A refusal the gateway says sending again cannot cure, such as
+AWS's for a number the SMS sandbox has not verified, marks the message `FAILED` with `DELIVERY_FAILED` on that
+attempt, about 2 seconds after the booking rather than after the backoff; a refusal it may cure still backs off 2, 4,
+8 and 16 seconds to a fifth-attempt `FAILED`. Each refusal says which it is, `MessageGateway.Refused`, and the rule is
+recorded in [BR-17](../domain-rules.md#br-17).
