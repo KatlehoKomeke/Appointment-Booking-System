@@ -4,7 +4,9 @@
  * za.co.fynbos.branchbook.booking.application.LookupAppointmentHandler}) and cancelling it ({@link
  * za.co.fynbos.branchbook.booking.application.CancelAppointmentHandler}). Opening and cancelling
  * both prove the reference and the last four digits through one check, counted by the {@link
- * za.co.fynbos.branchbook.booking.application.LookupAttemptLimiter}.
+ * za.co.fynbos.branchbook.booking.application.LookupAttemptLimiter} in {@code lookup_attempts},
+ * through the {@link za.co.fynbos.branchbook.booking.application.LookupAttemptStore} port, so every
+ * instance of the application counts against the same five.
  *
  * <p>The ports to other modules are declared here and implemented there, so dependencies run
  * towards booking: {@link za.co.fynbos.branchbook.booking.application.ConfirmationOutbox} writes

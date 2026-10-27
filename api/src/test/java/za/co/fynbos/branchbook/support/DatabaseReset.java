@@ -6,13 +6,13 @@ import org.junit.jupiter.api.extension.ExtensionContext;
 import org.springframework.context.ApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.junit.jupiter.SpringExtension;
-import za.co.fynbos.branchbook.booking.application.LookupAttemptLimiter;
 
 /**
- * Empties the booking tables, and the daily cap's ledger, before and after each test of a class
- * that books through the API, so no test sees another's appointments or counts another's SMS, and
- * no leftover row reaches a test class that does not use this extension. It also forgets scripted
- * references and lookup counts. The reference data is never touched.
+ * Empties the booking tables, the daily cap's ledger and the lookup limiter's counts, before and
+ * after each test of a class that books through the API, so no test sees another's appointments,
+ * counts another's SMS or inherits another's wrong lookups, and no leftover row reaches a test
+ * class that does not use this extension. It also forgets scripted references. The reference data
+ * is never touched.
  */
 public class DatabaseReset implements BeforeEachCallback, AfterEachCallback {
 
@@ -31,8 +31,8 @@ public class DatabaseReset implements BeforeEachCallback, AfterEachCallback {
     application
         .getBean(JdbcTemplate.class)
         .execute(
-            "TRUNCATE notification_messages, idempotency_keys, appointments, sms_recipient_sends");
+            "TRUNCATE notification_messages, idempotency_keys, appointments, sms_recipient_sends,"
+                + " lookup_attempts");
     application.getBean(ScriptedReferenceGenerator.class).clear();
-    application.getBean(LookupAttemptLimiter.class).reset();
   }
 }

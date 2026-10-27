@@ -25,6 +25,7 @@ import org.mockito.InOrder;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionOperations;
 import za.co.fynbos.branchbook.booking.domain.Appointment;
 import za.co.fynbos.branchbook.booking.domain.AppointmentReference;
 import za.co.fynbos.branchbook.booking.domain.CustomerDetails;
@@ -61,7 +62,9 @@ class CancelAppointmentHandlerTest {
   private final LookupAttemptLimiter limiter =
       new LookupAttemptLimiter(
           new BookingProperties(
-              Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false));
+              Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false),
+          new InMemoryLookupAttemptStore(),
+          TransactionOperations.withoutTransaction());
 
   private final CancelAppointmentHandler handler =
       new CancelAppointmentHandler(

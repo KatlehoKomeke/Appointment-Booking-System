@@ -241,7 +241,8 @@ class SchemaConstraintIT {
                         bookedAppointment().insert(),
                         idempotencyKey().insert(),
                         message().insert(),
-                        recipientSend().insert())));
+                        recipientSend().insert(),
+                        lookupAttempt().insert())));
   }
 
   /**
@@ -268,6 +269,23 @@ class SchemaConstraintIT {
             jdbc.queryForObject(
                 "SELECT to_regclass('ix_notification_messages_recipient') IS NULL", Boolean.class))
         .isTrue();
+  }
+
+  /**
+   * BR-13, V8: the hourly purge of closed lookup windows reads the limiter's table through its
+   * index on {@code closes_at}; the primary key, which each count locks by, is the only other one.
+   */
+  @Test
+  void theLookupAttemptsHaveTheirPurgeIndex() {
+    assertThat(
+            jdbc.queryForList(
+                "SELECT indexname || ' ' || indexdef FROM pg_indexes"
+                    + " WHERE tablename = 'lookup_attempts' ORDER BY indexname",
+                String.class))
+        .satisfiesExactly(
+            closes ->
+                assertThat(closes).startsWith("ix_lookup_attempts_closes ").endsWith("(closes_at)"),
+            pkey -> assertThat(pkey).startsWith("lookup_attempts_pkey ").endsWith("(reference)"));
   }
 
   static Stream<Violation> violations() {
@@ -618,7 +636,46 @@ class SchemaConstraintIT {
         check(
             "sms_recipient_sends_fingerprint_format",
             "a hash cut short",
-            recipientSend().with("recipient_fingerprint", "repeat('a', 63)")));
+            recipientSend().with("recipient_fingerprint", "repeat('a', 63)")),
+        // lookup_attempts
+        new Violation(
+            "lookup_attempts_pkey",
+            UNIQUE,
+            "the same reference twice",
+            lookupAttempt().insert(),
+            lookupAttempt().with("failures", "2").insert()),
+        check(
+            "lookup_attempts_reference_format",
+            "a lower-case reference",
+            lookupAttempt().with("reference", "'apt-7k3m-9q2x'")),
+        check(
+            "lookup_attempts_reference_format",
+            "a letter the alphabet leaves out",
+            lookupAttempt().with("reference", "'APT-7K3M-9Q2O'")),
+        check(
+            "lookup_attempts_window_order",
+            "a window that closes before it opens",
+            lookupAttempt().with("closes_at", "'2026-10-26 07:00Z'")),
+        check(
+            "lookup_attempts_window_order",
+            "a window that closes as it opens",
+            lookupAttempt().with("closes_at", "'2026-10-26 08:00Z'")),
+        check(
+            "lookup_attempts_counts_not_negative",
+            "a negative failure count",
+            lookupAttempt().with("failures", "-1")),
+        check(
+            "lookup_attempts_counts_not_negative",
+            "a negative in-flight count",
+            lookupAttempt().with("in_flight", "-1")),
+        check(
+            "lookup_attempts_lease_after_open",
+            "a lease that ran out before the window opened",
+            lookupAttempt().with("held_until", "'2026-10-26 07:59:30Z'")),
+        check(
+            "lookup_attempts_lease_after_open",
+            "a lease that ran out as the window opened",
+            lookupAttempt().with("held_until", "'2026-10-26 08:00Z'")));
   }
 
   static Stream<Acceptance> acceptances() {
@@ -972,5 +1029,19 @@ class SchemaConstraintIT {
     return Row.of("sms_recipient_sends")
         .column("recipient_fingerprint", "repeat('a', 64)")
         .column("written_at", "'2026-10-26 08:00Z'");
+  }
+
+  /**
+   * One reference's lookup window: one wrong lookup, open from 08:00 to 09:00 UTC, its lease run
+   * out 30 seconds after it opened.
+   */
+  private static Row lookupAttempt() {
+    return Row.of("lookup_attempts")
+        .column("reference", "'APT-EEEE-EEEE'")
+        .column("opens_at", "'2026-10-26 08:00Z'")
+        .column("closes_at", "'2026-10-26 09:00Z'")
+        .column("held_until", "'2026-10-26 08:00:30Z'")
+        .column("failures", "1")
+        .column("in_flight", "0");
   }
 }
