@@ -3,7 +3,8 @@
  *
  * Every hook throws {@link ApiProblem} for an error response and the browser's `TypeError` when the network fails,
  * so a screen can pass `error` straight to `problemMessage`. Queries are cached by {@link queryKeys}; the booking
- * mutation seeds the appointment's cache, so the confirmation page opens without a second request.
+ * mutation seeds the appointment's cache, so the confirmation page opens without a second request, and the cancel
+ * mutation replaces it, so the page shows the cancellation at once.
  *
  * @packageDocumentation
  */
@@ -147,6 +148,18 @@ export function hasPendingNotification(appointment: Appointment | undefined): bo
 }
 
 /**
+ * Tells whether a message was stopped by its appointment's cancellation before it went out, rather than failing:
+ * a confirmation marked FAILED with SUPERSEDED_BY_CANCELLATION (BR-24).
+ *
+ * @param notification - the message
+ */
+export function isSupersededByCancellation(notification: Notification): boolean {
+  return (
+    notification.status === 'FAILED' && notification.failureReason === 'SUPERSEDED_BY_CANCELLATION'
+  );
+}
+
+/**
  * Opens an appointment with its reference and the last four digits of the number it was booked with. Disabled
  * until both are given. A wrong reference and wrong digits both fail with `APPOINTMENT_NOT_FOUND`.
  *
@@ -251,6 +264,72 @@ export function useBookAppointment() {
     onSuccess: ({ appointment }, { request }) => {
       remember(queryClient, appointment, request.customer.mobile);
       void queryClient.invalidateQueries({ queryKey: queryKeys.allAvailability() });
+    },
+  });
+}
+
+/** What {@link useCancelAppointment} sends. */
+export interface CancelAppointmentVariables {
+  /** The reference as the page has it; case and hyphens do not matter. */
+  reference: string;
+  /** The last four digits the appointment was opened with, which the API checks again. */
+  last4: string;
+}
+
+function cancel({ reference, last4 }: CancelAppointmentVariables) {
+  return unwrap(
+    api.POST('/api/v1/appointments/{reference}/cancel', {
+      params: {
+        path: { reference: normaliseReference(reference) },
+        header: { 'X-Mobile-Last4': last4 },
+      },
+    }),
+  );
+}
+
+/**
+ * Tells whether a failed cancel was refused because the appointment has already started.
+ *
+ * @param error - what the cancel threw
+ */
+export function isTooLateToCancel(error: unknown): boolean {
+  return error instanceof ApiProblem && error.code === 'TOO_LATE_TO_CANCEL';
+}
+
+/**
+ * Cancels an appointment, proving the last four digits again as opening it did.
+ *
+ * Cancelling twice is safe: the API answers a repeat with the same 200 and changes nothing. So a `503 TRY_AGAIN` is
+ * retried once, after the server's `Retry-After` capped at five seconds, as booking does. On success the
+ * appointment's cache entry is replaced with the cancelled appointment, under the reference the page asked with and
+ * under its own, so the page shows it at once and polls while the cancellation SMS is PENDING; every cached
+ * availability and the inbox are marked stale, since a seat was freed and a message queued. When the API says it is
+ * too late, the appointment is fetched again, so the page stops offering to cancel it.
+ */
+export function useCancelAppointment() {
+  const queryClient = useQueryClient();
+  return useMutation<Appointment, Error, CancelAppointmentVariables>({
+    mutationFn: async (variables) => {
+      try {
+        return await cancel(variables);
+      } catch (error) {
+        if (error instanceof ApiProblem && error.status === 503) {
+          await new Promise((resolve) => setTimeout(resolve, tryAgainDelayMs(error)));
+          return cancel(variables);
+        }
+        throw error;
+      }
+    },
+    onSuccess: (appointment, { reference, last4 }) => {
+      queryClient.setQueryData(queryKeys.appointment(reference, last4), appointment);
+      queryClient.setQueryData(queryKeys.appointment(appointment.reference, last4), appointment);
+      void queryClient.invalidateQueries({ queryKey: queryKeys.allAvailability() });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.inbox() });
+    },
+    onError: (error, { reference, last4 }) => {
+      if (isTooLateToCancel(error)) {
+        void queryClient.invalidateQueries({ queryKey: queryKeys.appointment(reference, last4) });
+      }
     },
   });
 }

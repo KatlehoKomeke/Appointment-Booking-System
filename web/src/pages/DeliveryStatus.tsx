@@ -1,12 +1,13 @@
 /**
- * Where the confirmation SMS has got to: Sending, Sent at a time, or Not delivered.
+ * Where an SMS has got to: Sending, Sent at a time, Not delivered, or Not sent when a cancellation stopped a
+ * confirmation before it went out, which is not a failure.
  *
  * The status sits in a polite live region that is on the page from the start, so when polling moves it from
  * Sending to Sent, a screen reader says so without the customer looking for it.
  *
  * @packageDocumentation
  */
-import type { Notification } from '../api/queries';
+import { isSupersededByCancellation, type Notification } from '../api/queries';
 import { formatTime } from '../lib/time';
 import { Badge } from '../ui/Badge';
 import { CheckIcon, CrossIcon, PendingIcon } from '../ui/icons';
@@ -34,7 +35,13 @@ export function DeliveryStatus({ notification }: DeliveryStatusProps) {
           {notification.sentAt === null ? 'Sent' : `Sent at ${formatTime(notification.sentAt)}`}
         </Badge>
       )}
-      {notification.status === 'FAILED' && (
+      {isSupersededByCancellation(notification) && (
+        <Badge tone="neutral" size="large">
+          <CrossIcon size={18} />
+          Not sent
+        </Badge>
+      )}
+      {notification.status === 'FAILED' && !isSupersededByCancellation(notification) && (
         <Badge tone="failed" size="large">
           <CrossIcon size={18} />
           Not delivered

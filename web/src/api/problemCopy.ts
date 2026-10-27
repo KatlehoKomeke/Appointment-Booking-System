@@ -119,7 +119,7 @@ const COPY: Record<ProblemCode, (correlationId: string | undefined) => ProblemMe
   INTERNAL_ERROR: somethingWentWrong,
   TRY_AGAIN: () => ({
     title: "We couldn't finish that just now",
-    body: 'Nothing was booked twice. Please try again in a moment.',
+    body: 'Please try again in a moment. Trying again is safe: nothing happens twice.',
   }),
 };
 

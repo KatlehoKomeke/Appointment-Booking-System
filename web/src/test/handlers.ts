@@ -2,9 +2,10 @@
  * A fake of the API for tests, with MSW: every operation in docs/openapi.yaml, serving the seeded data in
  * `fixtures.ts` and answering the way the API does, problems included.
  *
- * Bookings are kept per test (reset by `resetFakeApi`, which `setup.ts` calls after each test): a booking can then
- * be opened with its reference and digits, and a repeat with the same `Idempotency-Key` replays it, as on the
- * server. A test that needs another answer overrides one handler:
+ * Bookings, cancellations and retried messages are kept per test (reset by `resetFakeApi`, which `setup.ts` calls
+ * after each test): a booking can then be opened with its reference and digits, a repeat with the same
+ * `Idempotency-Key` replays it, a cancelled appointment stays cancelled when it is opened again, and a retried message
+ * shows as PENDING in the inbox, as on the server. A test that needs another answer overrides one handler:
  *
  * ```ts
  * server.use(http.post('/api/v1/appointments', () => problemResponse('SLOT_FULL')));
@@ -15,6 +16,7 @@
 import { http, HttpResponse } from 'msw';
 
 import type { Problem } from '../api/client';
+import type { InboxMessage } from '../api/inbox';
 import type { Appointment, BookingRequest } from '../api/queries';
 import { last4, parseSaMobile } from '../lib/mobile';
 import { formatDateShort, formatTime, sastDate } from '../lib/time';
@@ -24,9 +26,11 @@ import {
   branchCodes,
   branchDetail,
   branches,
+  cancelledAppointment,
   confirmationSms,
   inboxMessages,
   LAST_BOOKABLE_DATE,
+  NOW,
   notification,
   problem,
   services,
@@ -84,9 +88,17 @@ interface Booking {
 /** Bookings made in this test, by idempotency key. */
 const bookings = new Map<string, Booking>();
 
-/** Forgets the bookings made in a test. `setup.ts` calls it after each one. */
+/** Appointments cancelled in this test, by reference without hyphens. */
+const cancellations = new Map<string, Appointment>();
+
+/** Inbox messages retried in this test, by id. */
+const retried = new Map<string, InboxMessage>();
+
+/** Forgets the bookings, cancellations and retries made in a test. `setup.ts` calls it after each one. */
 export function resetFakeApi(): void {
   bookings.clear();
+  cancellations.clear();
+  retried.clear();
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -101,6 +113,31 @@ function referenceFor(n: number): string {
   const alphabet = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
   const digits = Array.from({ length: 8 }, (_, i) => alphabet[(n * 7 + i * 13) % alphabet.length]);
   return `APT-${digits.slice(0, 4).join('')}-${digits.slice(4).join('')}`;
+}
+
+// The appointment with this reference and digits, as it is now in this test, or undefined: a wrong reference and
+// wrong digits are the same miss.
+function findAppointment(reference: string, digits: string): Appointment | undefined {
+  const wanted = normalise(reference);
+  const known = [appointment(), ...[...bookings.values()].map((b) => b.appointment)];
+  const found = known.find(
+    (a) => normalise(a.reference) === wanted && a.customer.mobileMasked.endsWith(digits),
+  );
+  return found === undefined ? undefined : (cancellations.get(wanted) ?? found);
+}
+
+// The 400 for a missing or malformed X-Mobile-Last4, or undefined when the digits are well formed.
+function digitsProblem(digits: string) {
+  return /^\d{4}$/.test(digits)
+    ? undefined
+    : problemResponse('VALIDATION_FAILED', {
+        errors: [{ field: 'X-Mobile-Last4', code: 'PATTERN', message: 'must be 4 digits' }],
+      });
+}
+
+// The inbox as it is now in this test, retried messages included.
+function currentInbox(): InboxMessage[] {
+  return inboxMessages.map((m) => retried.get(m.id) ?? m);
 }
 
 function isBookingRequest(body: unknown): body is BookingRequest {
@@ -293,19 +330,36 @@ export const handlers = [
 
   http.get(`${API}/appointments/:reference`, ({ params, request }) => {
     const digits = request.headers.get('X-Mobile-Last4') ?? '';
-    if (!/^\d{4}$/.test(digits)) {
-      return problemResponse('VALIDATION_FAILED', {
-        errors: [{ field: 'X-Mobile-Last4', code: 'PATTERN', message: 'must be 4 digits' }],
-      });
+    const invalid = digitsProblem(digits);
+    if (invalid !== undefined) {
+      return invalid;
     }
-    const reference = normalise(String(params.reference));
-    const known = [appointment(), ...[...bookings.values()].map((b) => b.appointment)];
-    const found = known.find(
-      (a) => normalise(a.reference) === reference && a.customer.mobileMasked.endsWith(digits),
-    );
+    const found = findAppointment(String(params.reference), digits);
     return found === undefined
       ? problemResponse('APPOINTMENT_NOT_FOUND')
       : HttpResponse.json(found);
+  }),
+
+  // BR-14: only before the start; a repeat answers the same 200 and changes nothing.
+  http.post(`${API}/appointments/:reference/cancel`, ({ params, request }) => {
+    const digits = request.headers.get('X-Mobile-Last4') ?? '';
+    const invalid = digitsProblem(digits);
+    if (invalid !== undefined) {
+      return invalid;
+    }
+    const found = findAppointment(String(params.reference), digits);
+    if (found === undefined) {
+      return problemResponse('APPOINTMENT_NOT_FOUND');
+    }
+    if (found.status === 'CANCELLED') {
+      return HttpResponse.json(found);
+    }
+    if (Date.parse(NOW) >= Date.parse(found.startsAt)) {
+      return problemResponse('TOO_LATE_TO_CANCEL');
+    }
+    const cancelled = cancelledAppointment(found);
+    cancellations.set(normalise(found.reference), cancelled);
+    return HttpResponse.json(cancelled);
   }),
 
   http.get(`${API}/messages`, ({ request }) => {
@@ -316,6 +370,35 @@ export const handlers = [
         errors: [{ field: 'limit', code: limit < 1 ? 'MIN' : 'MAX', message: 'must be 1 to 200' }],
       });
     }
-    return HttpResponse.json({ messages: inboxMessages.slice(0, limit) });
+    return HttpResponse.json({ messages: currentInbox().slice(0, limit) });
+  }),
+
+  // A retryable message goes back to PENDING with no attempts, due now; any other comes back unchanged.
+  http.post(`${API}/messages/:id/retry`, ({ params }) => {
+    const id = String(params.id);
+    if (!UUID.test(id)) {
+      return problemResponse('VALIDATION_FAILED', {
+        errors: [{ field: 'id', code: 'PATTERN', message: 'must be a UUID' }],
+      });
+    }
+    const message = currentInbox().find((m) => m.id === id);
+    if (message === undefined) {
+      return problemResponse('MESSAGE_NOT_FOUND');
+    }
+    if (!message.retryable) {
+      return HttpResponse.json(message);
+    }
+    const reset: InboxMessage = {
+      ...message,
+      status: 'PENDING',
+      failureReason: null,
+      retryable: false,
+      attempts: 0,
+      nextAttemptAt: NOW,
+      lastError: null,
+      sentAt: null,
+    };
+    retried.set(id, reset);
+    return HttpResponse.json(reset);
   }),
 ];

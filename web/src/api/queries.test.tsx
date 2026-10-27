@@ -10,7 +10,7 @@ import { notFoundResponse, problemResponse } from '../test/handlers';
 import { createTestQueryClient } from '../test/render';
 import { server } from '../test/server';
 import { ApiProblem } from './client';
-import { useInbox } from './inbox';
+import { type InboxState, isLinkableReference, useInbox, useRetryMessage } from './inbox';
 import {
   type BookingRequest,
   queryKeys,
@@ -19,6 +19,7 @@ import {
   useAvailability,
   useBookAppointment,
   useBranches,
+  useCancelAppointment,
 } from './queries';
 
 const REQUEST: BookingRequest = {
@@ -202,6 +203,103 @@ describe('useBookAppointment', () => {
     expect(wait('2')).toBe(2_000);
     expect(wait('3600')).toBe(5_000);
     expect(wait(undefined)).toBe(2_000);
+  });
+});
+
+describe('useCancelAppointment', () => {
+  it('sends the digits, retries a 503 once after Retry-After, and replaces the cached appointment', async () => {
+    const sent: { reference: string; digits: string | null }[] = [];
+    server.use(
+      // The first try is refused; the retry falls through to the fake API, which cancels it.
+      http.post('*/api/v1/appointments/:reference/cancel', ({ params, request }) => {
+        sent.push({
+          reference: String(params.reference),
+          digits: request.headers.get('X-Mobile-Last4'),
+        });
+        return sent.length === 1
+          ? problemResponse('TRY_AGAIN', {}, { 'Retry-After': '0' })
+          : undefined;
+      }),
+    );
+    const { result, queryClient } = renderWithCache(() => useCancelAppointment());
+    queryClient.setQueryData(queryKeys.appointment('apt-7k3m-9q2x', '0101'), appointment());
+
+    await act(async () => {
+      await result.current.mutateAsync({ reference: 'apt-7k3m-9q2x', last4: '0101' });
+    });
+
+    expect(sent).toEqual([
+      { reference: 'APT-7K3M-9Q2X', digits: '0101' },
+      { reference: 'APT-7K3M-9Q2X', digits: '0101' },
+    ]);
+    const cached = queryClient.getQueryData<ReturnType<typeof appointment>>(
+      queryKeys.appointment('APT-7K3M-9Q2X', '0101'),
+    );
+    expect(cached).toMatchObject({ status: 'CANCELLED', canCancel: false });
+    expect(cached?.notifications.map((n) => [n.kind, n.status, n.failureReason])).toEqual([
+      ['CONFIRMATION', 'FAILED', 'SUPERSEDED_BY_CANCELLATION'],
+      ['CANCELLATION', 'PENDING', null],
+    ]);
+  });
+
+  it('answers a repeat cancel with the same appointment, and never retries a refusal', async () => {
+    const { result } = renderWithCache(() => useCancelAppointment());
+
+    let first: ReturnType<typeof appointment> | undefined;
+    let second: typeof first;
+    await act(async () => {
+      first = await result.current.mutateAsync({ reference: 'APT-7K3M-9Q2X', last4: '0101' });
+      second = await result.current.mutateAsync({ reference: 'APT-7K3M-9Q2X', last4: '0101' });
+    });
+    expect(second).toEqual(first);
+
+    let calls = 0;
+    server.use(
+      http.post('*/api/v1/appointments/:reference/cancel', () => {
+        calls += 1;
+        return problemResponse('TOO_LATE_TO_CANCEL');
+      }),
+    );
+    await act(async () => {
+      await expect(
+        result.current.mutateAsync({ reference: 'APT-7K3M-9Q2X', last4: '0101' }),
+      ).rejects.toMatchObject({ status: 409, code: 'TOO_LATE_TO_CANCEL' });
+    });
+    expect(calls).toBe(1);
+  });
+});
+
+describe('useRetryMessage', () => {
+  it('puts the answer in the cached inbox at once', async () => {
+    const { result, queryClient } = renderWithCache(() => ({
+      inbox: useInbox(),
+      retry: useRetryMessage(),
+    }));
+    await waitFor(() => {
+      expect(result.current.inbox.isSuccess).toBe(true);
+    });
+
+    await act(async () => {
+      await result.current.retry.mutateAsync('40000000-0000-4000-8000-000000000001');
+    });
+
+    const state = queryClient.getQueryData<InboxState>(queryKeys.inbox());
+    const retried =
+      state?.available === true
+        ? state.messages.find((m) => m.id === '40000000-0000-4000-8000-000000000001')
+        : undefined;
+    expect(retried).toMatchObject({ status: 'PENDING', attempts: 0, retryable: false });
+  });
+});
+
+describe('isLinkableReference', () => {
+  it('links a real reference only, never a redacted one', () => {
+    expect(isLinkableReference('APT-7K3M-9Q2X')).toBe(true);
+    expect(isLinkableReference('APT-****-****')).toBe(false);
+    expect(isLinkableReference('APT-7K3M-****')).toBe(false);
+    // O, I, L, 0 and 1 are not in the alphabet (BR-11).
+    expect(isLinkableReference('APT-7K3M-9Q2O')).toBe(false);
+    expect(isLinkableReference('apt-7k3m-9q2x')).toBe(false);
   });
 });
 

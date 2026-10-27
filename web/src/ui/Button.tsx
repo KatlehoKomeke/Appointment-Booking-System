@@ -27,6 +27,11 @@ export interface ButtonLookProps {
   size?: 'regular' | 'compact';
   /** Stretches the button across its container, as the main actions are on a phone. */
   fullWidth?: boolean;
+  /**
+   * Draws the button in `accent`, the colour kept for destructive actions, such as cancelling an appointment: a
+   * filled accent button for `primary`, an accent edge and text for `secondary`. The words still say what it does.
+   */
+  destructive?: boolean;
 }
 
 /** Props for {@link Button}: the look, and everything a `<button>` takes. */
@@ -39,12 +44,14 @@ function lookClasses({
   variant = 'primary',
   size = 'regular',
   fullWidth = false,
+  destructive = false,
 }: ButtonLookProps) {
   return cx(
     styles.button,
     styles[variant],
     size === 'compact' && styles.compact,
     fullWidth && styles.fullWidth,
+    destructive && styles.destructive,
   );
 }
 
@@ -56,6 +63,7 @@ export function Button({
   variant,
   size,
   fullWidth,
+  destructive,
   className,
   type = 'button',
   ...buttonProps
@@ -63,15 +71,25 @@ export function Button({
   return (
     <button
       type={type}
-      className={cx(lookClasses({ variant, size, fullWidth }), className)}
+      className={cx(lookClasses({ variant, size, fullWidth, destructive }), className)}
       {...buttonProps}
     />
   );
 }
 
 /** A router link drawn as a button, for an action that goes to another page. */
-export function ButtonLink({ variant, size, fullWidth, className, ...linkProps }: ButtonLinkProps) {
+export function ButtonLink({
+  variant,
+  size,
+  fullWidth,
+  destructive,
+  className,
+  ...linkProps
+}: ButtonLinkProps) {
   return (
-    <Link className={cx(lookClasses({ variant, size, fullWidth }), className)} {...linkProps} />
+    <Link
+      className={cx(lookClasses({ variant, size, fullWidth, destructive }), className)}
+      {...linkProps}
+    />
   );
 }
