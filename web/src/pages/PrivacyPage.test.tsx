@@ -37,6 +37,9 @@ describe('PrivacyPage', () => {
     expect(screen.getByRole('region', { name: 'How long we keep it' })).toHaveTextContent(
       'backups, which could still hold it, expire after 7 days',
     );
+    expect(screen.getByRole('region', { name: 'How long we keep it' })).toHaveTextContent(
+      'A booking you cancel is deleted at once; only the cancellation SMS is kept, until it has been sent.',
+    );
     expect(screen.getByRole('region', { name: 'What we collect' })).toHaveTextContent(
       'Use only your own cellphone number: the hosted demo texts it.',
     );

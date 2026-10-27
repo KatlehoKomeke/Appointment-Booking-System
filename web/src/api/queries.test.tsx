@@ -4,8 +4,14 @@ import { http, HttpResponse } from 'msw';
 import type { ReactNode } from 'react';
 import { describe, expect, it } from 'vitest';
 
-import { lookupDigits } from '../booking/bookingSession';
-import { appointment, notification, problem, SENT_NOTIFICATION } from '../test/fixtures';
+import { lookupDigits, rememberedCancellation, rememberLookup } from '../booking/bookingSession';
+import {
+  appointment,
+  CANCELLED_AT,
+  notification,
+  problem,
+  SENT_NOTIFICATION,
+} from '../test/fixtures';
 import { notFoundResponse, problemResponse } from '../test/handlers';
 import { createTestQueryClient } from '../test/render';
 import { server } from '../test/server';
@@ -207,7 +213,7 @@ describe('useBookAppointment', () => {
 });
 
 describe('useCancelAppointment', () => {
-  it('sends the digits, retries a 503 once after Retry-After, and replaces the cached appointment', async () => {
+  it('sends the digits, retries a 503 once after Retry-After, and then forgets the appointment', async () => {
     const sent: { reference: string; digits: string | null }[] = [];
     server.use(
       // The first try is refused; the retry falls through to the fake API, which cancels it.
@@ -223,35 +229,47 @@ describe('useCancelAppointment', () => {
     );
     const { result, queryClient } = renderWithCache(() => useCancelAppointment());
     queryClient.setQueryData(queryKeys.appointment('apt-7k3m-9q2x', '0101'), appointment());
+    queryClient.setQueryData(queryKeys.appointment('APT-7K3M-9Q2X', '0101'), appointment());
+    rememberLookup('APT-7K3M-9Q2X', '0101');
 
+    let answer: ReturnType<typeof appointment> | undefined;
     await act(async () => {
-      await result.current.mutateAsync({ reference: 'apt-7k3m-9q2x', last4: '0101' });
+      answer = await result.current.mutateAsync({ reference: 'apt-7k3m-9q2x', last4: '0101' });
     });
 
     expect(sent).toEqual([
       { reference: 'APT-7K3M-9Q2X', digits: '0101' },
       { reference: 'APT-7K3M-9Q2X', digits: '0101' },
     ]);
-    const cached = queryClient.getQueryData<ReturnType<typeof appointment>>(
-      queryKeys.appointment('APT-7K3M-9Q2X', '0101'),
-    );
-    expect(cached).toMatchObject({ status: 'CANCELLED', canCancel: false });
-    expect(cached?.notifications.map((n) => [n.kind, n.status, n.failureReason])).toEqual([
-      ['CONFIRMATION', 'FAILED', 'SUPERSEDED_BY_CANCELLATION'],
-      ['CANCELLATION', 'PENDING', null],
-    ]);
+    // The answer is the appointment as it was cancelled, with the cancellation SMS just queued.
+    expect(answer).toMatchObject({ status: 'CANCELLED', canCancel: false });
+    expect(answer?.notifications.find((n) => n.kind === 'CANCELLATION')?.status).toBe('PENDING');
+    // The server has deleted it, so the cache and the tab let go of the name, the number and the digits.
+    expect(
+      queryClient.getQueryData(queryKeys.appointment('apt-7k3m-9q2x', '0101')),
+    ).toBeUndefined();
+    expect(
+      queryClient.getQueryData(queryKeys.appointment('APT-7K3M-9Q2X', '0101')),
+    ).toBeUndefined();
+    expect(lookupDigits('APT-7K3M-9Q2X')).toBeUndefined();
+    expect(rememberedCancellation('APT-7K3M-9Q2X')).toEqual({
+      cancelledAt: CANCELLED_AT,
+      branch: { code: 'SAN', name: 'Sandton Summit Mall' },
+      service: { code: 'FICA', name: 'Update personal details (FICA)' },
+      slot: { startsAt: '2026-10-27T09:30:00+02:00', endsAt: '2026-10-27T09:45:00+02:00' },
+    });
   });
 
-  it('answers a repeat cancel with the same appointment, and never retries a refusal', async () => {
+  it('finds nothing to cancel a second time, and never retries a refusal', async () => {
     const { result } = renderWithCache(() => useCancelAppointment());
 
-    let first: ReturnType<typeof appointment> | undefined;
-    let second: typeof first;
     await act(async () => {
-      first = await result.current.mutateAsync({ reference: 'APT-7K3M-9Q2X', last4: '0101' });
-      second = await result.current.mutateAsync({ reference: 'APT-7K3M-9Q2X', last4: '0101' });
+      await result.current.mutateAsync({ reference: 'APT-7K3M-9Q2X', last4: '0101' });
+      // The first cancel deleted it.
+      await expect(
+        result.current.mutateAsync({ reference: 'APT-7K3M-9Q2X', last4: '0101' }),
+      ).rejects.toMatchObject({ status: 404, code: 'APPOINTMENT_NOT_FOUND' });
     });
-    expect(second).toEqual(first);
 
     let calls = 0;
     server.use(

@@ -110,10 +110,16 @@ describe('the fake API', () => {
     expect(opened.reference).toBe(booked.reference);
   });
 
-  it('cancels with the right digits, answers a repeat the same, and keeps the appointment cancelled', async () => {
+  it('cancels with the right digits, then deletes the appointment, as the API does', async () => {
     const cancel = (reference: string, digits: string) =>
       unwrap(
         api.POST('/api/v1/appointments/{reference}/cancel', {
+          params: { path: { reference }, header: { 'X-Mobile-Last4': digits } },
+        }),
+      );
+    const open = (reference: string, digits: string) =>
+      unwrap(
+        api.GET('/api/v1/appointments/{reference}', {
           params: { path: { reference }, header: { 'X-Mobile-Last4': digits } },
         }),
       );
@@ -123,14 +129,43 @@ describe('the fake API', () => {
       code: 'APPOINTMENT_NOT_FOUND',
     });
     const cancelled = await cancel('apt7k3m9q2x', '0101');
-    expect(cancelled).toMatchObject({ status: 'CANCELLED', canCancel: false });
-    expect(await cancel(DEMO_REFERENCE, '0101')).toEqual(cancelled);
-    const opened = await unwrap(
-      api.GET('/api/v1/appointments/{reference}', {
-        params: { path: { reference: DEMO_REFERENCE }, header: { 'X-Mobile-Last4': '0101' } },
+    expect(cancelled).toMatchObject({
+      reference: DEMO_REFERENCE,
+      status: 'CANCELLED',
+      canCancel: false,
+    });
+    expect(cancelled.notifications.find((n) => n.kind === 'CANCELLATION')).toMatchObject({
+      status: 'PENDING',
+      recipientMasked: '082 *** 0101',
+    });
+
+    // That answer was the last word: with the right digits, it is not found, and cannot be cancelled again.
+    await expect(open(DEMO_REFERENCE, '0101')).rejects.toMatchObject({
+      status: 404,
+      code: 'APPOINTMENT_NOT_FOUND',
+    });
+    await expect(cancel(DEMO_REFERENCE, '0101')).rejects.toMatchObject({
+      status: 404,
+      code: 'APPOINTMENT_NOT_FOUND',
+    });
+
+    // A booking made in the test goes the same way.
+    const booked = await unwrap(
+      api.POST('/api/v1/appointments', {
+        params: { header: { 'Idempotency-Key': crypto.randomUUID() } },
+        body: {
+          branchCode: 'SAN',
+          serviceCode: 'FICA',
+          startsAt: '2026-10-27T10:00:00+02:00',
+          customer: { firstName: 'Nomvula', lastName: 'Dlamini', mobile: '082 555 0142' },
+        },
       }),
     );
-    expect(opened).toEqual(cancelled);
+    expect(await open(booked.reference, '0142')).toEqual(booked);
+    expect(await cancel(booked.reference, '0142')).toMatchObject({ status: 'CANCELLED' });
+    await expect(open(booked.reference, '0142')).rejects.toMatchObject({
+      code: 'APPOINTMENT_NOT_FOUND',
+    });
   });
 
   it('retries only a retryable message, and lists it as PENDING from then on', async () => {

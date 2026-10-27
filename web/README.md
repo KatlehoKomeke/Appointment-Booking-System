@@ -227,8 +227,9 @@ adds `step=details`, then `step=review`. The name and number stay in the tab's s
 - **Simulated inbox.** Every message the outbox has produced, newest first, with its status, attempts and last error,
   under a banner saying it is a demo operator view, switched off in production, where every message is simulated.
 - **Privacy notice.** The POPIA section 18 notice: Fynbos Bank (fictional demo) as the responsible party, the three
-  fields collected and why, the hosted demo's deletion of each booking once its appointment is over, and the customer's rights,
-  including a complaint to the Information Regulator.
+  fields collected and why, the hosted demo's deletion of each booking once its appointment is over, the deletion of a
+  cancelled booking at once, all but its cancellation SMS, which is kept until it has been sent, and the customer's
+  rights, including a complaint to the Information Regulator.
 
 Every page opens with the fictional-bank banner and the header, and ends with links to the inbox and the privacy
 notice.
@@ -383,9 +384,13 @@ Drawing the screens changed these.
 
 Not designed yet, though built from the designed parts: cancelling (Tier 2), a secondary "Cancel appointment" in
 `accent` under the appointment that opens an inline step naming it and saying the time is released and the step cannot
-be undone, with "Yes, cancel it" and "Keep my appointment" (Escape keeps it too), then a calm cancelled state: a
-"Cancelled" badge, when it was cancelled, the cancellation SMS's delivery status, and a confirmation it stopped shown
-as "Not sent" rather than failed; retrying a message (Tier 2), a compact Retry on a failed message in the inbox,
+be undone, with "Yes, cancel it" and "Keep my appointment" (Escape keeps it too), then a final cancelled page, since
+the appointment is deleted as it is cancelled: "This appointment was cancelled", "Its details have been deleted." with
+the masked number the cancellation SMS is on its way to, the service, branch, date and time it was for under a
+"Cancelled" badge, when it was cancelled, and the two ways to book again, but no reference, no Cancel button and no
+delivery status, which can no longer be watched (the tab remembers the cancellation without the name, the number or
+the time it was for, so a refresh shows the same page without that time, saying the SMS was sent to the number booked
+with, while any other tab finds nothing); retrying a message (Tier 2), a compact Retry on a failed message in the inbox,
 named for that message, whose answer is said in a status region in its card; a reference the inbox redacts, shown as
 plain text rather than a link; and, from Tier 1, asking for the last four digits when
 the confirmation page is opened in a new tab; the `/manage` lock after five wrong tries, whose `429` can also carry

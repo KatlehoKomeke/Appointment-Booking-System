@@ -4,8 +4,9 @@
  *
  * Bookings, cancellations and retried messages are kept per test (reset by `resetFakeApi`, which `setup.ts` calls
  * after each test): a booking can then be opened with its reference and digits, a repeat with the same
- * `Idempotency-Key` replays it, a cancelled appointment stays cancelled when it is opened again, and a retried message
- * shows as PENDING in the inbox, as on the server. A test that needs another answer overrides one handler:
+ * `Idempotency-Key` replays it, a cancel answers with the cancelled appointment and then deletes it, so opening or
+ * cancelling it again is not found, and a retried message shows as PENDING in the inbox, as on the server. A test
+ * that needs another answer overrides one handler:
  *
  * ```ts
  * server.use(http.post('/api/v1/appointments', () => problemResponse('SLOT_FULL')));
@@ -88,8 +89,8 @@ interface Booking {
 /** Bookings made in this test, by idempotency key. */
 const bookings = new Map<string, Booking>();
 
-/** Appointments cancelled in this test, by reference without hyphens. */
-const cancellations = new Map<string, Appointment>();
+/** Appointments cancelled, and so deleted, in this test, by reference without hyphens. */
+const deleted = new Set<string>();
 
 /** Inbox messages retried in this test, by id. */
 const retried = new Map<string, InboxMessage>();
@@ -97,7 +98,7 @@ const retried = new Map<string, InboxMessage>();
 /** Forgets the bookings, cancellations and retries made in a test. `setup.ts` calls it after each one. */
 export function resetFakeApi(): void {
   bookings.clear();
-  cancellations.clear();
+  deleted.clear();
   retried.clear();
 }
 
@@ -115,15 +116,17 @@ function referenceFor(n: number): string {
   return `APT-${digits.slice(0, 4).join('')}-${digits.slice(4).join('')}`;
 }
 
-// The appointment with this reference and digits, as it is now in this test, or undefined: a wrong reference and
-// wrong digits are the same miss.
+// The appointment with this reference and digits, or undefined: a wrong reference, wrong digits and an appointment
+// cancelled, and so deleted, in this test are the same miss.
 function findAppointment(reference: string, digits: string): Appointment | undefined {
   const wanted = normalise(reference);
+  if (deleted.has(wanted)) {
+    return undefined;
+  }
   const known = [appointment(), ...[...bookings.values()].map((b) => b.appointment)];
-  const found = known.find(
+  return known.find(
     (a) => normalise(a.reference) === wanted && a.customer.mobileMasked.endsWith(digits),
   );
-  return found === undefined ? undefined : (cancellations.get(wanted) ?? found);
 }
 
 // The 400 for a missing or malformed X-Mobile-Last4, or undefined when the digits are well formed.
@@ -340,7 +343,8 @@ export const handlers = [
       : HttpResponse.json(found);
   }),
 
-  // BR-14: only before the start; a repeat answers the same 200 and changes nothing.
+  // BR-14: only before the start. The answer is the appointment as it was when cancelled, the last the server says
+  // about it: cancelling deletes it, so opening it or cancelling it again is not found from then on.
   http.post(`${API}/appointments/:reference/cancel`, ({ params, request }) => {
     const digits = request.headers.get('X-Mobile-Last4') ?? '';
     const invalid = digitsProblem(digits);
@@ -351,15 +355,11 @@ export const handlers = [
     if (found === undefined) {
       return problemResponse('APPOINTMENT_NOT_FOUND');
     }
-    if (found.status === 'CANCELLED') {
-      return HttpResponse.json(found);
-    }
     if (Date.parse(NOW) >= Date.parse(found.startsAt)) {
       return problemResponse('TOO_LATE_TO_CANCEL');
     }
-    const cancelled = cancelledAppointment(found);
-    cancellations.set(normalise(found.reference), cancelled);
-    return HttpResponse.json(cancelled);
+    deleted.add(normalise(found.reference));
+    return HttpResponse.json(cancelledAppointment(found));
   }),
 
   http.get(`${API}/messages`, ({ request }) => {

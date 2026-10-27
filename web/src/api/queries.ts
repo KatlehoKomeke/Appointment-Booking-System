@@ -4,13 +4,13 @@
  * Every hook throws {@link ApiProblem} for an error response and the browser's `TypeError` when the network fails,
  * so a screen can pass `error` straight to `problemMessage`. Queries are cached by {@link queryKeys}; the booking
  * mutation seeds the appointment's cache, so the confirmation page opens without a second request, and the cancel
- * mutation replaces it, so the page shows the cancellation at once.
+ * mutation removes it, since the server deletes an appointment as it cancels it.
  *
  * @packageDocumentation
  */
 import { type QueryClient, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { rememberLookup } from '../booking/bookingSession';
+import { forgetLookup, rememberCancellation, rememberLookup } from '../booking/bookingSession';
 import { last4 as lastFourDigits } from '../lib/mobile';
 import { api, ApiProblem, isIdempotentReplay, unwrap, unwrapWithResponse } from './client';
 import type { components } from './schema';
@@ -67,6 +67,13 @@ export const queryKeys = {
    */
   appointment: (reference: string, last4: string) =>
     ['appointment', normaliseReference(reference), last4] as const,
+  /**
+   * Every cached copy of an appointment, whatever digits opened it, to forget them all once it is cancelled.
+   *
+   * @param reference - the reference, in any case
+   */
+  appointmentAnyDigits: (reference: string) =>
+    ['appointment', normaliseReference(reference)] as const,
   /** The simulated inbox. */
   inbox: () => ['messages'] as const,
 };
@@ -134,8 +141,13 @@ export function useAvailability(
 
 /** Options for {@link useAppointment}. */
 export interface UseAppointmentOptions {
-  /** Refetch every 2 s while any message is still PENDING, so a page shows the SMS being sent. */
+  /**
+   * Refetch every 2 s while any message is still PENDING, so a page shows the SMS being sent. A cancelled
+   * appointment is never polled: the server deletes it as it cancels it, so there is nothing more to watch.
+   */
   poll?: boolean;
+  /** False stops asking, keeping what was already fetched, for example while a cancel is on its way. */
+  enabled?: boolean;
 }
 
 /**
@@ -165,7 +177,7 @@ export function isSupersededByCancellation(notification: Notification): boolean 
  *
  * @param reference - such as `APT-7K3M-9Q2X`; case and hyphens do not matter
  * @param last4 - four digits
- * @param options - whether to poll while a message is pending
+ * @param options - whether to poll while a message is pending, and whether to ask at all
  */
 export function useAppointment(
   reference: string | null | undefined,
@@ -173,6 +185,7 @@ export function useAppointment(
   options: UseAppointmentOptions = {},
 ) {
   const poll = options.poll ?? false;
+  const enabled = options.enabled ?? true;
   return useQuery({
     queryKey: queryKeys.appointment(reference ?? '', last4 ?? ''),
     queryFn: () =>
@@ -184,9 +197,11 @@ export function useAppointment(
           },
         }),
       ),
-    enabled: present(reference) && present(last4),
+    enabled: enabled && present(reference) && present(last4),
     refetchInterval: (query) =>
-      poll && hasPendingNotification(query.state.data) ? POLL_INTERVAL_MS : false,
+      poll && query.state.data?.status !== 'CANCELLED' && hasPendingNotification(query.state.data)
+        ? POLL_INTERVAL_MS
+        : false,
   });
 }
 
@@ -299,12 +314,16 @@ export function isTooLateToCancel(error: unknown): boolean {
 /**
  * Cancels an appointment, proving the last four digits again as opening it did.
  *
- * Cancelling twice is safe: the API answers a repeat with the same 200 and changes nothing. So a `503 TRY_AGAIN` is
- * retried once, after the server's `Retry-After` capped at five seconds, as booking does. On success the
- * appointment's cache entry is replaced with the cancelled appointment, under the reference the page asked with and
- * under its own, so the page shows it at once and polls while the cancellation SMS is PENDING; every cached
- * availability and the inbox are marked stale, since a seat was freed and a message queued. When the API says it is
- * too late, the appointment is fetched again, so the page stops offering to cancel it.
+ * The server deletes the appointment as it cancels it, keeping only the cancellation SMS until it is sent. Its answer,
+ * the appointment as it was at that moment, is the last it says: from then on the appointment is not found, even with
+ * the right digits, and a repeat cancel finds nothing either. A `503 TRY_AGAIN` wrote nothing, so it is retried once,
+ * after the server's `Retry-After` capped at five seconds, as booking does.
+ *
+ * On success every cached copy of the appointment is removed, under the reference the page asked with and under its
+ * own, and the tab forgets its digits (`forgetLookup`) and remembers the cancellation without the name or the number
+ * (`rememberCancellation`), so the page can show it again after a refresh. Every cached availability and the inbox
+ * are marked stale, since a seat was freed and a message queued. When the API says it is too late, the appointment
+ * is fetched again, so the page stops offering to cancel it.
  */
 export function useCancelAppointment() {
   const queryClient = useQueryClient();
@@ -320,9 +339,18 @@ export function useCancelAppointment() {
         throw error;
       }
     },
-    onSuccess: (appointment, { reference, last4 }) => {
-      queryClient.setQueryData(queryKeys.appointment(reference, last4), appointment);
-      queryClient.setQueryData(queryKeys.appointment(appointment.reference, last4), appointment);
+    onSuccess: (appointment, { reference }) => {
+      // The cached copies hold the customer's name and masked number, which the server has just deleted.
+      for (const asked of [reference, appointment.reference]) {
+        queryClient.removeQueries({ queryKey: queryKeys.appointmentAnyDigits(asked) });
+      }
+      forgetLookup(appointment.reference);
+      rememberCancellation(appointment.reference, {
+        cancelledAt: appointment.cancelledAt,
+        branch: appointment.branch,
+        service: appointment.service,
+        slot: { startsAt: appointment.startsAt, endsAt: appointment.endsAt },
+      });
       void queryClient.invalidateQueries({ queryKey: queryKeys.allAvailability() });
       void queryClient.invalidateQueries({ queryKey: queryKeys.inbox() });
     },
