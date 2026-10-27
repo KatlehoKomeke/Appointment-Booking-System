@@ -61,7 +61,7 @@ its API is built.*
   delivers the outbox rows the booking transaction writes
   ([ADR-0003](adr/0003-transactional-outbox-for-confirmations.md)). `RetentionPurgeJob` runs every hour only where a
   deployment switches it on, as the hosted demo does, and deletes each booking once its appointment is over
-  ([runbook](runbook.md#did-the-48-hour-purge-run)). `DemoDataLoader` runs once after start-up where
+  ([runbook](runbook.md#did-the-retention-purge-run)). `DemoDataLoader` runs once after start-up where
   `branchbook.demo-data.enabled` is on, which only compose sets: on an empty database it books three demo
   appointments through the booking handler, and where `branchbook.booking.demo-numbers-only` is on it skips with one
   INFO line, because its numbers are not demo numbers (M6, [api/README.md](../api/README.md#demo-data)).

@@ -82,6 +82,7 @@ describe('AppStack', () => {
             { Name: 'DB_URL', Value: Match.objectLike({ 'Fn::Join': Match.anyValue() }) },
             { Name: 'PUBLIC_BASE_URL', Value: 'https://branchbook.link' },
             { Name: 'BRANCHBOOK_INBOX_ENABLED', Value: 'false' },
+            { Name: 'BRANCHBOOK_INBOX_REDACT_REFERENCES', Value: 'true' },
             { Name: 'BRANCHBOOK_RETENTION_ENABLED', Value: 'true' },
             { Name: 'BRANCHBOOK_SMS_GATEWAY', Value: 'aws' },
             { Name: 'BRANCHBOOK_SMS_AWS_REGION', Value: 'af-south-1' },

@@ -58,7 +58,7 @@ the public internet must not collect real personal information.
 - **The 48-hour purge is the retention job,** behind `branchbook.retention.enabled`, not a `demo` profile. The hosted
   demo's ECS task definition sets `BRANCHBOOK_RETENTION_ENABLED=true`; everywhere else it is off. Every hour it deletes
   each appointment booked 48 hours ago or earlier, with its messages and idempotency keys
-  ([docs/runbook.md](../runbook.md#did-the-48-hour-purge-run)). It empties the live database only: a deleted booking
+  ([docs/runbook.md](../runbook.md#did-the-retention-purge-run)). It empties the live database only: a deleted booking
   stays in the automated backups until they expire ([SECURITY.md](../../SECURITY.md#personal-information-popia)).
 - **Demo numbers are a block, not personas,** behind `branchbook.booking.demo-numbers-only`, not a `demo` profile.
   The hosted demo's task definition sets `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true`, so bookings take only

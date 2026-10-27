@@ -163,6 +163,8 @@ export class AppStack extends Stack {
         // demo number's last four digits are public, so anyone could open anyone's booking. Each booker still sees
         // their own SMS and its status on the confirmation page.
         BRANCHBOOK_INBOX_ENABLED: 'false',
+        // Should anyone switch the inbox back on, it shows every reference as APT-****-****.
+        BRANCHBOOK_INBOX_REDACT_REFERENCES: 'true',
         // Each booking, with its name and number, is deleted once its appointment is over, as the privacy notice
         // says of the hosted demo.
         BRANCHBOOK_RETENTION_ENABLED: 'true',
