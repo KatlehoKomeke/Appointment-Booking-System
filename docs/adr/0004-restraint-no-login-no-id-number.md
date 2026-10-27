@@ -45,3 +45,9 @@ relevant and not excessive for its purpose (section 10).
 
 - **2026-10-26.** The risks under Consequences, with their production controls, are listed in
   [SECURITY.md](../../SECURITY.md#known-risks).
+- **2026-10-27.** Where `BRANCHBOOK_SMS_GATEWAY=aws`, as on the hosted demo, the confirmation and the cancellation are
+  real SMS, so the "unauthenticated SMS sending" risk is real there. No login or one-time code is added; the controls
+  are a protect configuration that allows South Africa only, the per-recipient daily cap (`RECIPIENT_DAILY_CAP`,
+  [BR-17](../domain-rules.md#br-17)), WAF's per-address booking limit, `MaxPrice`, AWS's monthly spend limit and, until
+  the owner leaves it, the SMS sandbox. Anyone can still make the app text any South African number, up to the cap a
+  day ([SECURITY.md](../../SECURITY.md#known-risks)).

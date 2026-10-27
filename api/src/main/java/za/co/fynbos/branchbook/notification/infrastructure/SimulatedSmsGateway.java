@@ -2,7 +2,6 @@ package za.co.fynbos.branchbook.notification.infrastructure;
 
 import java.time.Duration;
 import java.util.UUID;
-import org.springframework.stereotype.Component;
 import za.co.fynbos.branchbook.notification.application.DispatcherProperties;
 import za.co.fynbos.branchbook.notification.application.MessageGateway;
 import za.co.fynbos.branchbook.notification.application.OutgoingMessage;
@@ -12,8 +11,11 @@ import za.co.fynbos.branchbook.notification.application.OutgoingMessage;
  * answer, accepts every message with a made-up provider id, and refuses every message to a number
  * ending in {@code 0000}, such as the demo number 082 555 0000, so a failed delivery can be shown.
  * It logs nothing; the dispatcher logs the outcome by message id.
+ *
+ * <p>It is not a bean of its own: {@link SmsGatewayConfiguration} hands it to the dispatcher for
+ * every number where {@code branchbook.sms.gateway} is {@code simulated}, the default, and for the
+ * published demo block where it is {@code aws}.
  */
-@Component
 class SimulatedSmsGateway implements MessageGateway {
 
   /** The code a refused simulated message records as its last error. */

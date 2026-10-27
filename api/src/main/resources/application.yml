@@ -87,12 +87,43 @@ branchbook:
     # (BR-18). docker compose sets it to the published port.
     public-base-url: ${PUBLIC_BASE_URL:http://localhost:8080}
   dispatcher:
-    # The dispatcher delivers PENDING confirmations through the simulated gateway (BR-17): every 2 seconds, on its
-    # own thread, up to 20 messages a tick. The tests switch it off and drive it themselves.
+    # The dispatcher delivers PENDING messages through the SMS gateway that branchbook.sms below chooses (BR-17):
+    # every 2 seconds, on its own thread, up to 20 messages a tick. The tests switch it off and drive it themselves.
     enabled: true
     interval: PT2S
     # How long the simulated gateway takes to accept a message, so the confirmation page shows "Sending" first.
     simulated-latency: PT0.15S
+  sms:
+    # Which gateway sends each SMS. simulated, the default, sends nothing, as in docker compose, make dev-api and the
+    # tests. aws sends a real SMS through AWS End User Messaging SMS to every number outside the published demo block,
+    # 082 555 0000 to 0199, which stays simulated because anyone may type it and it may belong to a real stranger.
+    # The hosted demo's task definition is to set BRANCHBOOK_SMS_GATEWAY=aws; the start-up log names the gateway.
+    gateway: simulated
+    # The most SMS one number outside the demo block may be written in any 24 hours, confirmations and cancellations
+    # together; one more is written FAILED with RECIPIENT_DAILY_CAP and never sent, while the booking or the cancel
+    # still succeeds (BR-17). 0 switches the cap off, as locally and in the tests; the hosted demo is to set it with
+    # BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP, so nobody can make the app text one number without end.
+    recipient-daily-cap: 0
+    aws:
+      # Read only when the gateway is aws. Credentials never appear here: the SDK's default chain finds them, which in
+      # the hosted demo is the ECS task role. The region to send from, such as af-south-1 (BRANCHBOOK_SMS_AWS_REGION);
+      # empty leaves it to the SDK's default region chain, and start-up fails if that finds none.
+      region:
+      # The protect configuration that limits the countries a message may go to; the hosted demo's allows South
+      # Africa only (BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID). Empty sends none.
+      protect-configuration-id:
+      # The configuration set whose event destinations record each message (BRANCHBOOK_SMS_AWS_CONFIGURATION_SET).
+      # Empty sends none.
+      configuration-set:
+      # The phone number, pool or sender ID to send from (BRANCHBOOK_SMS_AWS_ORIGINATION_IDENTITY). Empty lets AWS
+      # choose: South Africa does not support sender IDs, so AWS sends over a shared route.
+      origination-identity:
+      # The most one message may cost, in US dollars (BRANCHBOOK_SMS_AWS_MAX_PRICE); AWS refuses a dearer one. Up to
+      # two digits, a point and one to five digits; anything else stops start-up. Quoted, so YAML keeps it as text.
+      max-price: "0.20"
+      # Whether AWS only checks each message and sends none (BRANCHBOOK_SMS_AWS_DRY_RUN), to try the set-up without
+      # spending; the messages are still marked SENT.
+      dry-run: false
   inbox:
     # The simulated inbox, GET /api/v1/messages, lists every booking's messages with the reference and the
     # recipient redacted (FR-17). It is an operator view for the demo, so it is off unless a deployment asks for it:
@@ -131,6 +162,9 @@ logging:
     # constraint name and SQLSTATE, so this logger stays silent (BR-19); LogRedactionIT proves it. Hibernate 7 logs
     # them under this category, not SqlExceptionHelper's class name. Quoted, because a bare OFF is a YAML boolean.
     org.hibernate.orm.jdbc.error: "OFF"
+    # The AWS SDK logs its requests at DEBUG. Held at WARN, a lowered root level can never write anything about a
+    # request to AWS End User Messaging, which carries a mobile number and a reference, to the log (BR-19).
+    software.amazon.awssdk: WARN
 
 server:
   # The HTTP port. A hosting platform can set PORT; otherwise 8080.

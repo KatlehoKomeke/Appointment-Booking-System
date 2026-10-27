@@ -45,6 +45,9 @@ public record NotificationMessage(
     String correlationId,
     Instant createdAt) {
 
+  /** The failure reason of a message the per-recipient daily cap stopped (BR-17). */
+  public static final String RECIPIENT_DAILY_CAP = "RECIPIENT_DAILY_CAP";
+
   /** Rejects a missing value. */
   public NotificationMessage {
     Objects.requireNonNull(id, "id");
@@ -77,6 +80,51 @@ public record NotificationMessage(
       String body,
       String correlationId,
       Instant now) {
+    return sms(
+        appointmentId, kind, recipient, body, correlationId, now, NotificationStatus.PENDING, null);
+  }
+
+  /**
+   * Creates an SMS that the per-recipient daily cap stops: FAILED from the start with {@code
+   * RECIPIENT_DAILY_CAP}, so the dispatcher never claims it and the inbox's retry never resets it
+   * (BR-17).
+   *
+   * @param appointmentId the appointment it is about
+   * @param kind what it tells the customer
+   * @param recipient the mobile number in E.164 form
+   * @param body the text it would have carried
+   * @param correlationId the id of the request that writes it
+   * @param now the current instant
+   * @return a FAILED message with no attempts
+   */
+  public static NotificationMessage cappedSms(
+      UUID appointmentId,
+      NotificationKind kind,
+      String recipient,
+      String body,
+      String correlationId,
+      Instant now) {
+    return sms(
+        appointmentId,
+        kind,
+        recipient,
+        body,
+        correlationId,
+        now,
+        NotificationStatus.FAILED,
+        RECIPIENT_DAILY_CAP);
+  }
+
+  /** Builds an SMS with no attempts, due at once, in the given state. */
+  private static NotificationMessage sms(
+      UUID appointmentId,
+      NotificationKind kind,
+      String recipient,
+      String body,
+      String correlationId,
+      Instant now,
+      NotificationStatus status,
+      @Nullable String failureReason) {
     return new NotificationMessage(
         UUID.randomUUID(),
         appointmentId,
@@ -85,11 +133,11 @@ public record NotificationMessage(
         recipient,
         null,
         body,
-        NotificationStatus.PENDING,
+        status,
         0,
         now,
         null,
-        null,
+        failureReason,
         null,
         correlationId,
         now);

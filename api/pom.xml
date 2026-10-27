@@ -57,9 +57,26 @@
     <!-- Parses and checks South African mobile numbers (BR-19). Not managed by Spring Boot; Dependabot bumps it, and
          MobileNumberTest asserts the number types the rules depend on, so a metadata change cannot slip through. -->
     <libphonenumber.version>9.0.41</libphonenumber.version>
+    <!-- The AWS SDK for Java v2, for the real SMS gateway (AWS End User Messaging SMS). Pinned to the newest release that
+         was at least two weeks old when it was added (2.55.15, published 2026-10-12): the project waits two weeks
+         before taking a new release, so a broken or withdrawn one is caught upstream first. -->
+    <aws-sdk.version>2.55.15</aws-sdk.version>
     <!-- Test libraries that the Spring Boot parent does not manage. -->
     <archunit.version>1.5.1</archunit.version>
   </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <!-- Keeps every AWS SDK module on the one pinned version. -->
+      <dependency>
+        <groupId>software.amazon.awssdk</groupId>
+        <artifactId>bom</artifactId>
+        <version>${aws-sdk.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
 
   <dependencies>
     <!-- Runtime -->
@@ -119,6 +136,31 @@
       <groupId>org.springdoc</groupId>
       <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
       <version>${springdoc.version}</version>
+    </dependency>
+    <!-- Sends a real SMS through AWS End User Messaging SMS where branchbook.sms.gateway is aws (AwsSmsGateway). The
+         SDK's own HTTP clients, Apache (4 and 5) and Netty, are left out: one synchronous call needs no more than
+         the JDK's URLConnection client below, which keeps the jar lean. -->
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>pinpointsmsvoicev2</artifactId>
+      <exclusions>
+        <exclusion>
+          <groupId>software.amazon.awssdk</groupId>
+          <artifactId>apache-client</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>software.amazon.awssdk</groupId>
+          <artifactId>apache5-client</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>software.amazon.awssdk</groupId>
+          <artifactId>netty-nio-client</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>url-connection-client</artifactId>
     </dependency>
 
     <!-- Tests -->

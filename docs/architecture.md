@@ -24,7 +24,7 @@ milestone.
 [2.1 One request](#21-one-request-through-the-jar) ·
 [3. Modules](#3-modules-and-the-dependency-rule) ·
 [4. The booking transaction](#4-the-booking-transaction) ·
-[5. The confirmation](#5-the-simulated-confirmation) ·
+[5. The confirmation](#5-the-confirmation-sms) ·
 [6. Appointment lifecycle](#6-appointment-lifecycle) ·
 [7. Data model](#7-data-model) ·
 [8. Time](#8-time) ·
@@ -38,8 +38,10 @@ the confirmation SMS written as PENDING (M3), the booking screens (M4), the SMS'
 from the appointment page (M6).*
 
 A customer of the fictional Fynbos Bank picks a branch, a service, a date and a time slot, enters a name and a
-South African mobile number, and gets a booking reference such as `APT-7K3M-9Q2X`. A simulated SMS confirmation
-follows within a few seconds, and its delivery status is visible on the confirmation page. The customer can later
+South African mobile number, and gets a booking reference such as `APT-7K3M-9Q2X`. An SMS confirmation follows
+within a few seconds, and its delivery status is visible on the confirmation page: simulated locally and for the
+published demo numbers, and a real SMS through AWS End User Messaging SMS where a deployment asks, as the hosted
+demo does ([5](#5-the-confirmation-sms)). The customer can later
 look the appointment up, and cancel it, with the reference and the last four digits of their mobile number.
 
 ## 2. System context and containers
@@ -67,8 +69,9 @@ its API is built.*
   (M6): `appointments_booked_total{outcome}`, every booking request by how it ended, and `outbox_pending`, the
   messages still PENDING after the dispatcher's last tick ([runbook](runbook.md#read-the-metrics)). The hosted demo's
   WAF blocks `/actuator`.
-- **Real gateways plug in later.** The dispatcher sends through a `MessageGateway` port, which the simulated SMS
-  gateway implements; a real SMS provider would be one more implementation of it.
+- **The real gateway sits behind a port.** The dispatcher sends through a `MessageGateway` port: the simulated SMS
+  gateway by default, or, where `branchbook.sms.gateway` is `aws`, a router that keeps the published demo block
+  simulated and sends every other number a real SMS through AWS End User Messaging SMS ([5](#5-the-confirmation-sms)).
 
 ### 2.1 One request through the jar
 
@@ -250,9 +253,12 @@ Because the window is per reference, someone who knows a reference can block its
 is printed only in the customer's own SMS and pages, and production would bind appointments to a verified identity
 instead ([ADR-0004](adr/0004-restraint-no-login-no-id-number.md)).
 
-## 5. The simulated confirmation
+<a id="5-the-simulated-confirmation"></a>
+## 5. The confirmation SMS
 
-*Status: Built in M5 ([BR-17](domain-rules.md#br-17), proven). Built in M3: every booking writes its SMS as a PENDING
+*Status: Built in M5 ([BR-17](domain-rules.md#br-17), proven). Built after M6: the real gateway, AWS End User
+Messaging SMS where `branchbook.sms.gateway` is `aws`, and the per-recipient daily cap ([BR-17](domain-rules.md#br-17),
+proven). Built in M3: every booking writes its SMS as a PENDING
 row in the booking transaction ([BR-16](domain-rules.md#br-16)). Built in M1: `notification_messages` and its 11
 named constraints, proven by `SchemaConstraintIT`. Built in M6: the cancellation SMS, written in the cancel's
 transaction ([BR-16](domain-rules.md#br-16)), superseding a confirmation by a cancellation
@@ -262,6 +268,7 @@ transaction ([BR-16](domain-rules.md#br-16)), superseding a confirmation by a ca
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING: written with the booking or the cancel
+    [*] --> FAILED: written past the daily cap, never sent
     PENDING --> SENT: gateway accepts
     PENDING --> PENDING: failed, retry in 2, 4, 8, 16 s
     PENDING --> FAILED: fifth failure, a failed mark, or cancelled (M6)
@@ -273,9 +280,9 @@ scheduler so the hourly and daily jobs never share it. It claims up to 20 due ro
 transaction with `FOR UPDATE SKIP LOCKED`, so a crash re-sends at most one message and two instances never send the
 same message. The simulated gateway takes 150 ms and refuses every number ending in `0000`, such as the demo number
 082 555 0000, so a failed delivery can be shown: about 30 seconds of backoff later it is FAILED. A FAILED row records why: `DELIVERY_FAILED` after the fifth failed attempt,
-`SUPERSEDED_BY_CANCELLATION` when the appointment is cancelled before the message is sent, or
-`DISPATCH_ERROR` when recording the outcome of a send fails, so a poisoned row never loops. The schema and the API
-contract also list `RECIPIENT_DAILY_CAP`, which no v1 rule produces. `notification_messages`
+`SUPERSEDED_BY_CANCELLATION` when the appointment is cancelled before the message is sent,
+`DISPATCH_ERROR` when recording the outcome of a send fails, so a poisoned row never loops, or
+`RECIPIENT_DAILY_CAP` when the daily cap below stopped it before it was ever sent. `notification_messages`
 already enforces the shape of this state machine with its named constraints: three statuses, at most five attempts,
 a failure reason exactly when FAILED and a sent time exactly when SENT. An appointment's status never depends on
 delivery: the seat is what the customer booked.
@@ -286,6 +293,30 @@ now, unless it is the confirmation of an appointment that is cancelled or has st
 unchanged. It locks the message and waits up to 2 seconds for a send in flight, so it never races the dispatcher or
 a cancel. Where the inbox is off, the guarded SQL in the [runbook](runbook.md#replay-a-failed-message) replays a
 message instead.
+
+**Which gateway sends.** `branchbook.sms.gateway` decides, and one INFO line at start-up names the gateway, the
+region and whether a protect configuration and a daily cap are set. `simulated`, the default and what compose,
+`make dev-api` and the tests run, sends nothing. Where it is `aws` (`BRANCHBOOK_SMS_GATEWAY=aws`, the hosted demo),
+`RoutingSmsGateway` hands every number in the published demo block, 082 555 0000 to 0199, to the simulated gateway,
+because anyone may type those numbers and one may belong to a real stranger, and every other number to
+`AwsSmsGateway`. That calls `SendTextMessage` of AWS End User Messaging SMS (`pinpoint-sms-voice-v2`) in
+af-south-1, as a TRANSACTIONAL message with the deployment's `MaxPrice` and protect configuration, and its
+configuration set and origination identity where set, with credentials from the ECS task role. South Africa
+supports long and short codes but no sender IDs, so with no origination identity AWS sends over a shared route:
+delivery is best effort, and while the AWS account is in the SMS sandbox only verified destination numbers receive
+anything. The SDK does not retry, and a call gives up after 10 seconds; a refusal is a fixed code built from the
+exception's type and typed reason, such as `AWS_THROTTLED` or `AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED`,
+never AWS's message, which can quote the number ([runbook](runbook.md#what-the-aws-codes-mean)). The dispatcher's
+backoff and fifth-attempt FAILED apply as they do to the simulated gateway.
+
+**The per-recipient daily cap.** Where `branchbook.sms.recipient-daily-cap` is above 0
+(`BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP`), the outbox first counts the SMS the number was written in the last 24 hours,
+bound from the clock and leaving out those the cap itself stopped, through `ix_notification_messages_recipient`. At
+or above the cap the new message is written FAILED with `RECIPIENT_DAILY_CAP`: the dispatcher never claims it, the
+inbox's retry never resets it, and a later cancel leaves its reason alone, while the booking or the cancel succeeds
+as usual. The demo block is never capped, because it is never really sent. Bookings by one mobile are serialised
+([BR-22](domain-rules.md#br-22)), so their counts never race; a cancel takes no such lock, so cancels at the same
+moment as each other or as a booking can pass the cap by a message or two. The cap is off by default.
 
 ## 6. Appointment lifecycle
 
@@ -335,13 +366,13 @@ learns which seats are held through `booking`'s `JdbcBookedIntervals`, so it nev
 | `notification_messages` | `notification` | 11 |
 | **Total** | | **54** |
 
-The 54 are 8 primary keys, 3 unique constraints, 35 checks, 6 foreign keys and 2 exclusion constraints. Six
+The 54 are 8 primary keys, 3 unique constraints, 35 checks, 6 foreign keys and 2 exclusion constraints. Seven
 partial or plain indexes serve the hot queries: `ix_appointments_slot_lookup` (availability and the lowest free
 seat), `ix_appointments_customer_active` (the duplicate and overlap checks), `ix_idempotency_keys_expires` (the
-hourly purge), and `ix_notification_messages_due`, `_appointment` and `_created` (the dispatcher's claim, an
-appointment's messages and the simulated inbox).
+hourly purge), and `ix_notification_messages_due`, `_appointment`, `_created` and `_recipient` (the dispatcher's
+claim, an appointment's messages, the simulated inbox and the daily cap's count).
 
-The schema is created by four Flyway migrations, never edited once committed:
+The schema is created by five Flyway migrations, never edited once committed:
 
 | Migration | Contents |
 |---|---|
@@ -349,6 +380,7 @@ The schema is created by four Flyway migrations, never edited once committed:
 | [`V2__schema.sql`](../api/src/main/resources/db/migration/V2__schema.sql) | The eight tables, with every constraint named and the non-obvious ones commented |
 | [`V3__reference_data.sql`](../api/src/main/resources/db/migration/V3__reference_data.sql) | Six branches, their hours, six services and the capacities |
 | [`V4__public_holidays_2026_2027.sql`](../api/src/main/resources/db/migration/V4__public_holidays_2026_2027.sql) | The public holidays in law for 2026 and 2027 |
+| [`V5__notification_messages_recipient_index.sql`](../api/src/main/resources/db/migration/V5__notification_messages_recipient_index.sql) | The index the per-recipient daily cap counts through |
 
 Every constraint is named, because the application maps a violation to an API error by its name.
 [`SchemaConstraintIT`](../api/src/test/java/za/co/fynbos/branchbook/SchemaConstraintIT.java) proves each one fires,
@@ -410,7 +442,7 @@ follow its start-up order:
    on the Temurin 25 JDK, then a Temurin 25 JRE runtime that runs as user 10001.
 2. The `db` service starts PostgreSQL 17.
 3. `pg_isready` succeeds and `db` is healthy; [`compose.yaml`](../compose.yaml) starts `app` only then.
-4. The app starts: Flyway applies V1 to V4, and Hibernate validates the schema against the entities.
+4. The app starts: Flyway applies V1 to V5, and Hibernate validates the schema against the entities.
 5. `/readyz` answers UP, and Docker marks the container healthy.
 6. `--wait` returns, and `make up` prints the URL.
 

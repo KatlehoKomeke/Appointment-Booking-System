@@ -1,9 +1,10 @@
 package za.co.fynbos.branchbook.notification.application;
 
 /**
- * Where messages are handed over for delivery: the simulated SMS gateway in this version, and a
- * real provider would be one more implementation (FR-15). An implementation must never put the
- * recipient or the body in what it returns or logs.
+ * Where messages are handed over for delivery (FR-15): the simulated SMS gateway, or, where {@code
+ * branchbook.sms.gateway} is {@code aws}, AWS End User Messaging SMS for every number outside the
+ * published demo block. An implementation must never put the recipient or the body in what it
+ * returns or logs, nor a provider's error message, which may quote them: a refusal is a fixed code.
  */
 public interface MessageGateway {
 

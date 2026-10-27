@@ -59,7 +59,15 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
       UPDATE notification_messages
       SET status = 'FAILED', failure_reason = 'SUPERSEDED_BY_CANCELLATION'
       WHERE appointment_id = :appointmentId AND kind = 'CONFIRMATION'
-        AND status IN ('PENDING', 'FAILED')""";
+        AND status IN ('PENDING', 'FAILED')
+        AND failure_reason IS DISTINCT FROM 'RECIPIENT_DAILY_CAP'""";
+
+  /** Served by ix_notification_messages_recipient, so it reads one number's recent rows only. */
+  private static final String COUNT_TOWARDS_DAILY_CAP =
+      """
+      SELECT count(*) FROM notification_messages
+      WHERE recipient = :recipient AND channel = :channel AND created_at > :since
+        AND failure_reason IS DISTINCT FROM 'RECIPIENT_DAILY_CAP'""";
 
   private static final String RESET_FOR_RETRY =
       """
@@ -118,6 +126,16 @@ class JdbcNotificationMessageRepository implements NotificationMessageRepository
   @Override
   public Optional<NotificationMessage> lockById(UUID id) {
     return jdbc.sql(LOCK_BY_ID).param("id", id).query((rs, row) -> message(rs)).optional();
+  }
+
+  @Override
+  public long countTowardsDailyCap(String recipient, NotificationChannel channel, Instant since) {
+    return jdbc.sql(COUNT_TOWARDS_DAILY_CAP)
+        .param("recipient", recipient)
+        .param("channel", channel.name())
+        .param("since", utc(since))
+        .query(Long.class)
+        .single();
   }
 
   @Override
