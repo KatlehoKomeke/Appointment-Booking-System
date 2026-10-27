@@ -39,7 +39,10 @@ export function Shell() {
         <p className={styles.inner}>
           <strong>Fynbos Bank is fictional.</strong> BranchBook is an engineering assessment, not a
           real bank&apos;s service. The hosted demo texts the number you give, so use only your own;
-          the demo numbers 082 555 0000 to 082 555 0199 are never texted.
+          the demo numbers 082 555 0000 to 082 555 0199 are never texted.{' '}
+          {/* Remove this sentence once AWS takes the account out of the SMS sandbox (docs/runbook.md). */}
+          While AWS keeps the demo in its SMS sandbox, only numbers verified on its account receive
+          the text; any other shows Not delivered, and the booking still stands.
         </p>
       </aside>
 

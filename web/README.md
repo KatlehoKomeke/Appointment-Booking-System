@@ -346,7 +346,8 @@ its 31-character alphabet already leaves out characters that look alike
 - **No real bank is named in the app.** Every page opens with "Fynbos Bank is fictional. BranchBook is an engineering
   assessment, not a real bank's service. The hosted demo texts the number you give, so use only your own; the demo
   numbers 082 555 0000 to 082 555 0199 are never texted." The non-affiliation statement lives in the root
-  [README](../README.md).
+  [README](../README.md). Until AWS takes the account out of the SMS sandbox, the banner adds that only verified
+  numbers receive the text and any other shows Not delivered; that sentence goes once production access is granted.
 - **Times are always South African Standard Time** on a 24-hour clock, written "09:30 to 09:45 SAST".
 - **Dates put the day first.** A summary reads "Tuesday 27 October 2026"; a heading under the week's range drops the
   year, "Tuesday 27 October"; and where space is short, in the action bar and the SMS, it reads "Tue 27 Oct".
