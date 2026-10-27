@@ -16,7 +16,7 @@ an SMS confirmation that cannot be lost: simulated locally, and a real SMS throu
 | Area | Today |
 |---|---|
 | Stage | Milestones M0 to M6 built: the web app's five-step booking flow, confirmation page, `/manage` and simulated inbox; booking in one transaction that also writes the confirmation SMS; lookup with the reference and the last four digits; a dispatcher that delivers the SMS through a simulated gateway, or through AWS End User Messaging SMS where a deployment asks, with the race proofs; and cancelling and retrying, in the API and the web app, with end-to-end tests in a real browser. M7, the final documentation and the release, is under way. |
-| Design | The whole design, including planned work, is on the [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX); its header names the commit it was last checked against. The repository records what is built and wins where the two disagree. |
+| Design | The whole design, including planned work, is on the [architecture page](https://katlehokomeke.github.io/Appointment-Booking-System/); its header names the commit it was last checked against. The repository records what is built and wins where the two disagree. |
 | Run locally | `make up`, then open http://localhost:8080 |
 | Hosted demo | https://branchbook.click, in AWS Cape Town (af-south-1) since 2026-10-26, open to anyone with no sign-in, and with the simulated inbox off so no visitor sees another's booking. Any South African mobile may book there: a number outside the demo block 082 555 0000 to 0199 is sent a real SMS through AWS End User Messaging SMS, at most five a day to one number (best effort over a shared route, and only to verified numbers while the AWS account is in the SMS sandbox). Defined in AWS CDK and deployed by the pipeline on every push to `main`, first by hand on 2026-10-26; each booking is deleted within the hour after its appointment ends, or at once when it is cancelled ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md), [infra/README.md](infra/README.md#the-hosted-demo)). |
 | Deployment | Every push to `main` runs `ci`. Once its `api`, `web`, `stack` and `infra` jobs pass, its `deploy` job builds the image, deploys the hosted demo's two stacks through OpenID Connect with no stored keys, smoke-tests https://branchbook.click and only then records the commit in `BranchbookRelease`, the release record in af-south-1. A red check means no deployment ([ADR-0007](docs/adr/0007-continuous-deployment-from-main.md), [docs/delivery.md](docs/delivery.md)). |
@@ -37,9 +37,9 @@ an SMS confirmation that cannot be lost: simulated locally, and a real SMS throu
 
 ## The full design
 
-<a href="https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-page-dark.png"><img src="docs/assets/architecture-page-light.png" width="100%" alt="The BranchBook architecture page: the title, a one-paragraph summary of the design and the brief it answers"></picture></a>
+<a href="https://katlehokomeke.github.io/Appointment-Booking-System/"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-page-dark.png"><img src="docs/assets/architecture-page-light.png" width="100%" alt="The BranchBook architecture page: the title, a one-paragraph summary of the design and the brief it answers"></picture></a>
 
-**[BranchBook architecture](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX)** holds the whole design, including planned work: each section is marked built, partly built or planned, with every departure from the plan.
+**[BranchBook architecture](https://katlehokomeke.github.io/Appointment-Booking-System/)** holds the whole design, including planned work: each section is marked built, partly built or planned, with every departure from the plan.
 
 ## Reviewing this repository
 

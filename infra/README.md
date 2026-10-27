@@ -199,7 +199,7 @@ What limits this today is the repository, not AWS: it has one collaborator, who 
 ([Automatic deployment](#automatic-deployment)).* The design is in
 [ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md), and where the build departs from it is in its
 [Notes](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md#notes); the cost line items are on the
-[architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX).
+[architecture page](https://katlehokomeke.github.io/Appointment-Booking-System/).
 
 The demo runs at https://branchbook.click. The domain was registered through Route 53 on 2026-10-26, and Route 53
 created its hosted zone on registration, so no stack owns DNS; the zone's ID is in [cdk.json](cdk.json)

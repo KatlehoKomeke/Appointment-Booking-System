@@ -36,3 +36,8 @@ paths = [
   # Lock files contain integrity hashes that look like secrets.
   '''(^|/)package-lock\.json$''',
 ]
+# The architecture page (index.html on gh-pages) shows this made-up UUID as an example
+# Idempotency-Key header, which the generic-api-key rule reads as a key. It is not a secret.
+regexes = [
+  '''8c4f1a2e-1b3d-4e5f-9a6b-7c8d9e0f1a2b''',
+]

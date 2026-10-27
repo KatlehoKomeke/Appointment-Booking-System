@@ -112,7 +112,7 @@ that matter most.
 
 ### The architecture page
 
-The [architecture page](https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX) holds the full design, including planned
+The [architecture page](https://katlehokomeke.github.io/Appointment-Booking-System/) holds the full design, including planned
 work. The repository records what is built; where they disagree, the code and the repository win and the page is
 corrected. Re-check it after every major commit and at the end of every milestone.
 

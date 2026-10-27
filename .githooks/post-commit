@@ -18,7 +18,7 @@ if [[ -n "${major}" ]]; then
   cat >&2 <<EOF
 post-commit: major commit ${major}
   Re-check the architecture page against the code (CONTRIBUTING.md, "The architecture page"):
-  https://claude.ai/artifact/X4b1pc9RSCboanuXBSn6oX
+  https://katlehokomeke.github.io/Appointment-Booking-System/
 EOF
 fi
 exit 0
