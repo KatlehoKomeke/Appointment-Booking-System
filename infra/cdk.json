@@ -21,7 +21,7 @@
     "githubOwnerId": "88820937",
     "githubRepositoryId": "1423867330",
     "githubEnvironment": "aws-demo",
-    "monthlyBudgetUsd": 90,
+    "monthlyBudgetUsd": 110,
     "demoDomain": "branchbook.click",
     "demoHostedZoneId": "Z08340112LPW7WEQZV0IM",
     "@aws-cdk-containers/ecs-service-extensions:enableDefaultLogDriver": true,

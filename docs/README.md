@@ -57,3 +57,4 @@ module, such as booking's `AppointmentRepository`, are left out.
 | `AppointmentNotifications` | `booking` | `MessageQueries` (`notification`), which reads a booking's SMS | Built (M3) |
 | `NotificationEraser` | `booking` | `MessageEraser` (`notification`), which deletes a purged booking's messages in the purge's transaction | Built |
 | `MessageGateway` | `notification` | `SimulatedSmsGateway`, which sends nothing; and, where `branchbook.sms.gateway` is `aws`, `RoutingSmsGateway`, which sends every number outside the demo block a real SMS through `AwsSmsGateway` (AWS End User Messaging SMS) | Built (M5; AWS after M6) |
+| `LookupAttemptStore` | `booking` | `JdbcLookupAttemptStore` (`booking`), which locks a reference's row in `lookup_attempts` with `SELECT ... FOR UPDATE`, so every instance shares the lookup limit's counts (BR-13) | Built (V8, after M6) |

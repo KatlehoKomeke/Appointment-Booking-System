@@ -77,20 +77,20 @@ log is not exported, because a constraint error's `DETAIL` line can quote a mobi
 
 ## More than one task
 
-**Today.** One Fargate task, in a public subnet with a public IP so it reaches ECR and Secrets Manager without a NAT
-gateway. The lookup limit counts wrong tries in memory, for that one instance
-([architecture.md, Lookup](architecture.md#lookup)).
+**Today.** Two Fargate tasks, one in each of two Availability Zones, in public subnets with public IPs so they reach
+ECR and Secrets Manager without a NAT gateway. The lookup limit counts wrong tries in PostgreSQL (V8), so both tasks
+share the five tries ([architecture.md, Lookup](architecture.md#lookup)).
 
 **In production:**
 
-- At least two tasks across two Availability Zones, scaling on load, in private subnets that reach AWS through VPC
-  endpoints.
+- At least two tasks across two Availability Zones, as today, scaling on load, in private subnets that reach AWS
+  through VPC endpoints.
 - What already works with several tasks: the dispatcher claims with `FOR UPDATE SKIP LOCKED`, so two tasks never
-  send the same message, and idempotency keys, seat locks and the daily cap's ledger live in PostgreSQL, the ledger
-  under one key from Secrets Manager. The hourly purges of expired keys, ended appointments and day-old ledger rows
-  delete only what is due, and the daily holiday check only logs, so running them on every task is harmless.
-- What has to change: the lookup counts move to a shared store, a PostgreSQL table or a Redis-compatible cache, or
-  each task allows five tries of its own. WAF also limits lookups per address, as it limits booking `POST`s today.
+  send the same message, and the lookup counts, idempotency keys, seat locks and the daily cap's ledger live in
+  PostgreSQL, the ledger under one key from Secrets Manager. The hourly purges of expired keys, ended appointments,
+  day-old ledger rows and closed lookup windows delete only what is due, and the daily holiday check only logs, so
+  running them on every task is harmless.
+- What has to change: WAF limits lookups per address too, as it limits booking `POST`s today.
 
 ## The pipeline deploys the application
 

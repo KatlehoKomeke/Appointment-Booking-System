@@ -25,10 +25,11 @@ import za.co.fynbos.branchbook.shared.problem.ProblemException;
  * and its idempotency keys, until they expire. It is the only change the API makes to an existing
  * appointment.
  *
- * <p>{@link #cancel} runs these steps in one READ COMMITTED transaction:
+ * <p>{@link #cancel} runs these steps, the second to the ninth in one READ COMMITTED transaction:
  *
  * <ol>
- *   <li>Count the try with the {@link LookupAttemptLimiter}, as a lookup is counted.
+ *   <li>Count the try with the {@link LookupAttemptLimiter}, as a lookup is counted, in a short
+ *       transaction of the limiter's own, before this one begins.
  *   <li>Load the appointment by reference through JPA, without a lock.
  *   <li>Compare the digits in constant time; a mismatch is {@code 404} and counts as a failure.
  *   <li>{@link Appointment#cancel}, in memory: a started appointment is {@code 409
@@ -41,6 +42,11 @@ import za.co.fynbos.branchbook.shared.problem.ProblemException;
  *   <li>Delete the appointment, with its version checked; the foreign keys keep the cancellation
  *       SMS and the idempotency keys with no appointment.
  *   <li>Commit.
+ *   <li>Settle the count, in a transaction of the limiter's own: a {@code 404}, for wrong digits or
+ *       an appointment gone by the time it could be locked, is a failure; anything else releases
+ *       the try. The count is taken outside the cancel's transaction because a wrong try always
+ *       rolls that transaction back, which must not undo the count, and because a count inside it
+ *       would need a second connection while the first is held.
  * </ol>
  *
  * <p>From the commit on, the reference is unknown: opening or cancelling it again is {@code 404
@@ -51,8 +57,8 @@ import za.co.fynbos.branchbook.shared.problem.ProblemException;
  * (see {@link RetentionPurge}). A lock not granted within 2 seconds, such as on a confirmation the
  * dispatcher is still sending, is {@code 503 TRY_AGAIN}. Every instant comes from the injected
  * clock, read once and cut to the microsecond the database keeps. Nothing is read after the commit,
- * so the response cannot fail once the cancel is done. Log lines name the appointment by id, never
- * by reference, name or number.
+ * and the settle of the count never throws, so the response cannot fail once the cancel is done.
+ * Log lines name the appointment by id, never by reference, name or number.
  */
 @Service
 public class CancelAppointmentHandler {
@@ -105,15 +111,23 @@ public class CancelAppointmentHandler {
       AppointmentReference parsed =
           AppointmentReference.parse(reference).orElseThrow(AppointmentNotFoundException::new);
       Instant now = clock.instant().truncatedTo(ChronoUnit.MICROS);
+      LookupAttemptLimiter.Attempt attempt = access.begin(parsed, now); // 1
+      boolean wrong = false;
       Cancelled cancelled;
       try {
         cancelled =
             Objects.requireNonNull(transaction.execute(status -> cancel(parsed, mobileLast4, now)));
+      } catch (AppointmentNotFoundException unknown) {
+        wrong = true;
+        throw unknown;
       } catch (OptimisticLockingFailureException gone) {
-        // Deleted, by another cancel or the purge, after its digits matched: unknown from now on.
+        // Deleted, by another cancel or the purge, after its digits matched: unknown from now on,
+        // and counted as a wrong try, exactly as an unknown reference is (BR-13, BR-14).
         log.info("cancel.gone cause=VersionConflict");
-        access.countAsUnknown(parsed, now);
+        wrong = true;
         throw new AppointmentNotFoundException();
+      } finally {
+        access.end(attempt, wrong, now); // 10
       }
       log.info("cancel.deleted appointmentId={}", cancelled.appointmentId());
       return cancelled.view();
@@ -124,13 +138,12 @@ public class CancelAppointmentHandler {
   }
 
   private Cancelled cancel(AppointmentReference reference, String mobileLast4, Instant now) {
-    Appointment appointment = access.open(reference, mobileLast4, now); // 1, 2, 3
+    Appointment appointment = access.load(reference, mobileLast4); // 2, 3
     return switch (appointment.cancel(now)) { // 4
       case TOO_LATE -> throw new TooLateToCancelException();
       case ALREADY_CANCELLED -> {
         // Only an appointment cancelled before cancels deleted their bookings, or by hand: its
-        // reference is answered as a deleted one is, and counted.
-        access.countAsUnknown(reference, now);
+        // reference is answered as a deleted one is, and counted as a wrong try at step 10.
         throw new AppointmentNotFoundException();
       }
       case CANCELLED -> {

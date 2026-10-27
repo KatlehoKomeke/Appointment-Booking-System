@@ -9,6 +9,10 @@
  *   <li>{@link za.co.fynbos.branchbook.booking.infrastructure.JdbcIdempotencyKeyStore}: the {@code
  *       Idempotency-Key} rows, purged hourly by {@link
  *       za.co.fynbos.branchbook.booking.infrastructure.IdempotencyKeyPurgeJob}.
+ *   <li>{@link za.co.fynbos.branchbook.booking.infrastructure.JdbcLookupAttemptStore}: the lookup
+ *       limiter's counts in {@code lookup_attempts}, one locked row per reference, whose closed
+ *       windows {@link za.co.fynbos.branchbook.booking.infrastructure.LookupAttemptPurgeJob}
+ *       deletes hourly.
  *   <li>{@link za.co.fynbos.branchbook.booking.infrastructure.ConstraintViolationTranslator}: turns
  *       a broken constraint or a transaction conflict into the answer it means.
  *   <li>{@link za.co.fynbos.branchbook.booking.infrastructure.JdbcBookedIntervals}: the seats

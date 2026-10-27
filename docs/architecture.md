@@ -58,7 +58,8 @@ simulated SMS gateway (M5), the cancel and retry API (M6), the real SMS gateway 
   HTTPS ([10.3](#103-in-aws)).
 - **Everything on the customer path is synchronous.** Background work runs in the same jar: `HolidayCoverageCheck`
   at start-up and daily at 06:00 SAST (M2), `IdempotencyKeyPurgeJob` every hour (M3), `RecipientSendLedgerPurgeJob`
-  every hour from a minute after start-up, which deletes the daily cap's ledger rows once they are 24 hours old, and
+  every hour from a minute after start-up, which deletes the daily cap's ledger rows once they are 24 hours old,
+  `LookupAttemptPurgeJob` every hour from an hour after start-up, which deletes the lookup limit's closed windows, and
   the dispatcher (M5), which delivers the outbox rows the booking and cancel transactions write
   ([ADR-0003](adr/0003-transactional-outbox-for-confirmations.md)). `RetentionPurgeJob` runs every hour only where a
   deployment switches it on, as the hosted demo does, and deletes each booking within the hour after its appointment
@@ -241,15 +242,27 @@ therefore cannot all pass a check made before any of them was counted. A custome
 so they never lead to the hour-long block, though a burst of them can be refused for a second while the others are
 checked. Blocking logs one warning that names no reference.
 
-The counts live in memory, in a Caffeine cache bounded to 100,000 references. That is a deliberate trade-off for
-one instance, with three consequences:
+The counts live in PostgreSQL, in `lookup_attempts` (V8): one row per reference with an open window, holding its
+failures and its lookups in flight. Every instance reads and locks the same row, so the five tries are five across
+all of them, and a restart forgets nothing. The limiter reaches the table through the `LookupAttemptStore` port,
+implemented by `JdbcLookupAttemptStore`, which locks the reference's row with `SELECT ... FOR UPDATE`.
 
-- **They are per instance.** With several instances each would allow five tries; scaling out would move the
-  counts to a shared table or cache. The hosted demo runs one task.
-- **A restart forgets them.** At worst an attacker gets five more tries per restart, out of 10,000 combinations.
-- **The bound could be flooded.** Evicting one reference's window would take failed lookups of about 100,000
-  others, and Caffeine prefers to keep entries that are used often. A per-address limit on lookups at the edge
-  would close it; the hosted demo's web application firewall limits only booking and cancel `POST`s per address today.
+- **Each count is its own transaction.** `begin` and `end` each run in a short `REQUIRES_NEW` transaction, outside
+  the lookup's or the cancel's. `AppointmentAccess` counts before the caller's transaction and settles after it. So
+  a wrong-digit cancel's count survives the cancel's rollback, a read-only lookup never writes, and the limiter
+  never waits for a second connection from inside a transaction.
+- **A lost settle does bounded harm.** A lookup in flight holds its place on a 30-second lease
+  (`LookupAttemptLimiter.IN_FLIGHT_LEASE`), far above any lookup. A lookup whose instance crashed, or whose settle
+  failed, stops counting once the lease runs out. A settle that fails never changes the customer's answer: it logs
+  `lookup.count_not_settled` with the exception's class only.
+- **Closed windows are cleared.** A closed window is ignored and replaced at the next lookup. `LookupAttemptPurgeJob`
+  deletes closed windows hourly and logs `lookup_attempts.purged count=N`, so the table holds about an hour of
+  wrongly looked-up references.
+- **Each instance uses its own clock.** Two instances disagree only by their clocks' difference: milliseconds on the
+  hosted demo's tasks.
+
+A per-address limit on lookups at the edge is still open: the hosted demo's web application firewall limits only
+booking and cancel `POST`s per address today.
 
 Because the window is per reference, someone who knows a reference can block its lookup for an hour. A reference
 is printed only in the customer's own SMS and pages, and production would bind appointments to a verified identity
@@ -365,9 +378,9 @@ transitions are modelled and tested so the next feature, branch check-in, has a 
 
 ## 7. Data model
 
-*Status: Built in M1; V6 and V7 change it after M6.*
+*Status: Built in M1; V6, V7 and V8 change it after M6.*
 
-![The nine tables grouped by owning module: catalogue owns branches, hours, services, branch_services and public_holidays; booking owns appointments and idempotency_keys; notification owns notification_messages and sms_recipient_sends, the daily cap's ledger. Appointments reference branch_services by a composite key, and two exclusion constraints reject an overlapping seat or an overlapping booking by one mobile.](assets/diagrams/data-model.svg)
+![The ten tables grouped by owning module: catalogue owns branches, hours, services, branch_services and public_holidays; booking owns appointments, idempotency_keys and lookup_attempts, the lookup limit's counts; notification owns notification_messages and sms_recipient_sends, the daily cap's ledger. Appointments reference branch_services by a composite key, and two exclusion constraints reject an overlapping seat or an overlapping booking by one mobile.](assets/diagrams/data-model.svg)
 
 Each table belongs to one module. The one read across a module boundary is `booking`'s `SELECT ... FOR UPDATE`
 on the `branch_services` row (step 6 of [the booking transaction](#4-the-booking-transaction)); `scheduling`
@@ -382,23 +395,25 @@ learns which seats are held through `booking`'s `JdbcBookedIntervals`, so it nev
 | `public_holidays` | `catalogue` | 2 |
 | `appointments` | `booking` | 15 |
 | `idempotency_keys` | `booking` | 6 |
+| `lookup_attempts` | `booking` | 5 |
 | `notification_messages` | `notification` | 12 |
 | `sms_recipient_sends` | `notification` | 1 |
-| **Total** | | **56** |
+| **Total** | | **61** |
 
-The 56 are 8 primary keys, 3 unique constraints, 37 checks, 6 foreign keys and 2 exclusion constraints.
+The 61 are 9 primary keys, 3 unique constraints, 41 checks, 6 foreign keys and 2 exclusion constraints.
 `sms_recipient_sends`, the daily cap's ledger, has no primary key, because two SMS to one number can be written at
 the same instant and each must count, and no foreign key: a row holds a number's keyed fingerprint and when its SMS
 was written, nothing that leads back to a booking or a message. Since V6 a cancellation SMS may outlive its
 appointment: `notification_messages.appointment_id` and `idempotency_keys.appointment_id` are set to null when the
 appointment is deleted, and `notification_messages_detached_cancellation_only` lets only a cancellation have none.
-Eight partial or plain indexes serve the hot queries: `ix_appointments_slot_lookup` (availability and the lowest free
+`lookup_attempts` has no foreign key either: a deleted reference must count exactly like one never issued.
+Nine partial or plain indexes serve the hot queries: `ix_appointments_slot_lookup` (availability and the lowest free
 seat), `ix_appointments_customer_active` (the duplicate and overlap checks), `ix_idempotency_keys_expires` (the
 hourly purge), `ix_notification_messages_due`, `_appointment` and `_created` (the dispatcher's claim, an
-appointment's messages and the simulated inbox), and `ix_sms_recipient_sends_fingerprint` and `_written` (the daily
-cap's count and the ledger's hourly purge).
+appointment's messages and the simulated inbox), `ix_sms_recipient_sends_fingerprint` and `_written` (the daily
+cap's count and the ledger's hourly purge), and `ix_lookup_attempts_closes` (the lookup limit's hourly purge).
 
-The schema is created by seven Flyway migrations, never edited once committed:
+The schema is created by eight Flyway migrations, never edited once committed:
 
 | Migration | Contents |
 |---|---|
@@ -409,6 +424,7 @@ The schema is created by seven Flyway migrations, never edited once committed:
 | [`V5__notification_messages_recipient_index.sql`](../api/src/main/resources/db/migration/V5__notification_messages_recipient_index.sql) | The index the per-recipient daily cap first counted through, which V7 drops |
 | [`V6__cancel_deletes_the_booking.sql`](../api/src/main/resources/db/migration/V6__cancel_deletes_the_booking.sql) | A cancel deletes the appointment: the two foreign keys to it set null on delete, and only a cancellation may have no appointment |
 | [`V7__sms_recipient_sends.sql`](../api/src/main/resources/db/migration/V7__sms_recipient_sends.sql) | The daily cap's ledger, `sms_recipient_sends`, and its two indexes |
+| [`V8__lookup_attempts.sql`](../api/src/main/resources/db/migration/V8__lookup_attempts.sql) | The lookup limit's counts, `lookup_attempts`, shared by every instance, and its purge index |
 
 Every constraint is named, because the application maps a violation to an API error by its name.
 [`SchemaConstraintIT`](../api/src/test/java/za/co/fynbos/branchbook/SchemaConstraintIT.java) proves each one fires,
@@ -466,7 +482,7 @@ record to AWS once every check passes, and the demo runs in Cape Town (af-south-
 
 ### 10.1 Locally: the image and the stack
 
-![From source to a running stack: a three-stage Dockerfile builds the React app and the jar into branchbook:local (user 10001, /readyz health check). make up runs it with PostgreSQL 17 in Docker Compose on 127.0.0.1 and waits until both are healthy. CI's stack job builds and smoke-tests the same image, which the hosted demo runs as one Fargate task.](assets/diagrams/local-runtime.svg)
+![From source to a running stack: a three-stage Dockerfile builds the React app and the jar into branchbook:local (user 10001, /readyz health check). make up runs it with PostgreSQL 17 in Docker Compose on 127.0.0.1 and waits until both are healthy. CI's stack job builds and smoke-tests the same image, which the hosted demo runs as two Fargate tasks.](assets/diagrams/local-runtime.svg)
 
 `make up` runs `docker compose up --build --detach --wait --wait-timeout 300`, and the numbers in the picture
 follow its start-up order:
@@ -475,7 +491,7 @@ follow its start-up order:
    on the Temurin 25 JDK, then a Temurin 25 JRE runtime that runs as user 10001.
 2. The `db` service starts PostgreSQL 17.
 3. `pg_isready` succeeds and `db` is healthy; [`compose.yaml`](../compose.yaml) starts `app` only then.
-4. The app starts: Flyway applies V1 to V7, and Hibernate validates the schema against the entities.
+4. The app starts: Flyway applies V1 to V8, and Hibernate validates the schema against the entities.
 5. `/readyz` answers UP, and Docker marks the container healthy.
 6. `--wait` returns, and `make up` prints the URL.
 
@@ -499,7 +515,7 @@ each workflow proves and the gaps that remain.
 
 ### 10.3 In AWS
 
-![BranchBook in AWS, all built: the administrator's account stack in us-east-1 (OIDC provider, narrow deploy role, $90 budget), and in Cape Town the three stacks the pipeline deploys on every push to main: the release record and the demo, where Route 53, WAF and a load balancer front one Fargate task that uses RDS and texts only South African numbers through AWS End User Messaging.](assets/diagrams/aws-footprint.svg)
+![BranchBook in AWS, all built: the administrator's account stack in us-east-1 (OIDC provider, narrow deploy role, $110 budget), and in Cape Town the three stacks the pipeline deploys on every push to main: the release record and the demo, where Route 53, WAF and a load balancer front two Fargate tasks in two availability zones that use RDS and texts only South African numbers through AWS End User Messaging.](assets/diagrams/aws-footprint.svg)
 
 The letter and numbers in the picture:
 
@@ -525,11 +541,17 @@ registration.
 A reviewer's request to https://branchbook.click: Route 53 resolves the name to the load balancer; AWS WAF, attached
 to the load balancer, blocks `/actuator`, comparing the decoded, lowercased path, and allows 10 booking and cancel
 `POST`s per address in 5 minutes, with no sign-in; the load balancer redirects plain HTTP to HTTPS, ends HTTPS and
-forwards to one ARM64 Fargate task on port 8080, which serves only the health and info endpoints; and the task
+forwards to one of two ARM64 Fargate tasks on port 8080, which serve only the health and info endpoints; and each task
 reaches RDS for PostgreSQL 17 over TLS, directly. The simulated inbox is off there, so no visitor sees another's
 booking, and each booking is deleted within the hour after its appointment ends, or at once when it is cancelled
 ([ADR-0006, Notes](adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). The picture draws Route 53, then WAF, then the
 load balancer for readability; Route 53 only resolves the name.
+
+The two tasks run in the two availability zones, so one can fail or be replaced while the other serves. Nothing
+depends on one task: the lookup counts (V8), the dispatcher's `FOR UPDATE SKIP LOCKED` claims, the idempotency keys,
+the seat locks and the daily cap's ledger all live in PostgreSQL, and the hourly jobs delete only what is due, so
+both tasks run them harmlessly. The demo costs about $102 a month before VAT; the budget in `BranchbookAccount` is
+$110, with e-mails at $55, $88 and $110.
 
 Since 2026-10-27 the hosted demo texts real SMS, and any South African mobile number may book. The task sends
 through AWS End User Messaging SMS in Cape Town, through a protect configuration that allows South Africa alone and

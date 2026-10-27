@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -15,11 +16,14 @@ import java.time.ZoneOffset;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.QueryTimeoutException;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.SimpleTransactionStatus;
+import org.springframework.transaction.support.TransactionOperations;
 import za.co.fynbos.branchbook.shared.config.BookingProperties;
 
 /**
  * BR-13, at the handler: how a lookup's outcome reaches the limiter. The repository is a stub, so
- * the database can be made to fail on cue.
+ * the database can be made to fail on cue, and the limiter counts in a map.
  */
 class LookupAppointmentHandlerTest {
 
@@ -27,13 +31,18 @@ class LookupAppointmentHandlerTest {
 
   private final AppointmentRepository appointments = mock(AppointmentRepository.class);
 
+  private final PlatformTransactionManager transactions = mock(PlatformTransactionManager.class);
+
   private final LookupAppointmentHandler handler =
       new LookupAppointmentHandler(
+          transactions,
           new AppointmentAccess(
               appointments,
               new LookupAttemptLimiter(
                   new BookingProperties(
-                      Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false))),
+                      Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false),
+                  new InMemoryLookupAttemptStore(),
+                  TransactionOperations.withoutTransaction())),
           mock(AppointmentViews.class),
           Clock.fixed(Instant.parse("2026-10-26T06:00:00Z"), ZoneOffset.UTC));
 
@@ -45,6 +54,7 @@ class LookupAppointmentHandlerTest {
    */
   @Test
   void lookupWhoseReadFailsIsNeitherCountedNorLeftInFlight() {
+    when(transactions.getTransaction(any())).thenReturn(new SimpleTransactionStatus());
     doThrow(new QueryTimeoutException("statement timeout"))
         .when(appointments)
         .findByReference(any());

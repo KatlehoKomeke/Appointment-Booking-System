@@ -58,7 +58,7 @@ appointment is over.
 | A transactional outbox with one dispatcher thread, one transaction per message | No booking without its SMS, no SMS without its booking; one bad row never holds up the rest | At-least-once: a crash between the send and its mark can repeat one SMS | [ADR-0003](adr/0003-transactional-outbox-for-confirmations.md), [BR-16](domain-rules.md#br-16), [BR-17](domain-rules.md#br-17) |
 | No login; a reference and the last four digits open a booking | A sign-in in front of a demo turns away the people it is for; it collects the least the brief allows | A demo number's last four digits are public, so the hosted demo keeps its inbox off | [ADR-0004](adr/0004-restraint-no-login-no-id-number.md), [BR-11](domain-rules.md#br-11), [BR-13](domain-rules.md#br-13) |
 | Each hosted booking is deleted once its appointment is over; a cancelled one at once | Personal data with no further use is not kept | No history and no no-show analysis; the SMS daily cap keeps a keyed fingerprint of each number for a day, never the number | [BR-14](domain-rules.md#br-14), [BR-17](domain-rules.md#br-17), the privacy notice at `/privacy` |
-| One Fargate task in a public subnet, no NAT gateway, Single-AZ RDS | About $82 a month for a demo whose traffic is a handful of reviewers | The lookup limiter and the dispatcher assume one task; [production-notes.md](production-notes.md) says what a bank deployment adds | [ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md) |
+| Two Fargate tasks in two availability zones, public subnets, no NAT gateway, Single-AZ RDS | About $102 a month for a demo whose traffic is a handful of reviewers, and one task can fail while the other serves | The database is still one instance in one zone; [production-notes.md](production-notes.md) says what a bank deployment adds | [ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md) |
 
 ## Where to look, in order
 
@@ -73,8 +73,8 @@ appointment is over.
 
 ## What it does not do
 
-- It runs as one task: the lookup attempt limiter is in memory and the dispatcher is one thread. Two tasks would
-  need the limiter in the database; the dispatcher's claim is already safe for two.
+- It runs as two tasks, not an autoscaling fleet. Both share the lookup limit's counts in PostgreSQL (V8), and the
+  dispatcher's claim is safe for two, but nothing adds a third task under load.
 - Delivery is best effort over AWS's shared route, and while the account is in the SMS sandbox only verified numbers
   receive a text; the booking stands either way.
 - There are no staff screens, reminders, rescheduling or an email channel, each ruled out with its reason in the

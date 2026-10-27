@@ -55,11 +55,11 @@ files live in `.github/workflows/`.
 | booking-transaction | `booking/application/`; `V2__schema.sql` | when the booking transaction's steps change | `85cd726` |
 | confirmation-states | `notification/`; the `notification_messages` table in `V2__schema.sql` and `V6__cancel_deletes_the_booking.sql` | when the outbox, the dispatcher or the daily cap changes | `4d4ba68` |
 | appointment-lifecycle | `booking/domain/AppointmentStatus.java`; `booking/application/CancelAppointmentHandler.java` | when a status or a transition changes | `85cd726` |
-| data-model | `api/src/main/resources/db/migration/`; the writers in `booking/application/` and `notification/application/` | With a new migration | `4d4ba68` |
-| local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; the `Makefile` up and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box) | when a route, a management endpoint or the compose stack changes | `21798b6` |
+| data-model | `api/src/main/resources/db/migration/`; the writers in `booking/application/` and `notification/application/` | With a new migration | `44b8d1c` |
+| local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; the `Makefile` up and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box) | when a route, a management endpoint or the compose stack changes | `44b8d1c` |
 | delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/bin/branchbook.ts`; the `main` ruleset and the `aws-demo` environment | when a workflow, a job, a hook or a GitHub setting changes | `21798b6` |
 | push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured after the first run of the pipeline with `deploy` inside `ci` | `85cd726` (measured at `c5feafe`, before the `deploy` job joined `ci`) |
-| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/cdk.json` | when a stack, or who deploys it, changes | `21798b6` |
+| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/cdk.json` | when a stack, or who deploys it, changes | `44b8d1c` |
 | keyless-deploy | `ci.yml` (job `deploy`); `infra/lib/account-stack.ts` | on hardening; when the `deploy` job's steps change | `21798b6` |
 | access-boundary | `infra/lib/account-stack.ts`; `infra/bin/branchbook.ts`; `ci.yml` (job `deploy`); `aws-connection-check.yml`; the `aws-demo` environment; the `main` ruleset; the bootstrap commands in infra/README.md | on hardening; when a guard changes | `21798b6` |
 | secret-layers | `.gitignore`; `.githooks/pre-commit`; `.gitleaks.toml`; `secret-scan.yml`; `ci.yml` (job `stack`); `infra/lib/data-stack.ts` and `infra/lib/app-stack.ts` (the generated secrets and the task's secrets); the repository's security settings | when a layer is added or changes | `21798b6` |
@@ -109,7 +109,7 @@ no commit at all.
 
 - One file per diagram: `docs/assets/diagrams/<id>.svg`, at most 40 KB.
 - `viewBox="0 0 960 H"` with `width="960"` and `height="H"`. H is a multiple of 8 and at most 800. The one exception
-  is [data-model.svg](data-model.svg), at 872: its nine tables do not fit in 800.
+  is [data-model.svg](data-model.svg), at 1024: its ten tables do not fit in 800.
 - Every file paints its own card: `<rect class="card" x="0.5" y="0.5" width="959" height="H-1" rx="16"/>`. Content
   stays between x 24 and x 936.
 - An 8 px grid with integer coordinates; a 1 px stroke sits on a .5 coordinate so it renders crisp. Padding is 24 px

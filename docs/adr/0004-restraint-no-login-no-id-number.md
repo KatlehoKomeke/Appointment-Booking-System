@@ -37,8 +37,8 @@ relevant and not excessive for its purpose (section 10).
   its reference, branch or time ([BR-23](../domain-rules.md#br-23)). This is accepted for the demo; OTP
   verification closes it.
 - Someone who knows a reference can block its lookup for an hour with five wrong tries. A reference appears only
-  in the customer's own SMS and pages, so this is accepted too. The limit's counts are kept in memory for one
-  instance ([docs/architecture.md](../architecture.md), section 4).
+  in the customer's own SMS and pages, so this is accepted too. From V8 the limit's counts are kept in PostgreSQL,
+  shared by every instance ([docs/architecture.md](../architecture.md), section 4).
 - Branch check-in is the natural next feature, and its domain logic already exists.
 
 ## Notes
