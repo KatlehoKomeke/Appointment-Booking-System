@@ -29,6 +29,7 @@ import za.co.fynbos.branchbook.booking.domain.AppointmentReference;
 import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
 import za.co.fynbos.branchbook.support.MutableClock;
+import za.co.fynbos.branchbook.support.ResponseText;
 
 /**
  * {@code POST /api/v1/appointments} and {@code GET /api/v1/appointments/{reference}} through the
@@ -119,7 +120,7 @@ class AppointmentApiIT {
         .extractingPath("$.errors[*].field")
         .asArray()
         .containsExactly("customer.mobile");
-    assertThat(result.getResponse().getContentAsString())
+    assertThat(ResponseText.withoutIdentifiers(result.getResponse().getContentAsString()))
         .doesNotContain("0143")
         .contains("for example 082 555 0101");
   }

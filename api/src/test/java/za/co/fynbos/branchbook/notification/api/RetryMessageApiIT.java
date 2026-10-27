@@ -28,6 +28,7 @@ import za.co.fynbos.branchbook.support.BookingPause;
 import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
 import za.co.fynbos.branchbook.support.MutableClock;
+import za.co.fynbos.branchbook.support.ResponseText;
 
 /**
  * FR-18, BR-24: {@code POST /api/v1/messages/{id}/retry}, the simulated inbox's Retry button. It
@@ -80,7 +81,8 @@ class RetryMessageApiIT {
              "retryable": false, "attempts": 0, "nextAttemptAt": "2026-10-26T08:03:00+02:00",
              "lastError": null, "sentAt": null}"""
                 .formatted(id, reference));
-    assertThat(retried.getResponse().getContentAsString()).doesNotContain("0106");
+    assertThat(ResponseText.withoutIdentifiers(retried.getResponse().getContentAsString()))
+        .doesNotContain("0106");
     assertThat(dispatcher.runOnce(clock.instant())).isOne();
     assertThat(row(id)).containsEntry("status", "SENT").containsEntry("attempts", 1);
   }

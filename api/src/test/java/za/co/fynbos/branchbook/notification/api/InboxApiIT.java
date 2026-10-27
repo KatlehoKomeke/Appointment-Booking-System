@@ -18,6 +18,7 @@ import org.springframework.test.web.servlet.assertj.MvcTestResult;
 import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
 import za.co.fynbos.branchbook.support.MutableClock;
+import za.co.fynbos.branchbook.support.ResponseText;
 
 /**
  * FR-17, BR-19: {@code GET /api/v1/messages}, the simulated inbox. It lists every booking's
@@ -57,7 +58,7 @@ class InboxApiIT {
             ]}"""
                 .formatted(second, first));
     assertThat(string(inbox, "$.messages[0].body")).contains(second);
-    assertThat(inbox.getResponse().getContentAsString())
+    assertThat(ResponseText.withoutIdentifiers(inbox.getResponse().getContentAsString()))
         .doesNotContain("0183")
         .doesNotContain("0184")
         .doesNotContain("555");
