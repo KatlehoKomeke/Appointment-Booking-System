@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -57,11 +58,14 @@ import za.co.fynbos.branchbook.shared.problem.ProblemException;
  * holds bookings. It books nothing where {@code branchbook.booking.demo-numbers-only} is on, as on
  * the hosted demo (ADR-0006): the fixtures' numbers are outside the published demo numbers on
  * purpose, so the README's walkthrough never meets them, and the handler, which does not check that
- * rule, would otherwise store numbers that deployment promises it never takes. It says so in one
- * line at INFO instead. It runs on a thread of its own, after the application is ready, so it never
- * delays readiness, and under one correlation id, {@code sys-<uuid>}, which its log lines and the
- * three confirmations carry. A fixture that cannot be booked is logged as a warning, by its branch
- * and service only, and the others carry on; nothing it does can stop the application.
+ * rule, would otherwise store numbers that deployment promises it never takes. It also books
+ * nothing where {@code branchbook.sms.gateway} is {@code aws}: fixtures booked at start-up must
+ * never send a real SMS, whatever their numbers, and only the published demo block is kept
+ * simulated there. In either case it says so in one line at INFO instead. It runs on a thread of
+ * its own, after the application is ready, so it never delays readiness, and under one correlation
+ * id, {@code sys-<uuid>}, which its log lines and the three confirmations carry. A fixture that
+ * cannot be booked is logged as a warning, by its branch and service only, and the others carry on;
+ * nothing it does can stop the application.
  */
 @Component
 class DemoDataLoader {
@@ -82,8 +86,13 @@ class DemoDataLoader {
   private final Clock clock;
   private final BookingProperties rules;
   private final DemoDataProperties settings;
+  private final boolean realSms;
   private final Executor background;
 
+  /**
+   * The loader the application uses. The SMS gateway is read as the plain setting, so booking never
+   * depends on the notification module's settings type.
+   */
   @Autowired
   DemoDataLoader(
       BookAppointmentHandler booking,
@@ -92,7 +101,8 @@ class DemoDataLoader {
       JdbcClient jdbc,
       Clock clock,
       BookingProperties rules,
-      DemoDataProperties settings) {
+      DemoDataProperties settings,
+      @Value("${branchbook.sms.gateway:simulated}") String smsGateway) {
     this(
         booking,
         calendars,
@@ -101,10 +111,23 @@ class DemoDataLoader {
         clock,
         rules,
         settings,
+        "aws".equalsIgnoreCase(smsGateway.strip()),
         task -> Thread.ofVirtual().name("demo-data").start(task));
   }
 
-  /** As above, with the executor the load is handed to; the tests pass their own. */
+  /** As the application's loader, where the SMS gateway is simulated; the tests use it. */
+  DemoDataLoader(
+      BookAppointmentHandler booking,
+      BranchCalendarProvider calendars,
+      BookedIntervalsPort bookedIntervals,
+      JdbcClient jdbc,
+      Clock clock,
+      BookingProperties rules,
+      DemoDataProperties settings) {
+    this(booking, calendars, bookedIntervals, jdbc, clock, rules, settings, "simulated");
+  }
+
+  /** With a simulated gateway and the executor the load is handed to; the tests pass their own. */
   DemoDataLoader(
       BookAppointmentHandler booking,
       BranchCalendarProvider calendars,
@@ -114,6 +137,20 @@ class DemoDataLoader {
       BookingProperties rules,
       DemoDataProperties settings,
       Executor background) {
+    this(booking, calendars, bookedIntervals, jdbc, clock, rules, settings, false, background);
+  }
+
+  /** Every collaborator given, including whether the deployment sends real SMS. */
+  DemoDataLoader(
+      BookAppointmentHandler booking,
+      BranchCalendarProvider calendars,
+      BookedIntervalsPort bookedIntervals,
+      JdbcClient jdbc,
+      Clock clock,
+      BookingProperties rules,
+      DemoDataProperties settings,
+      boolean realSms,
+      Executor background) {
     this.booking = booking;
     this.calendars = calendars;
     this.bookedIntervals = bookedIntervals;
@@ -121,6 +158,7 @@ class DemoDataLoader {
     this.clock = clock;
     this.rules = rules;
     this.settings = settings;
+    this.realSms = realSms;
     this.background = background;
   }
 
@@ -141,14 +179,18 @@ class DemoDataLoader {
   }
 
   /**
-   * Books the fixtures if no appointment exists and the deployment takes any mobile number. It
-   * never throws: any failure is logged.
+   * Books the fixtures if no appointment exists, the deployment takes any mobile number and its SMS
+   * are simulated. It never throws: any failure is logged.
    *
    * @return how many fixtures were booked
    */
   int loadIfEmpty() {
     try (var _ = MDC.putCloseable(CorrelationIds.MDC_KEY, CorrelationIds.systemId())) {
       try {
+        if (realSms) {
+          log.info("demo_data.skipped reason=real_sms_gateway");
+          return 0;
+        }
         if (rules.demoNumbersOnly()) {
           log.info("demo_data.skipped reason=demo_numbers_only");
           return 0;
