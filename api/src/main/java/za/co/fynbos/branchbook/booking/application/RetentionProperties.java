@@ -1,42 +1,40 @@
 package za.co.fynbos.branchbook.booking.application;
 
-import jakarta.validation.constraints.NotNull;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
 
 /**
- * How long a booking is kept, under {@code branchbook.retention}: the hosted demo promises to
- * delete every booking, with the customer's name and number, after 48 hours (SECURITY.md,
- * ADR-0006).
+ * How long a booking is kept, under {@code branchbook.retention}: the hosted demo keeps each
+ * booking, with the customer's name and number, until its appointment is over, and deletes it
+ * within the hour after it ends (SECURITY.md, ADR-0006).
  *
- * <p>The application refuses to start with a max-age shorter than {@link #MINIMUM_MAX_AGE}, even
- * while the purge is switched off, so a mistyped value shows at start-up and never as bookings
- * deleted early. The floor is the 24 hours an {@code Idempotency-Key} is honoured for (BR-12): from
- * then on every key of a purged appointment has already expired, so the purge can never turn a
- * client's retry into a second booking. It also stops a value without its unit, which Spring reads
- * as milliseconds, from deleting bookings while their customers are still on the confirmation page.
+ * <p>A booking is never deleted before its appointment ends, so a customer who books days ahead
+ * keeps it until the day. {@code after-end} can keep it for longer; it is zero by default, and the
+ * application refuses to start with a negative one, even while the purge is switched off, so a
+ * mistyped value shows at start-up and never as bookings deleted early.
+ *
+ * <p>Deleting an appointment also deletes its {@code Idempotency-Key}, which may still have hours
+ * to run when the appointment is short and booked the same day. That cannot turn a retry into a
+ * second booking: by then the slot has started, and every booking of a slot that has started is
+ * refused (BR-12, BR-21).
  *
  * @param enabled whether the hourly purge runs; {@code false} by default and locally, {@code true}
  *     only in the hosted demo's task definition
- * @param maxAge how long after its booking an appointment is deleted, with its messages and its
- *     idempotency keys; {@code PT48H} by default, and never less than {@link #MINIMUM_MAX_AGE}
+ * @param afterEnd how long after its appointment ends a booking is deleted, with its messages and
+ *     its idempotency keys; {@code PT0S} by default, and never negative
  */
 @Validated
 @ConfigurationProperties("branchbook.retention")
-public record RetentionProperties(boolean enabled, @NotNull Duration maxAge) {
+public record RetentionProperties(boolean enabled, @DefaultValue("PT0S") Duration afterEnd) {
 
-  /** The shortest max-age allowed: the lifetime of an {@code Idempotency-Key} (BR-12). */
-  public static final Duration MINIMUM_MAX_AGE = Duration.ofHours(24);
-
-  /** Refuses a missing max-age, or one shorter than {@link #MINIMUM_MAX_AGE}. */
+  /** Refuses a missing or negative {@code after-end}. */
   public RetentionProperties {
-    if (maxAge == null || maxAge.compareTo(MINIMUM_MAX_AGE) < 0) {
+    if (afterEnd == null || afterEnd.isNegative()) {
       throw new IllegalArgumentException(
-          "branchbook.retention.max-age must be at least "
-              + MINIMUM_MAX_AGE
-              + ", how long an Idempotency-Key is honoured, so the purge never deletes a booking a"
-              + " retry could still replay");
+          "branchbook.retention.after-end must be zero or more, an ISO-8601 duration such as PT0S"
+              + " or PT24H, so the purge never deletes a booking before its appointment ends");
     }
   }
 }

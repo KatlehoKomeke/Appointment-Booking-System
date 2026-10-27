@@ -4,17 +4,20 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 
 import java.time.Duration;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.StandardEnvironment;
+import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 /**
- * The retention settings refuse a max-age that is missing, not positive, or shorter than the 24
- * hours an {@code Idempotency-Key} is honoured for, and that refusal stops start-up. No database is
- * needed: the settings are bound in a context of their own.
+ * The retention settings keep a booking until its appointment is over: {@code after-end} is zero by
+ * default, may add a delay, and is refused when missing or negative, which stops start-up. No
+ * database is needed: the settings are bound in a context of their own.
  */
 class RetentionPropertiesTest {
 
@@ -22,45 +25,57 @@ class RetentionPropertiesTest {
       new ApplicationContextRunner().withUserConfiguration(RetentionSettings.class);
 
   @Test
-  void acceptsFortyEightHoursAndExactlyTheFloor() {
-    assertThat(new RetentionProperties(true, Duration.ofHours(48)).maxAge())
-        .isEqualTo(Duration.ofHours(48));
-    assertThat(new RetentionProperties(true, Duration.ofHours(24)).maxAge())
-        .isEqualTo(RetentionProperties.MINIMUM_MAX_AGE);
+  void acceptsZeroAndADelay() {
+    assertThat(new RetentionProperties(true, Duration.ZERO).afterEnd()).isEqualTo(Duration.ZERO);
+    assertThat(new RetentionProperties(true, Duration.ofHours(24)).afterEnd())
+        .isEqualTo(Duration.ofHours(24));
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"PT23H59M59S", "PT1H", "PT0S", "-PT48H"})
-  void refusesAMaxAgeShorterThanTheFloorZeroOrNegative(String maxAge) {
+  @ValueSource(strings = {"-PT1S", "-PT48H"})
+  void refusesANegativeAfterEnd(String afterEnd) {
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new RetentionProperties(false, Duration.parse(maxAge)))
-        .withMessageContaining("at least PT24H");
+        .isThrownBy(() -> new RetentionProperties(false, Duration.parse(afterEnd)))
+        .withMessageContaining("zero or more");
   }
 
   @Test
-  void refusesAMissingMaxAge() {
+  void refusesAMissingAfterEnd() {
     assertThatIllegalArgumentException().isThrownBy(() -> new RetentionProperties(false, null));
   }
 
+  /** Unset, the purge is off and deletes a booking as soon as its appointment has ended. */
   @Test
-  void bindsFromTheSettingsAndIsOffUnlessSwitchedOn() {
-    context
-        .withPropertyValues("branchbook.retention.max-age=PT48H")
+  void isOffAndDeletesAtTheEndUnlessSetOtherwise() {
+    withEnvironment(Map.of())
         .run(
             started -> {
               RetentionProperties bound = started.getBean(RetentionProperties.class);
               assertThat(bound.enabled()).isFalse();
-              assertThat(bound.maxAge()).isEqualTo(Duration.ofHours(48));
+              assertThat(bound.afterEnd()).isEqualTo(Duration.ZERO);
             });
   }
 
-  /** A value below the floor stops start-up, even with the purge switched off. */
-  @ParameterizedTest
-  @ValueSource(strings = {"PT1H", "48", "PT0S"})
-  void aMaxAgeBelowTheFloorStopsStartUp(String maxAge) {
+  /** The names the hosted demo's task definition uses bind to the settings. */
+  @Test
+  void bindsFromTheEnvironmentNames() {
+    withEnvironment(
+            Map.of(
+                "BRANCHBOOK_RETENTION_ENABLED", "true", "BRANCHBOOK_RETENTION_AFTER_END", "PT2H"))
+        .run(
+            started -> {
+              RetentionProperties bound = started.getBean(RetentionProperties.class);
+              assertThat(bound.enabled()).isTrue();
+              assertThat(bound.afterEnd()).isEqualTo(Duration.ofHours(2));
+            });
+  }
+
+  /** A negative value stops start-up, even with the purge switched off. */
+  @Test
+  void aNegativeAfterEndStopsStartUp() {
     context
         .withPropertyValues(
-            "branchbook.retention.enabled=false", "branchbook.retention.max-age=" + maxAge)
+            "branchbook.retention.enabled=false", "branchbook.retention.after-end=-PT1H")
         .run(
             started ->
                 assertThat(started)
@@ -68,7 +83,20 @@ class RetentionPropertiesTest {
                     .getFailure()
                     .rootCause()
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessageContaining("at least PT24H"));
+                    .hasMessageContaining("zero or more"));
+  }
+
+  /** The runner with the developer's environment replaced by the given variables. */
+  private ApplicationContextRunner withEnvironment(Map<String, Object> variables) {
+    return context.withInitializer(
+        started ->
+            started
+                .getEnvironment()
+                .getPropertySources()
+                .replace(
+                    StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME,
+                    new SystemEnvironmentPropertySource(
+                        StandardEnvironment.SYSTEM_ENVIRONMENT_PROPERTY_SOURCE_NAME, variables)));
   }
 
   /** Binds the retention settings alone. */

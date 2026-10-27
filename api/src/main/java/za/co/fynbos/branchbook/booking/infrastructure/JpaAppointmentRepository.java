@@ -64,11 +64,11 @@ class JpaAppointmentRepository implements AppointmentRepository {
             AND status IN %s AND starts_at < :endsAt AND ends_at > :startsAt)"""
           .formatted(AppointmentStatus.ACTIVE_SQL);
 
-  private static final String LOCK_CREATED_NO_LATER_THAN =
+  private static final String LOCK_ENDED_NO_LATER_THAN =
       """
       SELECT id FROM appointments
-      WHERE created_at <= :cutoff
-      ORDER BY created_at, id
+      WHERE ends_at <= :cutoff
+      ORDER BY ends_at, id
       LIMIT :limit
       FOR UPDATE SKIP LOCKED""";
 
@@ -168,8 +168,8 @@ class JpaAppointmentRepository implements AppointmentRepository {
   }
 
   @Override
-  public List<UUID> lockCreatedNoLaterThan(Instant cutoff, int limit) {
-    return jdbc.sql(LOCK_CREATED_NO_LATER_THAN)
+  public List<UUID> lockEndedNoLaterThan(Instant cutoff, int limit) {
+    return jdbc.sql(LOCK_ENDED_NO_LATER_THAN)
         .param("cutoff", utc(cutoff))
         .param("limit", limit)
         .query(UUID.class)

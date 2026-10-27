@@ -45,8 +45,9 @@ public interface IdempotencyKeyStore {
 
   /**
    * Deletes the keys that booked the given appointments, in the caller's transaction, so the
-   * retention purge can delete the appointments. By then each key has expired, because the purge's
-   * max-age is never shorter than a key's 24 hours, so no retry loses a replay.
+   * retention purge can delete the appointments. The purge deletes only appointments that have
+   * ended, so a key that has not yet expired can no longer book anything: a retry of it asks for a
+   * slot that has started, which every booking refuses.
    *
    * @param appointmentIds the appointments being deleted; may be empty
    * @return how many keys were deleted

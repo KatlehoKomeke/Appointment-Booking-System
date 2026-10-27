@@ -18,9 +18,10 @@
  * simulated inbox and tells the dispatcher and the retry of a message whether an appointment is
  * cancelled or has started, so no other module reads booking's tables.
  *
- * <p>{@link za.co.fynbos.branchbook.booking.application.RetentionPurge} deletes appointments older
- * than {@link za.co.fynbos.branchbook.booking.application.RetentionProperties#maxAge()}, with their
- * messages and keys, in small transactions, for the hosted demo's 48-hour promise.
+ * <p>{@link za.co.fynbos.branchbook.booking.application.RetentionPurge} deletes appointments once
+ * they have ended, plus {@link
+ * za.co.fynbos.branchbook.booking.application.RetentionProperties#afterEnd()}, with their messages
+ * and keys, in small transactions, so the hosted demo keeps a booking until it is over.
  *
  * <p>{@link za.co.fynbos.branchbook.booking.application.BookingOutcome} is the one place that
  * decides how a booking request ended, for the {@code appointments_booked_total} metric (FR-30).
