@@ -227,7 +227,7 @@ adds `step=details`, then `step=review`. The name and number stay in the tab's s
 - **Simulated inbox.** Every message the outbox has produced, newest first, with its status, attempts and last error,
   under a banner saying it is a demo operator view, switched off in production, where every message is simulated.
 - **Privacy notice.** The POPIA section 18 notice: Fynbos Bank (fictional demo) as the responsible party, the three
-  fields collected and why, the hosted demo's deletion of every booking after 48 hours, and the customer's rights,
+  fields collected and why, the hosted demo's deletion of each booking once its appointment is over, and the customer's rights,
   including a complaint to the Information Regulator.
 
 Every page opens with the fictional-bank banner and the header, and ends with links to the inbox and the privacy

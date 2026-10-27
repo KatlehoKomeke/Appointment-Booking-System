@@ -60,7 +60,7 @@ its API is built.*
   at start-up and daily at 06:00 SAST (M2), `IdempotencyKeyPurgeJob` every hour (M3) and the dispatcher (M5), which
   delivers the outbox rows the booking transaction writes
   ([ADR-0003](adr/0003-transactional-outbox-for-confirmations.md)). `RetentionPurgeJob` runs every hour only where a
-  deployment switches it on, as the hosted demo does, and deletes each booking 48 hours after it was made
+  deployment switches it on, as the hosted demo does, and deletes each booking once its appointment is over
   ([runbook](runbook.md#did-the-48-hour-purge-run)). `DemoDataLoader` runs once after start-up where
   `branchbook.demo-data.enabled` is on, which only compose sets: on an empty database it books three demo
   appointments through the booking handler, and where `branchbook.booking.demo-numbers-only` is on it skips with one
@@ -152,7 +152,7 @@ Every module may use `shared` (config, correlation, problem, security, time, web
 |---|---|---|
 | `catalogue` | Built (M1, M2) | Branches, services, weekday trading hours, capacities and public holidays. Read-only at runtime; seeded by Flyway. |
 | `scheduling` | Built (M2) | `SlotCalendar`, a pure function that computes and validates slots in the branch's time zone, and the availability query. It learns which seats are taken through the `BookedIntervalsPort`, which `booking` implements, so it never reads the appointments table itself. |
-| `booking` | Built (M3, M6) | The `Appointment` aggregate, the booking transaction, idempotency, lookup, cancellation (M6), the 48-hour retention purge, the demo data (M6) and the `appointments_booked_total` counter (M6). |
+| `booking` | Built (M3, M6) | The `Appointment` aggregate, the booking transaction, idempotency, lookup, cancellation (M6), the retention purge of ended appointments, the demo data (M6) and the `appointments_booked_total` counter (M6). |
 | `notification` | Built (M3, M5, M6) | The outbox writer, the confirmation and cancellation templates, the read of an appointment's messages, the dispatcher with the `MessageGateway` port and its simulated SMS gateway, the simulated inbox, the retry of a FAILED message (M6) and the `outbox_pending` gauge (M6). It reads nothing from `catalogue`: the booking hands it the branch's and the service's short names with the appointment. |
 | `shared` | Built | Problem responses, correlation ids, security headers, the clock and configuration. |
 
@@ -340,7 +340,7 @@ stateDiagram-v2
 Cancellation is the only transition the API offers: `POST /api/v1/appointments/{reference}/cancel` with
 `X-Mobile-Last4`, through the same check and rate limit as a lookup. Before the start it frees the seat at once,
 supersedes a confirmation not yet sent and writes the cancellation SMS, all in one transaction; a repeat is the same
-`200`; at or after the start it is `409 TOO_LATE_TO_CANCEL`; and an appointment the 48-hour purge has deleted is
+`200`; at or after the start it is `409 TOO_LATE_TO_CANCEL`; and an appointment the retention job has already deleted is
 `404 APPOINTMENT_NOT_FOUND`, never a `500`. The staff transitions are modelled and tested
 so the next feature, branch check-in, has a correct foundation
 ([ADR-0004](adr/0004-restraint-no-login-no-id-number.md)).
@@ -491,7 +491,7 @@ to the load balancer, blocks `/actuator`, comparing the decoded, lowercased path
 `POST`s per address in 5 minutes, with no sign-in; the load balancer redirects plain HTTP to HTTPS, ends HTTPS and
 forwards to one ARM64 Fargate task on port 8080, which serves only the health and info endpoints; and the task
 reaches RDS for PostgreSQL 17 over TLS, directly. The simulated inbox is off there, so no visitor sees another's
-booking, and every booking is deleted 48 hours after it is made
+booking, and each booking is deleted once its appointment is over
 ([ADR-0006, Notes](adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). The picture draws Route 53, then WAF, then the
 load balancer for readability; Route 53 only resolves the name.
 

@@ -31,7 +31,7 @@ describe('PrivacyPage', () => {
       'To schedule, confirm and manage this appointment, and for nothing else:',
     );
     expect(screen.getByRole('region', { name: 'How long we keep it' })).toHaveTextContent(
-      'deletes every booking, with your name and number, from its database about 48 hours after it is made',
+      'keeps a booking, with your name and number, until its appointment is over, and deletes it within the hour after it ends',
     );
     // The backups outlive the deletion, so the notice says how long they last.
     expect(screen.getByRole('region', { name: 'How long we keep it' })).toHaveTextContent(

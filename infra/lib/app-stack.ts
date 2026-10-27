@@ -72,7 +72,7 @@ export interface AppStackProps extends StackProps {
  * 2. AWS WAF, attached to the load balancer, blocks `/actuator` (403), allows 10 bookings or cancellations per
  *    address in five minutes, and applies AWS's managed rules for known bad inputs and addresses. There is no
  *    sign-in: anyone with the address can try the demo. It texts the confirmation for real, to South African numbers
- *    only, at most five a day to one number, and deletes every booking after 48 hours.
+ *    only, at most five a day to one number, and deletes each booking once its appointment is over.
  * 3. The load balancer ends HTTPS with an ACM certificate, redirects plain HTTP to it, and health-checks `/readyz`.
  * 4. One ARM64 Fargate task (0.5 vCPU, 1 GB) serves the request on port 8080. It accepts traffic only from the load
  *    balancer, and runs in a public subnet so it reaches ECR, Secrets Manager and AWS End User Messaging without a
@@ -163,7 +163,7 @@ export class AppStack extends Stack {
         // demo number's last four digits are public, so anyone could open anyone's booking. Each booker still sees
         // their own SMS and its status on the confirmation page.
         BRANCHBOOK_INBOX_ENABLED: 'false',
-        // Every booking, with its name and number, is deleted 48 hours after it was made, as the privacy notice
+        // Each booking, with its name and number, is deleted once its appointment is over, as the privacy notice
         // says of the hosted demo.
         BRANCHBOOK_RETENTION_ENABLED: 'true',
         // Real SMS through AWS End User Messaging, in Cape Town, to South African numbers only (the protect
@@ -264,7 +264,8 @@ export class AppStack extends Stack {
 
   /**
    * The web ACL in front of the load balancer. It asks for no sign-in: a prompt in front of a demo turned away the
-   * people it is for (ADR-0006 Notes). The demo-number check and the 48-hour deletion keep real personal data out.
+   * people it is for (ADR-0006 Notes). Texting South Africa only, five a day to a number, and deleting each booking
+   * once its appointment is over keep what an open demo can do, and hold, small.
    */
   private webAcl(): wafv2.CfnWebACL {
     const visibility = (metricName: string): wafv2.CfnWebACL.VisibilityConfigProperty => ({

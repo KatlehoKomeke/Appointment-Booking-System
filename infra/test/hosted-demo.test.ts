@@ -73,7 +73,7 @@ describe('AppStack', () => {
     });
   });
 
-  test('gives the app the public address the SMS links to, over TLS to the database, with the inbox off and the 48-hour deletion on', () => {
+  test('gives the app the public address the SMS links to, over TLS to the database, with the inbox off and ended bookings deleted', () => {
     app.hasResourceProperties('AWS::ECS::TaskDefinition', {
       ContainerDefinitions: [
         Match.objectLike({

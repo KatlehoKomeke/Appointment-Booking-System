@@ -76,8 +76,8 @@ experience for everyone who opens it, reviewers included. Since 2026-10-27 it te
 mobile number may book, and the demo-numbers-only rule (`BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY`) is off. Every page
 asks visitors to use only their own number. What limits the personal data it holds, and who it can text:
 
-- **Every booking is deleted 48 hours after it is made** (`BRANCHBOOK_RETENTION_ENABLED`), live since 2026-10-26
-  (058e6fd); the deletion runs every hour.
+- **Each booking is deleted once its appointment is over** (`BRANCHBOOK_RETENTION_ENABLED`): the hourly job removes
+  it, with its messages and idempotency keys, within the hour after it ends, and never before.
 - **South Africa only.** The SMS go through AWS End User Messaging SMS in Cape Town (`BRANCHBOOK_SMS_GATEWAY=aws`),
   with a protect configuration that blocks SMS to every country AWS lists except South Africa, and every voice and
   MMS destination. The task role may call `sms-voice:SendTextMessage` through that protect configuration and nothing

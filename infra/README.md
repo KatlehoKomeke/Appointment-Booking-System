@@ -235,7 +235,7 @@ The task is configured by environment variables; there are no `prod` or `demo` S
 | `DB_USER`, `DB_PASSWORD` | From the Secrets Manager secret `branchbook/database`; never in the template |
 | `PUBLIC_BASE_URL` | `https://branchbook.click`, the confirmation SMS's `/manage` link |
 | `BRANCHBOOK_INBOX_ENABLED` | `false`: the simulated inbox is off, so `/api/v1/messages` answers 404 and the `/messages` page says it is switched off on this deployment. Each booker still sees their own SMS and its status on the confirmation page |
-| `BRANCHBOOK_RETENTION_ENABLED` | `true`: an hourly job deletes every booking 48 hours after it was made, with its messages and idempotency keys. Live since 058e6fd |
+| `BRANCHBOOK_RETENTION_ENABLED` | `true`: an hourly job deletes each booking, with its messages and idempotency keys, once its appointment is over |
 | `BRANCHBOOK_SMS_GATEWAY` | `aws`: each SMS goes through AWS End User Messaging SMS ([Real SMS](#real-sms)). The published demo numbers, 082 555 0000 to 082 555 0199, stay on the simulated gateway |
 | `BRANCHBOOK_SMS_AWS_REGION` | `af-south-1`, the stack's own Region |
 | `BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID` | The ID of the stack's protect configuration, which every send names |
@@ -250,7 +250,7 @@ off, because the demo now texts the number it is given.
 **No sign-in.** Anyone with the address can try the demo: a sign-in prompt in front of a demo is a poor experience
 for everyone who opens it, reviewers included
 ([ADR-0006, Notes](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). What limits what a visitor can do is
-the 48-hour deletion above, live since 058e6fd, the SMS controls under [Real SMS](#real-sms), and WAF's limit on
+the deletion of each booking once its appointment is over, the SMS controls under [Real SMS](#real-sms), and WAF's limit on
 bookings and cancellations. The inbox is off because, with no sign-in, it would list every booking's reference to
 every visitor, and a demo number's last four digits are public, so anyone could open a booking made with one and see
 the name typed into it.
