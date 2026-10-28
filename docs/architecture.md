@@ -4,7 +4,7 @@ This document explains how BranchBook is built and why. The decisions behind it 
 [docs/adr](adr/README.md); the business rules are in [domain-rules.md](domain-rules.md). The whole design,
 including the parts not built yet, is on the [architecture page](https://katlehokomeke.github.io/Appointment-Booking-System/).
 
-**Status: design complete; milestones M0 to M6 are built, and M7, the final pass before v1.0.0, is under way.** M0
+**Status: design complete; milestones M0 to M7 are built, and `v1.0.0` is tagged.** M0
 is the skeleton: one jar that serves the app, PostgreSQL 17 migrated by Flyway, health probes and security headers.
 M1 adds the whole schema, the seeded catalogue, the `catalogue` module with the public-holiday rule, and the shared
 error and correlation-id handling. M2 adds the `scheduling` module (`SlotCalendar` and the availability API) and
