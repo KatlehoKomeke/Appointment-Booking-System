@@ -1,9 +1,15 @@
 # .github/dependabot.yml
 #
-# Each week, Dependabot opens a pull request when a pinned dependency, base image or GitHub Action has a newer
-# version. CI must pass before such a pull request is merged. Minor and patch updates are grouped into one pull
+# Each week, Dependabot opens a pull request when a pinned dependency, base image, tool image or GitHub Action has a
+# newer version. CI must pass before such a pull request is merged. Minor and patch updates are grouped into one pull
 # request per package ecosystem, so updates stay reviewable; a major version always gets its own pull request,
 # because it may need code changes.
+#
+# Every entry waits 14 days after a release before proposing it (cooldown), the same supply-chain rule the
+# repository applies to every pin by hand: a compromised release is usually found and pulled within days.
+#
+# Actions are pinned to a full commit SHA with the version in a trailing comment, and images to a tag and a digest;
+# Dependabot moves both together.
 #
 # Some majors are deliberate choices, so they are ignored here; adopting one is a decision of its own:
 # - Java and Node.js stay on their LTS lines (25 and 24), and @types/node follows the Node.js line in .nvmrc.
@@ -17,6 +23,8 @@ updates:
     directory: /api
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 14
     groups:
       api-minor-and-patch:
         update-types: [minor, patch]
@@ -25,6 +33,8 @@ updates:
     directory: /web
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 14
     ignore:
       - dependency-name: typescript
         update-types: ['version-update:semver-major']
@@ -38,6 +48,8 @@ updates:
     directory: /infra
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 14
     ignore:
       - dependency-name: typescript
         update-types: ['version-update:semver-major']
@@ -47,30 +59,56 @@ updates:
       infra-minor-and-patch:
         update-types: [minor, patch]
 
+  # Playwright and axe, which the end-to-end tests run in CI.
+  - package-ecosystem: npm
+    directory: /e2e
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 14
+    ignore:
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/node'
+        update-types: ['version-update:semver-major']
+    groups:
+      e2e-minor-and-patch:
+        update-types: [minor, patch]
+
   # The base images in the Dockerfile.
   - package-ecosystem: docker
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 14
     ignore:
       - dependency-name: eclipse-temurin
         update-types: ['version-update:semver-major']
       - dependency-name: node
         update-types: ['version-update:semver-major']
 
-  # The PostgreSQL image in compose.yaml.
+  # The PostgreSQL image in compose.yaml, and the tool images CI runs (Trivy, k6, ZAP, actionlint, zizmor, gitleaks)
+  # in .github/tools/compose.yaml.
   - package-ecosystem: docker-compose
-    directory: /
+    directories:
+      - /
+      - /.github/tools
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 14
     ignore:
       - dependency-name: postgres
         update-types: ['version-update:semver-major']
 
+  # Every `uses:` in .github/workflows.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 14
     groups:
       actions-minor-and-patch:
         update-types: [minor, patch]
