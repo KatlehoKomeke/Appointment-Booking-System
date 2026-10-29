@@ -1,5 +1,6 @@
 /**
- * The whole app: the API cache and the router, around the routes in `routes.tsx`.
+ * The whole app: the API cache, the CAPTCHA the firewall can ask for, and the router, around the routes in
+ * `routes.tsx`.
  *
  * @packageDocumentation
  */
@@ -7,6 +8,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { createBrowserRouter, RouterProvider } from 'react-router';
 
 import { createQueryClient } from './app/queryClient';
+import { CaptchaProvider } from './captcha/CaptchaProvider';
 import { routes } from './routes';
 
 const router = createBrowserRouter(routes);
@@ -16,7 +18,9 @@ const queryClient = createQueryClient();
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <CaptchaProvider>
+        <RouterProvider router={router} />
+      </CaptchaProvider>
     </QueryClientProvider>
   );
 }
