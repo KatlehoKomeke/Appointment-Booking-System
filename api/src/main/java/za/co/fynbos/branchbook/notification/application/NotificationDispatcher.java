@@ -85,6 +85,7 @@ public class NotificationDispatcher {
   private final MessageGateway gateway;
   private final AppointmentDirectory appointments;
   private final OutboxPendingGauge pending;
+  private final OutboxHealthGauges health;
   private final DeliveryCircuit circuit;
   private final RetryBackoff backoff;
   private final int batchSize;
@@ -96,6 +97,7 @@ public class NotificationDispatcher {
       MessageGateway gateway,
       AppointmentDirectory appointments,
       OutboxPendingGauge pending,
+      OutboxHealthGauges health,
       DeliveryCircuit circuit,
       RetryBackoff backoff,
       DispatcherProperties settings) {
@@ -107,6 +109,7 @@ public class NotificationDispatcher {
     this.gateway = gateway;
     this.appointments = appointments;
     this.pending = pending;
+    this.health = health;
     this.circuit = circuit;
     this.backoff = backoff;
     this.batchSize = settings.batchSize();
@@ -115,7 +118,7 @@ public class NotificationDispatcher {
 
   /**
    * Runs one tick: delivers the messages that are due, up to {@code batch-size}, unless the circuit
-   * is open, then counts those still PENDING for the {@code outbox.pending} gauge.
+   * is open, then refreshes the {@code outbox.pending} gauge and the {@link OutboxHealthGauges}.
    *
    * @param now the current instant, from the application's clock; the tests pass their own
    * @return how many messages the tick handled
@@ -156,6 +159,7 @@ public class NotificationDispatcher {
       handled++;
     }
     pending.refresh();
+    health.tickCompleted();
     return handled;
   }
 

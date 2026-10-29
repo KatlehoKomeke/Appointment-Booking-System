@@ -84,6 +84,8 @@ class NotificationDispatcherIT {
 
   @Autowired private OutboxPendingGauge pending;
 
+  @Autowired private OutboxHealthGauges health;
+
   @Autowired private DispatcherProperties settings;
 
   /** The clock the circuits built by these tests wait on, apart from the application's. */
@@ -878,6 +880,7 @@ class NotificationDispatcherIT {
         gateway,
         directory,
         pending,
+        health,
         circuit,
         new RetryBackoff(noJitter(), () -> 0.0),
         dispatcherSettings);
