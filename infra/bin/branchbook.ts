@@ -14,7 +14,7 @@
  * anything personal. Nothing sensitive is ever written to the repository.
  */
 import { App, Tags } from 'aws-cdk-lib/core';
-import { AccountStack } from '../lib/account-stack';
+import { AccountStack, loadAccountConfig } from '../lib/account-stack';
 import { AppStack } from '../lib/app-stack';
 import { DataStack } from '../lib/data-stack';
 import { ReleaseStack } from '../lib/release-stack';
@@ -55,18 +55,14 @@ const account = process.env.CDK_DEFAULT_ACCOUNT;
 // It is therefore only part of the app when BRANCHBOOK_ALERT_EMAIL is set: on an administrator's machine, or with a
 // placeholder in the credential-free infra job. The deploy job never sets it, so the pipeline cannot even
 // synthesise this stack, let alone deploy it. The address is personal data and is never committed.
+const accountConfig = loadAccountConfig();
 const alertEmail = optionalEnv('BRANCHBOOK_ALERT_EMAIL');
 if (alertEmail !== undefined) {
   new AccountStack(app, 'BranchbookAccount', {
-    env: { account, region: 'us-east-1' },
-    description: 'BranchBook: GitHub OIDC deploy role and monthly cost budget (no customer data).',
-    githubRepository: context('githubRepository'),
-    githubOwnerId: context('githubOwnerId'),
-    githubRepositoryId: context('githubRepositoryId'),
-    githubEnvironment: context('githubEnvironment'),
+    env: { account, region: accountConfig.accountRegion },
+    description: 'BranchBook: GitHub OIDC deploy roles and monthly cost budget (no customer data).',
+    config: accountConfig,
     alertEmail,
-    monthlyBudgetUsd: Number(context('monthlyBudgetUsd')),
-    releaseRegion: 'af-south-1',
   });
 }
 
