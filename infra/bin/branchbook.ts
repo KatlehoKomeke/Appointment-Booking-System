@@ -17,6 +17,7 @@ import { App, Tags } from 'aws-cdk-lib/core';
 import { AccountStack, loadAccountConfig } from '../lib/account-stack';
 import { AppStack } from '../lib/app-stack';
 import { DataStack } from '../lib/data-stack';
+import { GuardrailsStack } from '../lib/guardrails-stack';
 import { ReleaseStack } from '../lib/release-stack';
 
 const app = new App();
@@ -63,6 +64,17 @@ if (alertEmail !== undefined) {
     description: 'BranchBook: GitHub OIDC deploy roles and monthly cost budget (no customer data).',
     config: accountConfig,
     alertEmail,
+  });
+}
+
+// BranchbookGuardrails holds the audit trail, the detective controls and the policies that limit every deployment,
+// so, like BranchbookAccount, only an administrator deploys it, with their own credentials. It is part of the app
+// only when BRANCHBOOK_GUARDRAILS=true, which the deploy job never sets.
+if (process.env.BRANCHBOOK_GUARDRAILS === 'true') {
+  new GuardrailsStack(app, 'BranchbookGuardrails', {
+    env: { account, region: accountConfig.workloadRegion },
+    description: 'BranchBook: CloudTrail, GuardDuty, AWS Config, Security Hub, Access Analyzer and the deployment policies (no customer data).',
+    config: accountConfig,
   });
 }
 
