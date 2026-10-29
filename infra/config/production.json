@@ -1,0 +1,96 @@
+{
+  "name": "production",
+  "stackIdPrefix": "Branchbook",
+  "resourcePrefix": "branchbook",
+  "region": "af-south-1",
+  "availabilityZones": ["af-south-1a", "af-south-1b"],
+  "domain": {
+    "name": "branchbook.click",
+    "hostedZoneName": "branchbook.click",
+    "hostedZoneId": "Z08340112LPW7WEQZV0IM"
+  },
+  "network": {
+    "cidr": "10.40.0.0/16",
+    "subnetCidrMask": 24,
+    "natGateways": 2
+  },
+  "database": {
+    "instanceClass": "t4g.micro",
+    "multiAz": true,
+    "allocatedStorageGiB": 20,
+    "maxAllocatedStorageGiB": 50,
+    "backupRetentionDays": 14,
+    "deletionProtection": true,
+    "connectionBudget": 75,
+    "connectionHeadroom": 10,
+    "appUser": "branchbook_app"
+  },
+  "service": {
+    "cpu": 512,
+    "memoryMiB": 1024,
+    "minTasks": 2,
+    "maxTasks": 4,
+    "minHealthyPercent": 100,
+    "maxHealthyPercent": 200,
+    "dbPoolSize": 5,
+    "cpuTargetPercent": 60,
+    "requestsPerTargetPerMinute": 600,
+    "scaleOutCooldownSeconds": 60,
+    "scaleInCooldownSeconds": 300,
+    "containerInsights": true,
+    "stopTimeoutSeconds": 30,
+    "deregistrationDelaySeconds": 30,
+    "healthCheckGracePeriodSeconds": 180
+  },
+  "healthCheck": {
+    "intervalSeconds": 15,
+    "healthyThreshold": 2,
+    "unhealthyThreshold": 3,
+    "containerIntervalSeconds": 10,
+    "containerTimeoutSeconds": 3,
+    "containerRetries": 3,
+    "containerStartPeriodSeconds": 90
+  },
+  "migration": {
+    "cpu": 512,
+    "memoryMiB": 1024,
+    "dbPoolSize": 2,
+    "timeoutMinutes": 15
+  },
+  "logs": {
+    "appRetentionDays": 30,
+    "wafRetentionDays": 30,
+    "flowLogRetentionDays": 30
+  },
+  "waf": {
+    "bookingLimit": 10,
+    "bookingWindowSeconds": 300,
+    "lookupLimit": 100,
+    "lookupWindowSeconds": 300,
+    "requestLimit": 1000,
+    "requestWindowSeconds": 300,
+    "captchaImmunitySeconds": 300,
+    "syntheticTrafficBypass": false
+  },
+  "sms": {
+    "gateway": "aws",
+    "recipientDailyCap": 5,
+    "allowedCountry": "ZA"
+  },
+  "alarms": {
+    "serverErrorThreshold": 5,
+    "serverErrorPeriodMinutes": 5,
+    "noHealthyTaskMinutes": 3,
+    "databaseFreeStorageGiB": 2
+  },
+  "appEnvironment": {
+    "SPRING_PROFILES_ACTIVE": "prod",
+    "BRANCHBOOK_MIGRATE_ON_START": "false",
+    "BRANCHBOOK_INBOX_ENABLED": "false",
+    "BRANCHBOOK_INBOX_REDACT_REFERENCES": "true",
+    "BRANCHBOOK_RETENTION_ENABLED": "true",
+    "BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY": "false",
+    "MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE": "health,info",
+    "SERVER_FORWARD_HEADERS_STRATEGY": "native"
+  }
+}
