@@ -1,10 +1,9 @@
-import * as path from 'node:path';
-import { CfnOutput, Duration, Stack, StackProps } from 'aws-cdk-lib/core';
+import { ArnFormat, CfnOutput, Duration, RemovalPolicy, SecretValue, Stack, StackProps, Validations } from 'aws-cdk-lib/core';
 import * as acm from 'aws-cdk-lib/aws-certificatemanager';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as cloudwatchActions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
-import { Platform } from 'aws-cdk-lib/aws-ecr-assets';
+import * as ecr from 'aws-cdk-lib/aws-ecr';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
 import * as iam from 'aws-cdk-lib/aws-iam';
@@ -18,47 +17,69 @@ import * as sns from 'aws-cdk-lib/aws-sns';
 import * as subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
 import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
-import { DATABASE_NAME } from './data-stack';
+import { CaptchaApiKey } from './captcha-api-key';
+import { EnvironmentConfig, retentionDays } from './config';
+import { DATABASE_NAME, POSTGRES_PORT, SUBNET_GROUPS } from './data-stack';
+import { SchemaMigration } from './schema-migration';
+import { ANY_RESOURCE_FINDING, LAMBDA_BASIC_EXECUTION_FINDING } from './nag';
 import { MMS_COUNTRIES, SMS_COUNTRIES, VOICE_COUNTRIES } from './sms-countries';
 
+/** The port the app serves its pages, API and probes on; the only port the load balancer reaches. */
+export const APP_PORT = 8080;
+
 /**
- * Bookings and cancellations one address may make in {@link BOOKING_RATE_WINDOW_SECONDS} before WAF refuses more
- * (ADR-0006). Each sends a real SMS on the hosted demo, so the limit is WAF's lowest.
+ * The management (actuator) port of the `prod` profile. Nothing routes to it: it is in no target group and no
+ * security group rule, so only the task itself can call it.
  */
-export const BOOKING_RATE_LIMIT = 10;
+export const MANAGEMENT_PORT = 8081;
 
-/** The most SMS the app sends to one number in a day, whatever the bookings (SECURITY.md, known risks). */
-export const SMS_RECIPIENT_DAILY_CAP = 5;
+/** HTTPS, the one port the task may call out on, besides PostgreSQL. */
+const HTTPS_PORT = 443;
 
-/** The only country the hosted demo texts: the app accepts South African mobile numbers alone (BR-19). */
-export const SMS_COUNTRY = 'ZA';
+/** Where the image keeps the RDS certificate bundle that `sslmode=verify-full` checks the server against. */
+export const RDS_CA_BUNDLE = '/app/certs/rds-global-bundle.pem';
 
-/** The window of the booking rate limit: five minutes. */
-export const BOOKING_RATE_WINDOW_SECONDS = 300;
+/** The JDBC driver of the AWS Advanced JDBC Wrapper, which signs the IAM authentication token. */
+export const AWS_JDBC_DRIVER = 'software.amazon.jdbc.Driver';
+
+/** The API path that bookings, lookups and cancellations share. */
+export const APPOINTMENTS_PATH = '/api/v1/appointments';
+
+/** The header the pipeline's synthetic traffic carries its token in (staging only). */
+export const SYNTHETIC_TRAFFIC_HEADER = 'x-branchbook-synthetic';
+
+/** The header a lookup or cancellation carries the number's last four digits in. */
+export const MOBILE_LAST4_HEADER = 'x-mobile-last4';
+
+/** The names of the app's container and of the migration's. */
+export const CONTAINER_NAMES = { app: 'App', migrate: 'Migrate' } as const;
+
+/** The scratch volume mounted at /tmp, the one writable path in the container's read-only file system. */
+const TMP_VOLUME = 'tmp';
 
 /**
  * Configuration for {@link AppStack}.
  */
 export interface AppStackProps extends StackProps {
+  /** The environment: sizes, limits, thresholds, retention, names and the app's settings. */
+  readonly config: EnvironmentConfig;
+
   /** The network from {@link DataStack}. */
   readonly vpc: ec2.IVpc;
 
-  /** The database from {@link DataStack}; its generated secret supplies the credentials. */
+  /** The database from {@link DataStack}. */
   readonly database: rds.DatabaseInstance;
 
   /** The SMS daily cap's HMAC key from {@link DataStack}, injected into the task and never into the template. */
   readonly smsCapKey: secretsmanager.ISecret;
 
-  /**
-   * The public domain, at most 20 characters so that `https://` and it fit the 28 the confirmation SMS allows
-   * (BR-18). Its Route 53 hosted zone was created when the domain was registered.
-   */
-  readonly domainName: string;
+  /** The ECR repository the image is pulled from, `branchbook` (see {@link RegistryStack}). */
+  readonly repositoryName: string;
 
-  /** The ID of that hosted zone. Public, not a secret, and written out so that synthesis needs no lookup. */
-  readonly hostedZoneId: string;
+  /** The digest of the image every task runs, `sha256:...`, from `BRANCHBOOK_IMAGE_DIGEST`. */
+  readonly imageDigest: string;
 
-  /** Where the three alarms are e-mailed, if anywhere. Personal data, so supplied at deploy time only. */
+  /** Where the alarms are e-mailed, if anywhere. Personal data, so supplied at deploy time only. */
   readonly alertEmail?: string;
 
   /**
@@ -69,59 +90,77 @@ export interface AppStackProps extends StackProps {
 }
 
 /**
- * The hosted demo's application, in Cape Town (`af-south-1`), on the network and database of {@link DataStack}
- * (ADR-0006). A reviewer's request takes this path:
+ * One environment's application, in Cape Town (`af-south-1`), on the network and database of {@link DataStack}
+ * (ADR-0006). A request takes this path:
  *
  * 1. Route 53 answers the domain with the load balancer's address.
- * 2. AWS WAF, attached to the load balancer, blocks `/actuator` (403), allows 10 bookings or cancellations per
- *    address in five minutes, and applies AWS's managed rules for known bad inputs and addresses. There is no
- *    sign-in: anyone with the address can try the demo. It texts the confirmation for real, to South African numbers
- *    only, at most five a day to one number, and deletes each booking once its appointment is over.
- * 3. The load balancer ends HTTPS with an ACM certificate, redirects plain HTTP to it, and health-checks `/readyz`.
- * 4. One of two ARM64 Fargate tasks (0.5 vCPU, 1 GB each), spread across the two zones, serves the request on port
- *    8080. Each accepts traffic only from the load balancer, and runs in a public subnet so it reaches ECR, Secrets
- *    Manager and AWS End User Messaging without a NAT gateway. It may send SMS through the stack's protect
- *    configuration and nothing else.
- * 5. The task reaches RDS on port 5432 over TLS, directly, with no RDS Proxy; the database accepts only the task.
+ * 2. AWS WAF, attached to the load balancer, blocks `/actuator`, blocks an address that makes too many bookings or
+ *    cancellations, lookups or requests of any kind, and asks for a CAPTCHA on every booking and cancellation, before
+ *    AWS's managed rules.
+ * 3. The load balancer ends HTTPS with an ACM certificate, redirects plain HTTP to it, and health-checks `/readyz` on
+ *    port 8080. The management port, 8081, is never routed.
+ * 4. One of the Fargate tasks serves the request. The tasks run in private subnets with no public address, accept
+ *    traffic only from the load balancer, and may call out only on 443 (AWS's APIs, through the NAT gateways) and to
+ *    the database on 5432. Their root file system is read-only and they hold no Linux capabilities. Autoscaling keeps
+ *    their number between the configured bounds.
+ * 5. The task signs in to RDS as `branchbook_app` with an IAM token over TLS (`verify-full`); it has no database
+ *    password. Only the migration task, run once per image before the service is updated, has the master secret.
  *
- * The image is built from the repository's Dockerfile for ARM64 when the stack is deployed. Application logs are
- * kept for seven days, and three alarms e-mail through an SNS topic.
+ * Every number, name and limit comes from the environment's configuration (infra/config).
  */
 export class AppStack extends Stack {
-  /** The address reviewers open. */
+  /** The address the environment serves. */
   public readonly url: string;
+
+  /** The Fargate service. */
+  public readonly service: ecs.FargateService;
+
+  /** The service's target group behind the HTTPS listener. */
+  public readonly targetGroup: elbv2.ApplicationTargetGroup;
+
+  /** The internet-facing load balancer. */
+  public readonly loadBalancer: elbv2.ApplicationLoadBalancer;
+
+  /** The database the service uses. */
+  public readonly database: rds.DatabaseInstance;
+
+  /** The topic every alarm publishes to. */
+  public readonly alarmTopic: sns.Topic;
+
+  /** The web ACL in front of the load balancer. */
+  public readonly webAcl: wafv2.CfnWebACL;
+
+  /** The migration that runs before the service is updated. */
+  public readonly migration: SchemaMigration;
+
+  /** The one-off migration task definition. */
+  public readonly migrationTask: ecs.FargateTaskDefinition;
 
   constructor(scope: Construct, id: string, props: AppStackProps) {
     super(scope, id, props);
+    const { config } = props;
+    const prefix = config.resourcePrefix;
+    this.database = props.database;
+    this.url = `https://${config.domain.name}`;
 
-    if (props.domainName.length > 20) {
-      throw new Error(`domainName must be at most 20 characters for the SMS link (BR-18): ${props.domainName}`);
-    }
-    this.url = `https://${props.domainName}`;
-
+    // The construct IDs below are those of the first deployment; renaming one would replace the resource.
     const zone = route53.HostedZone.fromHostedZoneAttributes(this, 'Zone', {
-      hostedZoneId: props.hostedZoneId,
-      zoneName: props.domainName,
+      hostedZoneId: config.domain.hostedZoneId,
+      zoneName: config.domain.hostedZoneName,
     });
     const certificate = new acm.Certificate(this, 'Certificate', {
-      domainName: props.domainName,
+      domainName: config.domain.name,
       validation: acm.CertificateValidation.fromDns(zone),
     });
 
-    const cluster = new ecs.Cluster(this, 'Cluster', { vpc: props.vpc });
-
-    const logGroup = new logs.LogGroup(this, 'Logs', {
-      logGroupName: '/branchbook/app',
-      retention: logs.RetentionDays.ONE_WEEK,
+    const cluster = new ecs.Cluster(this, 'Cluster', {
+      vpc: props.vpc,
+      containerInsightsV2: config.service.containerInsights ? ecs.ContainerInsights.ENABLED : ecs.ContainerInsights.DISABLED,
     });
 
-    const task = new ecs.FargateTaskDefinition(this, 'Task', {
-      cpu: 512,
-      memoryLimitMiB: 1024,
-      runtimePlatform: {
-        cpuArchitecture: ecs.CpuArchitecture.ARM64,
-        operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
-      },
+    const logGroup = new logs.LogGroup(this, 'Logs', {
+      logGroupName: `/${prefix}/app`,
+      retention: retentionDays(config.logs.appRetentionDays),
     });
 
     const secret = props.database.secret;
@@ -129,158 +168,304 @@ export class AppStack extends Stack {
       throw new Error('the database must have generated credentials');
     }
     const endpoint = props.database.dbInstanceEndpointAddress;
-
-    // Real SMS go through AWS End User Messaging. A protect configuration allows every country by default, so it
-    // blocks each one AWS lists except South Africa, and every voice and MMS destination; the app names it on every
-    // send, so it holds whatever the account's default is.
-    const smsProtection = new smsvoice.CfnProtectConfiguration(this, 'SmsProtection', {
-      countryRuleSet: {
-        sms: SMS_COUNTRIES.map((countryCode) => ({
-          countryCode,
-          protectStatus: countryCode === SMS_COUNTRY ? 'ALLOW' : 'BLOCK',
-        })),
-        voice: VOICE_COUNTRIES.map((countryCode) => ({ countryCode, protectStatus: 'BLOCK' })),
-        mms: MMS_COUNTRIES.map((countryCode) => ({ countryCode, protectStatus: 'BLOCK' })),
-      },
-    });
-    // SendTextMessage is authorised against the resources a send names; with no origination identity (AWS's shared
-    // route) that is the protect configuration alone, so the task may send through this one and nothing else.
-    task.addToTaskRolePolicy(
-      new iam.PolicyStatement({
-        actions: ['sms-voice:SendTextMessage'],
-        resources: [smsProtection.attrArn],
-      }),
+    const image = ecs.ContainerImage.fromEcrRepository(
+      ecr.Repository.fromRepositoryName(this, 'Repository', props.repositoryName),
+      props.imageDigest,
     );
-
-    task.addContainer('App', {
-      image: ecs.ContainerImage.fromAsset(path.join(__dirname, '..', '..'), {
-        file: 'Dockerfile',
-        platform: Platform.LINUX_ARM64,
-      }),
-      portMappings: [{ containerPort: 8080 }],
-      logging: ecs.LogDrivers.awsLogs({ logGroup, streamPrefix: 'app' }),
-      environment: {
-        // sslmode=require encrypts the connection; the server also refuses anything else (rds.force_ssl).
-        DB_URL: `jdbc:postgresql://${endpoint}:5432/${DATABASE_NAME}?sslmode=require`,
-        // The confirmation SMS's /manage link (BR-18).
-        PUBLIC_BASE_URL: this.url,
-        // The simulated inbox is off: with no sign-in, it would show every visitor every booking's reference, and a
-        // demo number's last four digits are public, so anyone could open anyone's booking. Each booker still sees
-        // their own SMS and its status on the confirmation page.
-        BRANCHBOOK_INBOX_ENABLED: 'false',
-        // Should anyone switch the inbox back on, it shows every reference as APT-****-****.
-        BRANCHBOOK_INBOX_REDACT_REFERENCES: 'true',
-        // Each booking, with its name and number, is deleted once its appointment is over, as the privacy notice
-        // says of the hosted demo.
-        BRANCHBOOK_RETENTION_ENABLED: 'true',
-        // Real SMS through AWS End User Messaging, in Cape Town, to South African numbers only (the protect
-        // configuration above). The published demo numbers, 082 555 0000 to 082 555 0199, stay on the simulated
-        // gateway, so a reader trying the README's examples never texts a stranger.
-        BRANCHBOOK_SMS_GATEWAY: 'aws',
-        BRANCHBOOK_SMS_AWS_REGION: this.region,
-        BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID: smsProtection.attrProtectConfigurationId,
-        BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP: String(SMS_RECIPIENT_DAILY_CAP),
-        BRANCHBOOK_SMS_AWS_DRY_RUN: String(props.smsDryRun === true),
-        // Only health and info are served, so the metrics stay private even if a request slipped past WAF's block.
-        MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: 'health,info',
-        // The load balancer ends HTTPS; trusting its X-Forwarded-* headers makes the app see the request as secure,
-        // so links and HSTS are right. Tomcat trusts them only from private addresses, which the load balancer has.
-        SERVER_FORWARD_HEADERS_STRATEGY: 'native',
-      },
-      secrets: {
-        DB_USER: ecs.Secret.fromSecretsManager(secret, 'username'),
-        DB_PASSWORD: ecs.Secret.fromSecretsManager(secret, 'password'),
-        // The daily cap's ledger keys each number's fingerprint with it. Without it the app would make a key at
-        // start-up, and every new task would start counting from zero.
-        BRANCHBOOK_SMS_RECIPIENT_CAP_KEY: ecs.Secret.fromSecretsManager(props.smsCapKey),
-      },
-      stopTimeout: Duration.seconds(30),
-    });
+    const appSubnets = props.vpc.selectSubnets({ subnetGroupName: SUBNET_GROUPS.app });
 
     const taskSecurityGroup = new ec2.SecurityGroup(this, 'TaskSecurityGroup', {
       vpc: props.vpc,
       description: 'BranchBook app task: in from the load balancer only',
-      allowAllOutbound: true,
+      allowAllOutbound: false,
     });
+    // Out on 443 only: ECR, Secrets Manager, CloudWatch Logs, STS and End User Messaging, through the NAT gateways.
+    // DNS and the task metadata endpoint are link-local, which security groups never filter.
+    taskSecurityGroup.addEgressRule(ec2.Peer.anyIpv4(), ec2.Port.tcp(HTTPS_PORT), 'AWS APIs over HTTPS');
     // The database's rule is written here, on an imported handle of its group, so the data stack never refers to
     // this one: the app can be torn down and redeployed while the data stack stays as it is.
     const databaseSecurityGroups = props.database.connections.securityGroups;
     if (databaseSecurityGroups.length !== 1) {
       throw new Error('the database must have exactly one security group');
     }
-    const databaseSecurityGroupId = databaseSecurityGroups[0].securityGroupId;
-    ec2.SecurityGroup.fromSecurityGroupId(this, 'DatabaseSecurityGroup', databaseSecurityGroupId).addIngressRule(
+    const databaseSecurityGroup = ec2.SecurityGroup.fromSecurityGroupId(
+      this,
+      'DatabaseSecurityGroup',
+      databaseSecurityGroups[0].securityGroupId,
+    );
+    databaseSecurityGroup.addIngressRule(
       taskSecurityGroup,
-      ec2.Port.tcp(5432),
+      ec2.Port.tcp(POSTGRES_PORT),
       'PostgreSQL from the BranchBook app task only',
     );
+    taskSecurityGroup.addEgressRule(databaseSecurityGroup, ec2.Port.tcp(POSTGRES_PORT), 'PostgreSQL to the database only');
 
-    const service = new ecs.FargateService(this, 'Service', {
+    const task = this.taskDefinition('Task', config.service.cpu, config.service.memoryMiB);
+
+    // The runtime role signs in with IAM authentication: the task role may connect as branchbook_app and as no
+    // other database user.
+    props.database.grantConnect(task.taskRole, config.database.appUser);
+
+    const environment: Record<string, string> = {
+      ...config.appEnvironment,
+      // IAM authentication through the AWS Advanced JDBC Wrapper, which signs a short-lived token with the task role;
+      // verify-full checks the server's certificate and name against the RDS bundle baked into the image.
+      DB_URL: `jdbc:aws-wrapper:postgresql://${endpoint}:${String(POSTGRES_PORT)}/${DATABASE_NAME}?wrapperPlugins=iam&sslmode=verify-full&sslrootcert=${RDS_CA_BUNDLE}`,
+      DB_USER: config.database.appUser,
+      DB_PASSWORD: '',
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: AWS_JDBC_DRIVER,
+      // Sized so the worst case, every task autoscaling allows plus a deployment's new ones, fits the database's
+      // connection budget (config.ts, connectionPeak).
+      SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: String(config.service.dbPoolSize),
+      // The confirmation SMS's /manage link (BR-18).
+      PUBLIC_BASE_URL: this.url,
+      BRANCHBOOK_SMS_GATEWAY: config.sms.gateway,
+      BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP: String(config.sms.recipientDailyCap),
+    };
+    if (config.sms.gateway === 'aws') {
+      Object.assign(environment, this.smsSettings(config, task, props.smsDryRun === true));
+    }
+
+    const captcha = new CaptchaApiKey(this, 'Captcha', {
+      domainName: config.domain.name,
+      logRetention: retentionDays(config.logs.appRetentionDays),
+    });
+    environment.BRANCHBOOK_CAPTCHA_SCRIPT_URL = captcha.scriptUrl;
+    environment.BRANCHBOOK_CAPTCHA_API_KEY = captcha.apiKey;
+
+    const container = task.addContainer(CONTAINER_NAMES.app, {
+      ...this.hardenedContainer(image, logGroup, 'app'),
+      portMappings: [{ containerPort: APP_PORT }],
+      environment,
+      secrets: {
+        // The daily cap's ledger keys each number's fingerprint with it. Without it the app would make a key at
+        // start-up, and every new task would start counting from zero.
+        BRANCHBOOK_SMS_RECIPIENT_CAP_KEY: ecs.Secret.fromSecretsManager(props.smsCapKey),
+      },
+      // Liveness only: a task whose JVM stops answering is replaced. Readiness, which includes the database, is
+      // the load balancer's check, so a database outage takes tasks out of rotation without killing them all.
+      healthCheck: {
+        command: ['CMD-SHELL', `wget -q -O /dev/null http://127.0.0.1:${String(APP_PORT)}/livez || exit 1`],
+        interval: Duration.seconds(config.healthCheck.containerIntervalSeconds),
+        timeout: Duration.seconds(config.healthCheck.containerTimeoutSeconds),
+        retries: config.healthCheck.containerRetries,
+        startPeriod: Duration.seconds(config.healthCheck.containerStartPeriodSeconds),
+      },
+      stopTimeout: Duration.seconds(config.service.stopTimeoutSeconds),
+    });
+    container.addMountPoints({ sourceVolume: TMP_VOLUME, containerPath: '/tmp', readOnly: false });
+
+    // The migration task: the same image, run once per digest before the service is updated. It alone receives the
+    // master secret, with a plain JDBC URL, and it serves nothing.
+    const migrationTask = this.taskDefinition('MigrationTask', config.migration.cpu, config.migration.memoryMiB);
+    this.migrationTask = migrationTask;
+    const migrationContainer = migrationTask.addContainer(CONTAINER_NAMES.migrate, {
+      ...this.hardenedContainer(image, logGroup, 'migrate'),
+      environment: {
+        // The same settings as the service, so the prod profile's start-up guard sees the same safe combination.
+        ...config.appEnvironment,
+        DB_URL: `jdbc:postgresql://${endpoint}:${String(POSTGRES_PORT)}/${DATABASE_NAME}?sslmode=verify-full&sslrootcert=${RDS_CA_BUNDLE}`,
+        SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE: String(config.migration.dbPoolSize),
+        PUBLIC_BASE_URL: this.url,
+        BRANCHBOOK_MIGRATE_ONLY: 'true',
+        BRANCHBOOK_MIGRATE_ON_START: 'true',
+        BRANCHBOOK_DB_APP_ROLE: config.database.appUser,
+        SPRING_MAIN_WEB_APPLICATION_TYPE: 'none',
+      },
+      secrets: {
+        DB_USER: ecs.Secret.fromSecretsManager(secret, 'username'),
+        DB_PASSWORD: ecs.Secret.fromSecretsManager(secret, 'password'),
+      },
+    });
+    migrationContainer.addMountPoints({ sourceVolume: TMP_VOLUME, containerPath: '/tmp', readOnly: false });
+
+    this.migration = new SchemaMigration(this, 'Migration', {
+      cluster,
+      taskDefinition: migrationTask,
+      containerName: CONTAINER_NAMES.migrate,
+      subnets: appSubnets.subnets,
+      securityGroup: taskSecurityGroup,
+      imageDigest: props.imageDigest,
+      timeout: Duration.minutes(config.migration.timeoutMinutes),
+      logRetention: retentionDays(config.logs.appRetentionDays),
+    });
+
+    this.service = new ecs.FargateService(this, 'Service', {
       cluster,
       taskDefinition: task,
-      // Two tasks, which ECS spreads across the two zones, so one can fail or be replaced while the other serves.
-      // Nothing depends on a single task: the lookup counts (V8), the dispatcher's claims (FOR UPDATE SKIP LOCKED)
-      // and the daily cap's ledger all live in PostgreSQL, and the hourly jobs delete only what is due.
-      desiredCount: 2,
-      assignPublicIp: true,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      // No desiredCount: autoscaling owns the number of tasks, and a deployment must not reset it. A new service
+      // starts with one and autoscaling raises it to minTasks.
+      assignPublicIp: false,
+      vpcSubnets: { subnetGroupName: SUBNET_GROUPS.app },
       securityGroups: [taskSecurityGroup],
       // A new version starts and passes its health check before the old one stops, and a version that never
-      // becomes healthy is rolled back.
-      minHealthyPercent: 100,
-      maxHealthyPercent: 200,
+      // becomes healthy, or raises the deployment alarm, is rolled back.
+      minHealthyPercent: config.service.minHealthyPercent,
+      maxHealthyPercent: config.service.maxHealthyPercent,
       circuitBreaker: { enable: true, rollback: true },
-      healthCheckGracePeriod: Duration.minutes(3),
+      healthCheckGracePeriod: Duration.seconds(config.service.healthCheckGracePeriodSeconds),
     });
+    // The migration runs only once its task can reach the database: its roles' policies, the task's egress rules
+    // and the database's ingress rule must exist first, or a first deployment could race them.
+    this.migration.resource.node.addDependency(migrationTask, taskSecurityGroup, databaseSecurityGroup);
+    // The service is updated only after the new image's migration has exited 0.
+    this.service.node.addDependency(this.migration.resource);
 
-    const loadBalancer = new elbv2.ApplicationLoadBalancer(this, 'LoadBalancer', {
+    this.loadBalancer = new elbv2.ApplicationLoadBalancer(this, 'LoadBalancer', {
       vpc: props.vpc,
       internetFacing: true,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
+      vpcSubnets: { subnetGroupName: SUBNET_GROUPS.public },
       dropInvalidHeaderFields: true,
     });
-    loadBalancer.addRedirect({ sourcePort: 80, targetPort: 443 });
-    const https = loadBalancer.addListener('Https', {
-      port: 443,
+    this.loadBalancer.addRedirect({ sourcePort: 80, targetPort: HTTPS_PORT });
+    const https = this.loadBalancer.addListener('Https', {
+      port: HTTPS_PORT,
       certificates: [certificate],
       sslPolicy: elbv2.SslPolicy.RECOMMENDED_TLS,
     });
-    const targetGroup = https.addTargets('App', {
-      port: 8080,
+    // Port 8080 only; the management port is never a target.
+    this.targetGroup = https.addTargets('App', {
+      port: APP_PORT,
       protocol: elbv2.ApplicationProtocol.HTTP,
-      targets: [service],
+      targets: [this.service],
       healthCheck: {
         path: '/readyz',
-        interval: Duration.seconds(15),
-        healthyThresholdCount: 2,
-        unhealthyThresholdCount: 3,
+        interval: Duration.seconds(config.healthCheck.intervalSeconds),
+        healthyThresholdCount: config.healthCheck.healthyThreshold,
+        unhealthyThresholdCount: config.healthCheck.unhealthyThreshold,
       },
-      deregistrationDelay: Duration.seconds(30),
+      deregistrationDelay: Duration.seconds(config.service.deregistrationDelaySeconds),
+    });
+
+    const scaling = this.service.autoScaleTaskCount({
+      minCapacity: config.service.minTasks,
+      maxCapacity: config.service.maxTasks,
+    });
+    scaling.scaleOnCpuUtilization('Cpu', {
+      targetUtilizationPercent: config.service.cpuTargetPercent,
+      scaleOutCooldown: Duration.seconds(config.service.scaleOutCooldownSeconds),
+      scaleInCooldown: Duration.seconds(config.service.scaleInCooldownSeconds),
+    });
+    scaling.scaleOnRequestCount('Requests', {
+      requestsPerTarget: config.service.requestsPerTargetPerMinute,
+      targetGroup: this.targetGroup,
+      scaleOutCooldown: Duration.seconds(config.service.scaleOutCooldownSeconds),
+      scaleInCooldown: Duration.seconds(config.service.scaleInCooldownSeconds),
     });
 
     new route53.ARecord(this, 'Address', {
       zone,
-      target: route53.RecordTarget.fromAlias(new targets.LoadBalancerTarget(loadBalancer)),
+      recordName: config.domain.name,
+      target: route53.RecordTarget.fromAlias(new targets.LoadBalancerTarget(this.loadBalancer)),
     });
 
-    const webAcl = this.webAcl();
+    this.webAcl = this.createWebAcl(config);
     new wafv2.CfnWebACLAssociation(this, 'WafOnLoadBalancer', {
-      resourceArn: loadBalancer.loadBalancerArn,
-      webAclArn: webAcl.attrArn,
+      resourceArn: this.loadBalancer.loadBalancerArn,
+      webAclArn: this.webAcl.attrArn,
+    });
+    this.wafLogging(config, this.webAcl);
+
+    this.alarmTopic = this.alarms(props, config);
+
+    new CfnOutput(this, 'Url', { value: this.url, description: `The ${config.name} environment` });
+    new CfnOutput(this, 'LogGroup', {
+      value: logGroup.logGroupName,
+      description: `Application logs, ${String(config.logs.appRetentionDays)} days`,
     });
 
-    this.alarms(props, loadBalancer, targetGroup);
-
-    new CfnOutput(this, 'Url', { value: this.url, description: 'The hosted demo' });
-    new CfnOutput(this, 'LogGroup', { value: logGroup.logGroupName, description: 'Application logs, 7 days' });
+    this.suppressNagFindings(config);
   }
 
   /**
-   * The web ACL in front of the load balancer. It asks for no sign-in: a prompt in front of a demo turned away the
-   * people it is for (ADR-0006 Notes). Texting South Africa only, five a day to a number, and deleting each booking
-   * once its appointment is over keep what an open demo can do, and hold, small.
+   * An ARM64 Fargate task definition with the scratch volume both containers mount at /tmp.
+   *
+   * @param id - the construct ID
+   * @param cpu - CPU units
+   * @param memoryMiB - memory in MiB
    */
-  private webAcl(): wafv2.CfnWebACL {
+  private taskDefinition(id: string, cpu: number, memoryMiB: number): ecs.FargateTaskDefinition {
+    const definition = new ecs.FargateTaskDefinition(this, id, {
+      cpu,
+      memoryLimitMiB: memoryMiB,
+      // The pipeline builds the image for ARM64 (Graviton), which Fargate runs for less than x86.
+      runtimePlatform: {
+        cpuArchitecture: ecs.CpuArchitecture.ARM64,
+        operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
+      },
+    });
+    definition.addVolume({ name: TMP_VOLUME });
+    return definition;
+  }
+
+  /**
+   * The settings both containers share: the image by digest, logs, a read-only root file system and no Linux
+   * capabilities. The JVM and Tomcat write only to /tmp, the task's scratch volume.
+   *
+   * @param image - the image, by digest
+   * @param logGroup - the application's log group
+   * @param streamPrefix - the log stream prefix, `app` or `migrate`
+   */
+  private hardenedContainer(image: ecs.ContainerImage, logGroup: logs.ILogGroup, streamPrefix: string): ecs.ContainerDefinitionOptions {
+    const linuxParameters = new ecs.LinuxParameters(this, `${streamPrefix}LinuxParameters`);
+    linuxParameters.dropCapabilities(ecs.Capability.ALL);
+    return {
+      image,
+      logging: ecs.LogDrivers.awsLogs({ logGroup, streamPrefix }),
+      readonlyRootFilesystem: true,
+      linuxParameters,
+    };
+  }
+
+  /**
+   * Real SMS through AWS End User Messaging. A protect configuration allows every country by default, so it blocks
+   * each one AWS lists except the allowed one, and every voice and MMS destination; the app names it on every send,
+   * so it holds whatever the account's default is. SendTextMessage is authorised against the resources a send names;
+   * with no origination identity (AWS's shared route) that is the protect configuration alone, so the task may send
+   * through this one and nothing else.
+   *
+   * @param config - the environment
+   * @param task - the service's task definition, whose role may send
+   * @param dryRun - whether AWS only checks each send
+   */
+  private smsSettings(config: EnvironmentConfig, task: ecs.TaskDefinition, dryRun: boolean): Record<string, string> {
+    const smsProtection = new smsvoice.CfnProtectConfiguration(this, 'SmsProtection', {
+      countryRuleSet: {
+        sms: SMS_COUNTRIES.map((countryCode) => ({
+          countryCode,
+          protectStatus: countryCode === config.sms.allowedCountry ? 'ALLOW' : 'BLOCK',
+        })),
+        voice: VOICE_COUNTRIES.map((countryCode) => ({ countryCode, protectStatus: 'BLOCK' })),
+        mms: MMS_COUNTRIES.map((countryCode) => ({ countryCode, protectStatus: 'BLOCK' })),
+      },
+    });
+    task.addToTaskRolePolicy(
+      new iam.PolicyStatement({
+        actions: ['sms-voice:SendTextMessage'],
+        resources: [smsProtection.attrArn],
+      }),
+    );
+    return {
+      BRANCHBOOK_SMS_AWS_REGION: this.region,
+      BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID: smsProtection.attrProtectConfigurationId,
+      BRANCHBOOK_SMS_AWS_DRY_RUN: String(dryRun),
+    };
+  }
+
+  /**
+   * The web ACL in front of the load balancer, its rules in order:
+   *
+   * 0. Block `/actuator`.
+   * 1. to 3. Block an address over the booking-and-cancellation, lookup or overall request limit.
+   * 4. A CAPTCHA on every booking and cancellation `POST`. WAF answers a request without a valid token with 405 and
+   *    `x-amzn-waf-action: captcha`, and the SPA shows the puzzle and resends. On staging, requests that carry the
+   *    synthetic-traffic token skip it; production has no bypass.
+   * 5. to 7. AWS's managed rule groups: IP reputation, known bad inputs and the common rule set.
+   *
+   * @param config - the environment's limits and windows
+   */
+  private createWebAcl(config: EnvironmentConfig): wafv2.CfnWebACL {
+    const { waf } = config;
     const visibility = (metricName: string): wafv2.CfnWebACL.VisibilityConfigProperty => ({
       cloudWatchMetricsEnabled: true,
       metricName,
@@ -299,6 +484,35 @@ export class AppStack extends Stack {
         ],
       },
     });
+    const method = (name: 'GET' | 'POST'): wafv2.CfnWebACL.StatementProperty => ({
+      byteMatchStatement: {
+        fieldToMatch: { method: {} },
+        positionalConstraint: 'EXACTLY',
+        searchString: name,
+        textTransformations: [{ priority: 0, type: 'NONE' }],
+      },
+    });
+    const bookingOrCancel = (): wafv2.CfnWebACL.StatementProperty[] => [method('POST'), startsWith(APPOINTMENTS_PATH)];
+    const rateLimit = (
+      name: string,
+      priority: number,
+      limit: number,
+      window: number,
+      scopeDown?: wafv2.CfnWebACL.StatementProperty[],
+    ): wafv2.CfnWebACL.RuleProperty => ({
+      name,
+      priority,
+      action: { block: {} },
+      statement: {
+        rateBasedStatement: {
+          limit,
+          evaluationWindowSec: window,
+          aggregateKeyType: 'IP',
+          scopeDownStatement: scopeDown === undefined ? undefined : { andStatement: { statements: scopeDown } },
+        },
+      },
+      visibilityConfig: visibility(name),
+    });
     const managed = (name: string, priority: number): wafv2.CfnWebACL.RuleProperty => ({
       name,
       priority,
@@ -307,10 +521,28 @@ export class AppStack extends Stack {
       visibilityConfig: visibility(name),
     });
 
+    const captchaScope = bookingOrCancel();
+    if (waf.syntheticTrafficBypass) {
+      // A CloudFormation dynamic reference: the token is resolved at deploy time and is never in the template.
+      const token = SecretValue.secretsManager(`${config.resourcePrefix}/synthetic-traffic-token`).unsafeUnwrap();
+      captchaScope.push({
+        notStatement: {
+          statement: {
+            byteMatchStatement: {
+              fieldToMatch: { singleHeader: { Name: SYNTHETIC_TRAFFIC_HEADER } },
+              positionalConstraint: 'EXACTLY',
+              searchString: token,
+              textTransformations: [{ priority: 0, type: 'NONE' }],
+            },
+          },
+        },
+      });
+    }
+
     return new wafv2.CfnWebACL(this, 'Waf', {
       scope: 'REGIONAL',
       defaultAction: { allow: {} },
-      visibilityConfig: visibility('branchbook-demo'),
+      visibilityConfig: visibility(`${config.resourcePrefix}-web-acl`),
       rules: [
         {
           name: 'block-actuator',
@@ -319,82 +551,157 @@ export class AppStack extends Stack {
           statement: startsWith('/actuator'),
           visibilityConfig: visibility('block-actuator'),
         },
+        rateLimit('booking-rate-limit', 1, waf.bookingLimit, waf.bookingWindowSeconds, bookingOrCancel()),
+        rateLimit('lookup-rate-limit', 2, waf.lookupLimit, waf.lookupWindowSeconds, [
+          method('GET'),
+          startsWith(`${APPOINTMENTS_PATH}/`),
+        ]),
+        rateLimit('request-rate-limit', 3, waf.requestLimit, waf.requestWindowSeconds),
         {
-          name: 'booking-rate-limit',
-          priority: 1,
-          action: { block: {} },
-          statement: {
-            rateBasedStatement: {
-              limit: BOOKING_RATE_LIMIT,
-              evaluationWindowSec: BOOKING_RATE_WINDOW_SECONDS,
-              aggregateKeyType: 'IP',
-              scopeDownStatement: {
-                andStatement: {
-                  statements: [
-                    {
-                      byteMatchStatement: {
-                        fieldToMatch: { method: {} },
-                        positionalConstraint: 'EXACTLY',
-                        searchString: 'POST',
-                        textTransformations: [{ priority: 0, type: 'NONE' }],
-                      },
-                    },
-                    startsWith('/api/v1/appointments'),
-                  ],
-                },
-              },
-            },
-          },
-          visibilityConfig: visibility('booking-rate-limit'),
+          name: 'booking-captcha',
+          priority: 4,
+          action: { captcha: {} },
+          captchaConfig: { immunityTimeProperty: { immunityTime: waf.captchaImmunitySeconds } },
+          statement: { andStatement: { statements: captchaScope } },
+          visibilityConfig: visibility('booking-captcha'),
         },
-        managed('AWSManagedRulesAmazonIpReputationList', 2),
-        managed('AWSManagedRulesKnownBadInputsRuleSet', 3),
-        managed('AWSManagedRulesCommonRuleSet', 4),
+        managed('AWSManagedRulesAmazonIpReputationList', 5),
+        managed('AWSManagedRulesKnownBadInputsRuleSet', 6),
+        managed('AWSManagedRulesCommonRuleSet', 7),
       ],
     });
   }
 
   /**
-   * Three alarms: the app failing requests, no healthy task, and the database running out of space.
+   * WAF's request log, in CloudWatch Logs. Each entry records the request's headers and path, so the fields that
+   * carry personal data or credentials are redacted (BR-19): the number's last four digits, the synthetic-traffic
+   * token, the query string, the path and the Referer (both hold appointment references), and the cookies (the
+   * CAPTCHA token).
    *
-   * @param props - the stack's configuration: the database and the optional alert address
-   * @param loadBalancer - the load balancer whose 5xx answers are counted
-   * @param targetGroup - the target group whose healthy tasks are counted
+   * @param config - the environment's prefix and retention
+   * @param webAcl - the web ACL to log
    */
-  private alarms(props: AppStackProps, loadBalancer: elbv2.ApplicationLoadBalancer, targetGroup: elbv2.ApplicationTargetGroup) {
-    const topic = new sns.Topic(this, 'Alarms', { displayName: 'BranchBook demo alarms' });
+  private wafLogging(config: EnvironmentConfig, webAcl: wafv2.CfnWebACL): void {
+    // WAF accepts only log groups whose names start with aws-waf-logs-.
+    const name = `aws-waf-logs-${config.resourcePrefix}`;
+    const logGroup = new logs.LogGroup(this, 'WafLogs', {
+      logGroupName: name,
+      retention: retentionDays(config.logs.wafRetentionDays),
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+    const header = (headerName: string): wafv2.CfnLoggingConfiguration.FieldToMatchProperty => ({
+      singleHeader: { Name: headerName },
+    });
+    const logging = new wafv2.CfnLoggingConfiguration(this, 'WafLogging', {
+      resourceArn: webAcl.attrArn,
+      // WAF wants the log group's ARN without the :* that CloudFormation's Arn attribute ends in.
+      logDestinationConfigs: [
+        this.formatArn({ service: 'logs', resource: 'log-group', resourceName: name, arnFormat: ArnFormat.COLON_RESOURCE_NAME }),
+      ],
+      redactedFields: [
+        header(MOBILE_LAST4_HEADER),
+        header(SYNTHETIC_TRAFFIC_HEADER),
+        header('referer'),
+        header('cookie'),
+        { queryString: {} },
+        { uriPath: {} },
+      ],
+    });
+    logging.node.addDependency(logGroup);
+  }
+
+  /**
+   * Three alarms: the app failing requests, no healthy task, and the database running out of space. The first also
+   * rolls back an ECS deployment that raises it.
+   *
+   * @param props - the stack's configuration: the optional alert address
+   * @param config - the environment's thresholds
+   */
+  private alarms(props: AppStackProps, config: EnvironmentConfig): sns.Topic {
+    const { alarms } = config;
+    const topic = new sns.Topic(this, 'Alarms', {
+      displayName: `BranchBook ${config.name} alarms`,
+      enforceSSL: true,
+    });
     if (props.alertEmail !== undefined) {
       topic.addSubscription(new subscriptions.EmailSubscription(props.alertEmail));
     }
     const notify = new cloudwatchActions.SnsAction(topic);
 
-    new cloudwatch.Alarm(this, 'ServerErrors', {
-      alarmDescription: 'The app answered 5xx to 5 or more requests in 5 minutes.',
-      metric: loadBalancer.metrics.httpCodeTarget(elbv2.HttpCodeTarget.TARGET_5XX_COUNT, {
-        period: Duration.minutes(5),
+    const serverErrors = new cloudwatch.Alarm(this, 'ServerErrors', {
+      alarmDescription: `The app answered 5xx to ${String(alarms.serverErrorThreshold)} or more requests in ${String(alarms.serverErrorPeriodMinutes)} minutes.`,
+      metric: this.loadBalancer.metrics.httpCodeTarget(elbv2.HttpCodeTarget.TARGET_5XX_COUNT, {
+        period: Duration.minutes(alarms.serverErrorPeriodMinutes),
         statistic: 'Sum',
       }),
-      threshold: 5,
+      threshold: alarms.serverErrorThreshold,
       evaluationPeriods: 1,
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
-    }).addAlarmAction(notify);
+    });
+    serverErrors.addAlarmAction(notify);
+    // Beside the circuit breaker, which catches tasks that never become healthy, a deployment whose healthy tasks
+    // answer 5xx is rolled back too.
+    this.service.enableDeploymentAlarms([serverErrors.alarmName], { behavior: ecs.AlarmBehavior.ROLLBACK_ON_ALARM });
 
     new cloudwatch.Alarm(this, 'NoHealthyTask', {
-      alarmDescription: 'No task has passed the /readyz health check for 3 minutes.',
-      metric: targetGroup.metrics.healthyHostCount({ period: Duration.minutes(1), statistic: 'Minimum' }),
+      alarmDescription: `No task has passed the /readyz health check for ${String(alarms.noHealthyTaskMinutes)} minutes.`,
+      metric: this.targetGroup.metrics.healthyHostCount({ period: Duration.minutes(1), statistic: 'Minimum' }),
       threshold: 1,
-      evaluationPeriods: 3,
+      evaluationPeriods: alarms.noHealthyTaskMinutes,
       comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.BREACHING,
     }).addAlarmAction(notify);
 
     new cloudwatch.Alarm(this, 'DatabaseStorage', {
-      alarmDescription: 'The database has less than 2 GB of storage left.',
-      metric: props.database.metricFreeStorageSpace({ period: Duration.minutes(5), statistic: 'Minimum' }),
-      threshold: 2 * 1024 ** 3,
+      alarmDescription: `The database has less than ${String(alarms.databaseFreeStorageGiB)} GB of storage left.`,
+      metric: this.database.metricFreeStorageSpace({ period: Duration.minutes(5), statistic: 'Minimum' }),
+      threshold: alarms.databaseFreeStorageGiB * 1024 ** 3,
       evaluationPeriods: 1,
       comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
     }).addAlarmAction(notify);
+
+    return topic;
+  }
+
+  /**
+   * The cdk-nag (AwsSolutions) findings this stack accepts, each with its reason. infra/test/nag.test.ts fails on
+   * any finding not listed here.
+   *
+   * @param config - the environment
+   */
+  private suppressNagFindings(config: EnvironmentConfig): void {
+    Validations.of(this).acknowledge(
+      {
+        id: 'AwsSolutions-ECS2',
+        reason: 'The task\'s environment holds settings only; every secret (the SMS cap key, the master credentials) comes from Secrets Manager, and the CAPTCHA key is public by design.',
+      },
+      {
+        id: LAMBDA_BASIC_EXECUTION_FINDING,
+        reason: 'CDK\'s AWS SDK custom resource handler uses AWSLambdaBasicExecutionRole, which grants only writing its own logs.',
+      },
+    );
+    Validations.of(this.loadBalancer).acknowledge(
+      {
+        id: 'AwsSolutions-ELB2',
+        reason: 'Access logs would record every request path, and lookup and cancel paths carry appointment references, which no log may hold (BR-19). WAF logs, with those fields redacted, record each request instead.',
+      },
+      {
+        id: 'AwsSolutions-EC23',
+        reason: 'The load balancer serves the public site: it must accept 80 (redirected) and 443 from anywhere; WAF filters what reaches the tasks.',
+      },
+    );
+    for (const definition of [this.service.taskDefinition, this.migrationTask]) {
+      Validations.of(definition).acknowledge({
+        id: ANY_RESOURCE_FINDING,
+        reason: 'ecr:GetAuthorizationToken, which the execution role needs to pull the image, accepts no resource ARN.',
+      });
+    }
+    if (!config.service.containerInsights) {
+      Validations.of(this.service.cluster).acknowledge({
+        id: 'AwsSolutions-ECS4',
+        reason: `${config.name} saves Container Insights' cost; production turns it on, and the service's CPU and memory metrics remain.`,
+      });
+    }
   }
 }
