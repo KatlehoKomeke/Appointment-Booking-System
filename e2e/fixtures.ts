@@ -90,6 +90,9 @@ const RETRYABLE = new Set(['DUPLICATE_APPOINTMENT', 'CUSTOMER_OVERLAP']);
 /** The path every booking is POSTed to. */
 export const BOOKING_PATH = '/api/v1/appointments';
 
+/** The simulated inbox's path. A deployment under the `prod` profile, staging included, switches it off: 404. */
+export const INBOX_PATH = '/api/v1/messages';
+
 export const test = base.extend<{
   browserProblems: BrowserProblems;
   expectConsoleError: ExpectConsoleError;
@@ -178,6 +181,21 @@ export const test = base.extend<{
 });
 
 export { expect };
+
+/**
+ * Skips the calling test when the app under test has no simulated inbox, that is when `GET /api/v1/messages` answers
+ * 404, as on staging and production. Call it first, before the test books anything.
+ *
+ * @param request - the test's API fixture, which sends what the browser sends, the synthetic-traffic header included
+ */
+export async function skipWithoutInbox(request: APIRequestContext): Promise<void> {
+  const response = await request.get(`${INBOX_PATH}?limit=1`);
+  test.skip(
+    response.status() === 404,
+    `The simulated inbox is switched off here (GET ${INBOX_PATH} answered 404), so its messages cannot be read`,
+  );
+  expect(response.status(), `GET ${INBOX_PATH}`).toBe(200);
+}
 
 /** A random demo number from 082 555 0100 to 082 555 0199. */
 export function mintMobile(): string {
