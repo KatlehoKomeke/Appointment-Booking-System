@@ -9,6 +9,7 @@
  */
 import createClient from 'openapi-fetch';
 
+import { type CaptchaSolver, withCaptcha } from './captcha';
 import type { components, paths } from './schema';
 
 /** An RFC 9457 problem: the body of every error the API returns (docs/errors.md). */
@@ -39,10 +40,18 @@ export interface ApiClientOptions {
   baseUrl?: string;
   /** The fetch implementation. Defaults to the browser's; tests pass a fake. */
   fetch?: (request: Request) => Promise<Response>;
+  /**
+   * Who solves a WAF CAPTCHA when a POST is challenged. Defaults to the one the `CaptchaProvider` registers
+   * (`captcha.ts`); tests pass a fake.
+   */
+  solveCaptcha?: CaptchaSolver;
 }
 
 /**
  * Creates a client for the API.
+ *
+ * A POST that WAF challenges with a CAPTCHA (`405` and `x-amzn-waf-action: captcha`) is sent again, once, with the
+ * same body and headers, after the customer solves it; see `captcha.ts`.
  *
  * @param options - where the API is and how to reach it
  * @returns a client whose `GET` and other methods accept only the contract's paths and parameters
@@ -52,7 +61,10 @@ export function createApiClient(options: ApiClientOptions = {}) {
     baseUrl: options.baseUrl ?? defaultBaseUrl(),
     // The global fetch is looked up on each call, not when the client is made, so a fake installed later (MSW in
     // the tests) still sees every request.
-    fetch: options.fetch ?? ((request) => globalThis.fetch(request)),
+    fetch: withCaptcha(
+      options.fetch ?? ((request) => globalThis.fetch(request)),
+      options.solveCaptcha,
+    ),
   });
 }
 
