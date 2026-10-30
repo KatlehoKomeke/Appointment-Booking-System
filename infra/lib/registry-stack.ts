@@ -3,6 +3,9 @@ import * as ecr from 'aws-cdk-lib/aws-ecr';
 import { Construct } from 'constructs';
 import { RegistryConfig } from './config';
 
+/** The registry stack's ID: one repository serves every environment, so there is one stack, outside them all. */
+export const REGISTRY_STACK_ID = 'BranchbookRegistry';
+
 /**
  * Configuration for {@link RegistryStack}.
  */
