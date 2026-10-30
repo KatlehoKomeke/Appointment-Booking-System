@@ -61,10 +61,6 @@ concurrency:
   group: ci-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-env:
-  # The ECR repository that BranchbookRegistry defines and the app stacks read the image from (infra/).
-  IMAGE_REPOSITORY: branchbook
-
 jobs:
   api:
     runs-on: ubuntu-24.04
@@ -377,11 +373,12 @@ jobs:
         run: scripts/demo-409.sh http://127.0.0.1:8080
 
       # load/booking.js carries its own pass/fail thresholds (load/README.md); k6 exits non-zero when one is crossed.
+      # Thirty seconds at the script's default rates is enough to catch a regression without slowing every run.
       - name: Load-test bookings briefly (k6)
         timeout-minutes: 5
         run: >-
           docker compose --file .github/tools/compose.yaml run --rm k6
-          run --env BASE_URL=http://127.0.0.1:8080 /load/booking.js
+          run --env BASE_URL=http://127.0.0.1:8080 --env DURATION=30s /load/booking.js
 
       # A passive scan of what ZAP's spider finds, with the rules in .github/zap/rules.tsv: any warning that file does
       # not explain fails the build.
@@ -487,6 +484,9 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: true
 
+      - name: Read the image repository's name from infra/config
+        run: .github/scripts/read-config.sh infra/config/registry.json IMAGE_REPOSITORY=repositoryName >> "$GITHUB_ENV"
+
       # Without BRANCHBOOK_ENV the CDK app holds only the registry, the one stack both environments share.
       - name: Deploy the image registry (BranchbookRegistry)
         working-directory: infra
@@ -514,8 +514,8 @@ jobs:
           aws ecr get-login-password | docker login --username AWS --password-stdin "${repository%%/*}"
           docker tag branchbook:ci "$repository:$GITHUB_SHA"
           docker push "$repository:$GITHUB_SHA"
-          digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$repository:$GITHUB_SHA" \
-            | grep --fixed-strings "$repository@" | head -n 1 | cut -d@ -f2)"
+          digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+            "$repository:$GITHUB_SHA" | grep --fixed-strings "$repository@" | head -n 1 | cut -d@ -f2)"
           [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "No digest for the pushed image" >&2; exit 1; }
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
           echo "Published $IMAGE_REPOSITORY:$GITHUB_SHA as $digest"
@@ -546,7 +546,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment:
       name: staging
-      url: ${{ steps.config.outputs.url }}
+      url: https://${{ steps.config.outputs.domain }}
     timeout-minutes: 45
     permissions:
       contents: read
@@ -577,16 +577,14 @@ jobs:
         working-directory: infra
         run: npm ci
 
-      # The address and the names of the environment's resources come from its configuration, not from this file.
+      # The address, the stacks' names and the prefix of the resources' names come from the environment's
+      # configuration, which the CDK app reads too, not from this file.
       - name: Read the environment's settings from infra/config
         id: config
         run: |
-          config="./infra/config/$BRANCHBOOK_ENV.json"
-          prefix="$(node -p "require('$config').resourcePrefix")"
-          url="https://$(node -p "require('$config').domainName")"
-          echo "PREFIX=$prefix" >> "$GITHUB_ENV"
-          echo "SITE_URL=$url" >> "$GITHUB_ENV"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
+          .github/scripts/read-config.sh "infra/config/$BRANCHBOOK_ENV.json" \
+            PREFIX=resourcePrefix STACK_PREFIX=stackIdPrefix DOMAIN=domain.name >> "$GITHUB_ENV"
+          .github/scripts/read-config.sh "infra/config/$BRANCHBOOK_ENV.json" domain=domain.name >> "$GITHUB_OUTPUT"
 
       - name: Sign in to AWS through OpenID Connect
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -614,9 +612,7 @@ jobs:
         working-directory: infra
         env:
           BRANCHBOOK_DEMO_ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
-        run: >-
-          npx cdk deploy BranchbookStagingData BranchbookStagingApp
-          --require-approval never --ci --progress events
+        run: npx cdk deploy "${STACK_PREFIX}Data" "${STACK_PREFIX}App" --require-approval never --ci --progress events
 
       # Staging's CAPTCHA rule lets requests carrying this secret through, so the checks below can book. It is masked
       # before anything can print it.
@@ -634,7 +630,7 @@ jobs:
           EXPECT_PROD_PROFILE: '1'
           EXPECT_CAPTCHA: '1'
           EXPECT_DEMO_NUMBERS_ONLY: '1'
-        run: SMOKE_SYNTHETIC_TOKEN="$SYNTHETIC_TOKEN" scripts/smoke.sh "$SITE_URL"
+        run: SMOKE_SYNTHETIC_TOKEN="$SYNTHETIC_TOKEN" scripts/smoke.sh "https://$DOMAIN"
 
       # A deployment that holds credentials uses no cache, so the browser is installed fresh.
       - name: Install the end-to-end test dependencies and Chromium
@@ -647,7 +643,7 @@ jobs:
       - name: Run the end-to-end tests against staging
         if: steps.order.outputs.newer == 'true'
         working-directory: e2e
-        run: E2E_BASE_URL="$SITE_URL" E2E_SYNTHETIC_TOKEN="$SYNTHETIC_TOKEN" npx playwright test
+        run: E2E_BASE_URL="https://$DOMAIN" E2E_SYNTHETIC_TOKEN="$SYNTHETIC_TOKEN" npx playwright test
 
       - name: Keep the end-to-end report and traces of a failed run
         if: failure()
@@ -663,7 +659,7 @@ jobs:
       - name: Record the release (BranchbookStagingRelease)
         if: steps.order.outputs.newer == 'true'
         working-directory: infra
-        run: npx cdk deploy BranchbookStagingRelease --require-approval never --ci --progress events
+        run: npx cdk deploy "${STACK_PREFIX}Release" --require-approval never --ci --progress events
 
       - name: Verify the recorded commit and image
         if: steps.order.outputs.newer == 'true'
@@ -678,7 +674,7 @@ jobs:
     # The production environment requires a reviewer's approval before this job starts.
     environment:
       name: production
-      url: ${{ steps.config.outputs.url }}
+      url: https://${{ steps.config.outputs.domain }}
     timeout-minutes: 40
     permissions:
       contents: read
@@ -716,12 +712,10 @@ jobs:
       - name: Read the environment's settings from infra/config
         id: config
         run: |
-          config="./infra/config/$BRANCHBOOK_ENV.json"
-          prefix="$(node -p "require('$config').resourcePrefix")"
-          url="https://$(node -p "require('$config').domainName")"
-          echo "PREFIX=$prefix" >> "$GITHUB_ENV"
-          echo "SITE_URL=$url" >> "$GITHUB_ENV"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
+          .github/scripts/read-config.sh "infra/config/$BRANCHBOOK_ENV.json" \
+            PREFIX=resourcePrefix STACK_PREFIX=stackIdPrefix DOMAIN=domain.name >> "$GITHUB_ENV"
+          .github/scripts/read-config.sh "infra/config/$BRANCHBOOK_ENV.json" domain=domain.name >> "$GITHUB_OUTPUT"
+          .github/scripts/read-config.sh infra/config/registry.json IMAGE_REPOSITORY=repositoryName >> "$GITHUB_ENV"
 
       - name: Sign in to AWS through OpenID Connect
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -766,7 +760,7 @@ jobs:
           echo "commit=$commit" >> "$GITHUB_OUTPUT"
           echo "image=$image" >> "$GITHUB_OUTPUT"
           if [[ -z "$image" ]]; then
-            echo "::warning::No image is recorded in /$PREFIX/release-image yet, so a failure cannot be rolled back automatically."
+            echo "::warning::/$PREFIX/release-image is empty, so a failure here cannot be rolled back automatically."
           else
             echo "Rollback target: commit $commit, image $image"
           fi
@@ -777,7 +771,7 @@ jobs:
         working-directory: infra
         env:
           BRANCHBOOK_DEMO_ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
-        run: npx cdk deploy BranchbookData BranchbookApp --require-approval never --ci --progress events
+        run: npx cdk deploy "${STACK_PREFIX}Data" "${STACK_PREFIX}App" --require-approval never --ci --progress events
 
       # Production has no CAPTCHA bypass, so the smoke test checks that an unsolved booking is challenged and skips
       # the refusals that would need one.
@@ -787,12 +781,12 @@ jobs:
         env:
           EXPECT_PROD_PROFILE: '1'
           EXPECT_CAPTCHA: '1'
-        run: scripts/smoke.sh "$SITE_URL"
+        run: scripts/smoke.sh "https://$DOMAIN"
 
       - name: Record the release (BranchbookRelease)
         if: steps.order.outputs.newer == 'true'
         working-directory: infra
-        run: npx cdk deploy BranchbookRelease --require-approval never --ci --progress events
+        run: npx cdk deploy "${STACK_PREFIX}Release" --require-approval never --ci --progress events
 
       - name: Verify the recorded commit and image
         if: steps.order.outputs.newer == 'true'
@@ -823,7 +817,7 @@ jobs:
     # The production role trusts this environment alone, so the rollback also waits for a reviewer's approval.
     environment:
       name: production
-      url: ${{ steps.config.outputs.url }}
+      url: https://${{ steps.config.outputs.domain }}
     timeout-minutes: 40
     permissions:
       contents: read
@@ -839,7 +833,7 @@ jobs:
       - name: Stop if no earlier release is recorded
         if: env.PREVIOUS_COMMIT == '' || env.BRANCHBOOK_IMAGE_DIGEST == ''
         run: |
-          echo "::error::Nothing was recorded before this deployment, so production must be restored by hand (infra/README.md)."
+          echo "::error::No release was recorded before this deployment; restore production by hand (infra/README.md)."
           exit 1
 
       # This commit's checkout provides the release script; the previous release's provides the CDK app and the smoke
@@ -870,12 +864,10 @@ jobs:
       - name: Read the environment's settings from the previous release's infra/config
         id: config
         run: |
-          config="./previous/infra/config/$BRANCHBOOK_ENV.json"
-          prefix="$(node -p "require('$config').resourcePrefix")"
-          url="https://$(node -p "require('$config').domainName")"
-          echo "PREFIX=$prefix" >> "$GITHUB_ENV"
-          echo "SITE_URL=$url" >> "$GITHUB_ENV"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
+          .github/scripts/read-config.sh "previous/infra/config/$BRANCHBOOK_ENV.json" \
+            PREFIX=resourcePrefix STACK_PREFIX=stackIdPrefix DOMAIN=domain.name >> "$GITHUB_ENV"
+          .github/scripts/read-config.sh "previous/infra/config/$BRANCHBOOK_ENV.json" \
+            domain=domain.name >> "$GITHUB_OUTPUT"
 
       - name: Sign in to AWS through OpenID Connect
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -903,14 +895,14 @@ jobs:
         working-directory: previous/infra
         env:
           BRANCHBOOK_DEMO_ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
-        run: npx cdk deploy BranchbookData BranchbookApp --require-approval never --ci --progress events
+        run: npx cdk deploy "${STACK_PREFIX}Data" "${STACK_PREFIX}App" --require-approval never --ci --progress events
 
       - name: Smoke-test production on the previous release
         if: steps.current.outputs.needed == 'true'
         env:
           EXPECT_PROD_PROFILE: '1'
           EXPECT_CAPTCHA: '1'
-        run: previous/scripts/smoke.sh "$SITE_URL"
+        run: previous/scripts/smoke.sh "https://$DOMAIN"
 
       # The failed deployment never recorded itself, so the record still names the release now running again.
       - name: Verify the record names the release now running

@@ -24,7 +24,7 @@ services:
 
   # Runs load/booking.js against the stack that ci.yml's job stack starts on the runner's loopback address.
   k6:
-    image: grafana/k6:2.3.0@sha256:2dd4756ec6e14e62778916e1eb850108e4b499304c02df56760fa0bdb0fba0b8
+    image: grafana/k6:1.8.1@sha256:23f2279054c3e01535455c4d92914a625df12aeb631ea0e3ea7a43f96bcbc843
     network_mode: host
     volumes:
       - ../../load:/load:ro
