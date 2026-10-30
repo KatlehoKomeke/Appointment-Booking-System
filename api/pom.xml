@@ -61,6 +61,9 @@
          was at least two weeks old when it was added (2.55.15, published 2026-10-12): the project waits two weeks
          before taking a new release, so a broken or withdrawn one is caught upstream first. -->
     <aws-sdk.version>2.55.15</aws-sdk.version>
+    <!-- The AWS Advanced JDBC Wrapper, whose iam plugin signs in to RDS with IAM database authentication. 4.5.0,
+         published 2026-10-14, was the newest release at least two weeks old when it was added. -->
+    <aws-advanced-jdbc-wrapper.version>4.5.0</aws-advanced-jdbc-wrapper.version>
     <!-- Test libraries that the Spring Boot parent does not manage. -->
     <archunit.version>1.5.1</archunit.version>
   </properties>
@@ -156,6 +159,35 @@
     <dependency>
       <groupId>software.amazon.awssdk</groupId>
       <artifactId>url-connection-client</artifactId>
+    </dependency>
+    <!-- In AWS the application connects to RDS as the runtime role with IAM database authentication, so no database
+         password for it exists: DB_URL is jdbc:aws-wrapper:postgresql://...?wrapperPlugins=iam, and the wrapper's
+         driver, software.amazon.jdbc.Driver, asks RDS's utilities for a short-lived token in place of a password and
+         hands the connection to PostgreSQL's driver. A plain jdbc:postgresql: URL, as locally, in CI and in the
+         migration task, never touches it (AwsJdbcWrapperIT). The wrapper's own AWS dependencies are optional, so the
+         one its iam plugin needs, the SDK's rds module, is added below on the pinned SDK version. -->
+    <dependency>
+      <groupId>software.amazon.jdbc</groupId>
+      <artifactId>aws-advanced-jdbc-wrapper</artifactId>
+      <version>${aws-advanced-jdbc-wrapper.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>software.amazon.awssdk</groupId>
+      <artifactId>rds</artifactId>
+      <exclusions>
+        <exclusion>
+          <groupId>software.amazon.awssdk</groupId>
+          <artifactId>apache-client</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>software.amazon.awssdk</groupId>
+          <artifactId>apache5-client</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>software.amazon.awssdk</groupId>
+          <artifactId>netty-nio-client</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
 
     <!-- Tests -->
