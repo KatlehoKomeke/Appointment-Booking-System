@@ -145,6 +145,14 @@ jobs:
       - name: Check out the repository
         uses: actions/checkout@v7
 
+      # compose.yaml commits no database password, so each run makes its own: random, masked in the log, and looked
+      # for in the logs below.
+      - name: Make a random database password for this run
+        run: |
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::$password"
+          echo "DB_PASSWORD=$password" >> "$GITHUB_ENV"
+
       - name: Build the image and start the stack, as make up does
         run: docker compose up --build --detach --wait --wait-timeout 300
 
@@ -207,7 +215,7 @@ jobs:
 
       - name: Check that the logs hold no credentials
         run: |
-          if docker compose logs app db | grep --ignore-case --extended-regexp 'password|local-dev-only'; then
+          if docker compose logs app db | grep --ignore-case --fixed-strings --regexp password --regexp "$DB_PASSWORD"; then
             echo "A log line above mentions a credential." >&2
             exit 1
           fi
