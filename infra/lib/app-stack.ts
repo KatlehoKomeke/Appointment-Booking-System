@@ -19,7 +19,7 @@ import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
 import { CaptchaApiKey } from './captcha-api-key';
 import { EnvironmentConfig, retentionDays } from './config';
-import { DATABASE_NAME, POSTGRES_PORT, SUBNET_GROUPS } from './data-stack';
+import { DATABASE_NAME, POSTGRES_PORT, SUBNET_GROUPS, syntheticTrafficSecretName } from './data-stack';
 import { SchemaMigration } from './schema-migration';
 import { ANY_RESOURCE_FINDING, LAMBDA_BASIC_EXECUTION_FINDING } from './nag';
 import { MMS_COUNTRIES, SMS_COUNTRIES, VOICE_COUNTRIES } from './sms-countries';
@@ -524,7 +524,7 @@ export class AppStack extends Stack {
     const captchaScope = bookingOrCancel();
     if (waf.syntheticTrafficBypass) {
       // A CloudFormation dynamic reference: the token is resolved at deploy time and is never in the template.
-      const token = SecretValue.secretsManager(`${config.resourcePrefix}/synthetic-traffic-token`).unsafeUnwrap();
+      const token = SecretValue.secretsManager(syntheticTrafficSecretName(config.resourcePrefix)).unsafeUnwrap();
       captchaScope.push({
         notStatement: {
           statement: {

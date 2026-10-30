@@ -6,6 +6,17 @@ import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
 import { Construct } from 'constructs';
 import { EnvironmentConfig, retentionDays } from './config';
 
+/**
+ * The Secrets Manager secret that holds an environment's synthetic-traffic token, where it has one: requests carrying
+ * it in `x-branchbook-synthetic` skip the WAF CAPTCHA. The data stack creates it, the app stack's web ACL reads it,
+ * and the account stack lets only that environment's deploy role read it.
+ *
+ * @param resourcePrefix - the environment's `resourcePrefix`
+ */
+export function syntheticTrafficSecretName(resourcePrefix: string): string {
+  return `${resourcePrefix}/synthetic-traffic-token`;
+}
+
 /** The database the application connects to; the migration task creates its schema. */
 export const DATABASE_NAME = 'branchbook';
 
@@ -151,7 +162,7 @@ export class DataStack extends Stack {
       // The pipeline's end-to-end tests and smoke test send this as x-branchbook-synthetic, and the web ACL lets such
       // requests skip the CAPTCHA. It lives with the data so redeploying the app does not change it mid-run.
       this.syntheticTrafficToken = new secretsmanager.Secret(this, 'SyntheticTrafficToken', {
-        secretName: `${prefix}/synthetic-traffic-token`,
+        secretName: syntheticTrafficSecretName(prefix),
         description: 'BranchBook: lets the pipeline\'s synthetic traffic skip the CAPTCHA (staging only)',
         generateSecretString: { passwordLength: 40, excludePunctuation: true },
         removalPolicy: RemovalPolicy.DESTROY,

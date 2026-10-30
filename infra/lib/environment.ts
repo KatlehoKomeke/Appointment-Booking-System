@@ -31,6 +31,17 @@ export interface EnvironmentStacks {
 }
 
 /**
+ * The IDs of one environment's three stacks, from its `stackIdPrefix`. The account-level policies name these stacks,
+ * so this is the one place their IDs are formed.
+ *
+ * @param config - the environment
+ */
+export function environmentStackIds(config: Pick<EnvironmentConfig, 'stackIdPrefix'>): { data: string; app: string; release: string } {
+  const prefix = config.stackIdPrefix;
+  return { data: `${prefix}Data`, app: `${prefix}App`, release: `${prefix}Release` };
+}
+
+/**
  * Adds one environment's stacks to the CDK app, named from its `stackIdPrefix`: production keeps the IDs its live
  * stacks were deployed under (`BranchbookData`, `BranchbookApp`, `BranchbookRelease`), so nothing live is renamed or
  * replaced, and staging's are `BranchbookStagingData`, `BranchbookStagingApp` and `BranchbookStagingRelease`.
@@ -51,14 +62,14 @@ export function addEnvironment(
     throw new Error(`${config.name} runs in ${config.region}, but the image registry is in ${registry.region}`);
   }
   const env = { account: inputs.account, region: config.region };
-  const id = config.stackIdPrefix;
+  const ids = environmentStackIds(config);
 
-  const data = new DataStack(app, `${id}Data`, {
+  const data = new DataStack(app, ids.data, {
     env,
     description: `BranchBook ${config.name}: the network and the PostgreSQL 17 database.`,
     config,
   });
-  const appStack = new AppStack(app, `${id}App`, {
+  const appStack = new AppStack(app, ids.app, {
     env,
     description: `BranchBook ${config.name}: WAF, the HTTPS load balancer, the Fargate service and the schema migration.`,
     config,
@@ -70,7 +81,7 @@ export function addEnvironment(
     alertEmail: inputs.alertEmail,
     smsDryRun: inputs.smsDryRun,
   });
-  const release = new ReleaseStack(app, `${id}Release`, {
+  const release = new ReleaseStack(app, ids.release, {
     env,
     description: `BranchBook ${config.name}: records the git commit and image digest most recently deployed.`,
     resourcePrefix: config.resourcePrefix,
