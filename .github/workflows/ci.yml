@@ -1,34 +1,48 @@
 # .github/workflows/ci.yml
 #
-# Builds and tests the application on every push to main and every pull request, and deploys it from main. Four jobs
-# run in parallel:
+# Builds, tests and scans BranchBook on every push to main and every pull request. On a push to main it then delivers
+# the one image it built: to staging first, then, once a person approves, the same image digest to production
+# (docs/delivery.md, docs/adr/0007-continuous-deployment-from-main.md).
 #
-# - api:   `./mvnw verify` on JDK 25. Compiler and Javadoc lint, unit tests, integration tests on a real
-#          PostgreSQL 17 (Testcontainers), the formatting check, the OpenAPI contract check (docs/openapi.yaml must be
-#          what the API generates) and the coverage report. The unit tests and the API tests then run again in
-#          America/New_York, because slot times must not depend on the JVM's zone. Last,
-#          scripts/check-test-refs.sh: every rule in docs/domain-rules.md has a status and a proof, and every test
-#          that a proven rule or README.md cites exists, unless README.md marks it as planned.
-# - web:   the API types must be what docs/openapi.yaml generates; then lint, type check, format check, unit tests
-#          in two time zones, and the production build.
-# - stack: builds the Docker image and starts it with PostgreSQL through docker compose, exactly as `make up` does on
-#          a reviewer's machine. It then runs scripts/smoke.sh, the Playwright end-to-end tests in e2e/ at 390 and
-#          1280 px (failing on any CSP violation or console error), the smoke test again, and the 409 race
-#          (scripts/demo-409.sh), and checks that the logs hold no credentials. A failed run keeps the end-to-end
-#          report, its traces and the stack's logs as artifacts.
-# - infra: lints, type-checks and unit-tests the AWS CDK app in infra/, then synthesises every stack. It needs no AWS
-#          credentials: the tests assert on the generated CloudFormation, and synth never calls AWS.
+# The checks run in parallel and have no access to AWS:
 #
-# On a push to main, once all four are green, one more job runs (docs/adr/0007-continuous-deployment-from-main.md):
+# - api:           `./mvnw verify` on JDK 25. Compiler and Javadoc lint, unit tests, integration tests on a real
+#                  PostgreSQL 17 (Testcontainers), the formatting check, the OpenAPI contract check (docs/openapi.yaml
+#                  must be what the API generates) and the coverage report. The unit tests and the API tests then run
+#                  again in America/New_York, because slot times must not depend on the JVM's zone. Last,
+#                  scripts/check-test-refs.sh: every rule in docs/domain-rules.md has a status and a proof, and every
+#                  test that a proven rule or README.md cites exists, unless README.md marks it as planned.
+# - web:           the API types must be what docs/openapi.yaml generates; then lint, type check, format check, unit
+#                  tests in two time zones, and the production build.
+# - infra:         lints, type-checks and unit-tests the AWS CDK app in infra/, then synthesises staging and production
+#                  with a placeholder image digest, the account and guardrails stacks included. Synth never calls AWS.
+# - workflow-lint: actionlint (with shellcheck) and zizmor over .github/.
+# - image:         builds the ARM64 image once, natively on an ARM runner, scans it with Trivy (failing on any HIGH or
+#                  CRITICAL vulnerability that has a fix), writes its CycloneDX SBOM, and keeps both as artifacts.
+#                  Every later job uses this build; nothing rebuilds it.
+# - stack:         starts that image with PostgreSQL through docker compose, as `make up` does but without building,
+#                  with a database password generated for the run. Then the smoke test, the Playwright end-to-end
+#                  tests at 390 and 1280 px (failing on any CSP violation or console error), the smoke test again, the
+#                  409 race, a short k6 load test, the OWASP ZAP baseline scan, and a check that no log line holds a
+#                  credential. A failed run keeps the reports, traces and the stack's logs as artifacts.
 #
-# - deploy: signs in to AWS through OpenID Connect (no stored keys) as the role in the aws-demo environment, builds
-#           the ARM64 image on an ARM runner, deploys the hosted demo's two stacks with `cdk deploy`, smoke-tests the
-#           live address, and only then records the commit in BranchbookRelease and reads it back. A red check above
-#           means no deployment.
+# On a push to main, once every check is green, the delivery jobs run, each in a GitHub environment whose AWS role
+# trusts that environment alone:
 #
-# The first four jobs only read the repository and have no access to AWS. The pipeline never sets
-# BRANCHBOOK_ALERT_EMAIL, so it cannot synthesise or change BranchbookAccount, the stack that grants it access (see
-# infra/bin/branchbook.ts). Account IDs are masked in the public logs.
+# - publish:             (staging) deploys BranchbookRegistry, pushes the image to ECR as branchbook:<commit>, and
+#                        attests its build provenance and SBOM. Its digest is what every later job deploys.
+# - deploy-staging:      (staging) deploys BranchbookStagingData and BranchbookStagingApp with that digest,
+#                        smoke-tests and end-to-end-tests the staging address, then records the release.
+# - deploy-production:   (production, after a reviewer approves) verifies the image's attestation, deploys
+#                        BranchbookData and BranchbookApp with the same digest, smoke-tests the production address,
+#                        then records the release.
+# - rollback-production: (production) if production changed and then failed its deployment or smoke test, redeploys
+#                        the release recorded before it and smoke-tests that.
+#
+# Every job starts with no token permissions and asks for what it needs. The pipeline never sets
+# BRANCHBOOK_ALERT_EMAIL or BRANCHBOOK_GUARDRAILS outside the credential-free infra job, so a job that holds AWS
+# credentials cannot synthesise, let alone deploy, the stacks that define its own access (infra/bin/branchbook.ts).
+# Account IDs are masked in the logs, which are public.
 
 name: ci
 
@@ -38,28 +52,32 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
-# A newer push to the same pull request or branch cancels the run it makes obsolete. On main, runs queue instead, so a
-# deployment in progress is never interrupted: at most one run waits, and a newer push replaces the waiting one.
+# A newer push to a pull request or branch cancels the run it makes obsolete. On main each run is a group of its own,
+# so a run waiting for a production approval never holds up the next commit's checks; the delivery jobs queue per
+# environment instead, through their own groups, and are never cancelled once started.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   api:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: api
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up JDK 25
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
           java-version: 25
@@ -81,7 +99,7 @@ jobs:
 
       - name: Keep the test reports of a failed run
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: api-test-reports
           path: |
@@ -92,15 +110,19 @@ jobs:
   web:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    permissions:
+      contents: read
     defaults:
       run:
         working-directory: web
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js from .nvmrc
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -109,8 +131,8 @@ jobs:
       - name: Install the pinned dependencies
         run: npm ci
 
-      # src/api/schema.d.ts is generated from the committed contract and committed itself, so a reviewer can read
-      # it. Regenerating it must change nothing (ADR-0005).
+      # src/api/schema.d.ts is generated from the committed contract and committed itself, so a reader can read it.
+      # Regenerating it must change nothing (ADR-0005).
       - name: Check that the API types match docs/openapi.yaml
         run: npm run check:api
 
@@ -138,24 +160,179 @@ jobs:
       - name: Production build
         run: npm run build
 
-  stack:
+  infra:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: infra
+    env:
+      # Synthesis needs an image digest for the app stacks and never resolves it; the real one exists only once the
+      # image job's build is pushed.
+      BRANCHBOOK_IMAGE_DIGEST: sha256:0000000000000000000000000000000000000000000000000000000000000000
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-      - name: Build the image and start the stack, as make up does
-        run: docker compose up --build --detach --wait --wait-timeout 300
+      - name: Set up Node.js from .nvmrc
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: infra/package-lock.json
+
+      - name: Install the pinned dependencies
+        run: npm ci
+
+      - name: Lint, including TSDoc on every export
+        run: npm run lint
+
+      - name: Type-check
+        run: npm run build
+
+      - name: Unit-test the synthesised templates
+        run: npm test -- --ci
+
+      - name: Synthesise staging
+        env:
+          BRANCHBOOK_ENV: staging
+        run: npx cdk synth --quiet
+
+      # The two flags bring the administrator's stacks into the app, which only this credential-free job ever does
+      # in CI. The address is a placeholder: the real one is personal data and is never committed.
+      - name: Synthesise production, with the account and guardrails stacks
+        env:
+          BRANCHBOOK_ENV: production
+          BRANCHBOOK_ALERT_EMAIL: alerts@example.com
+          BRANCHBOOK_GUARDRAILS: 'true'
+        run: npx cdk synth --quiet
+
+  workflow-lint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Lint the workflows and the shell in them (actionlint)
+        run: docker compose --file .github/tools/compose.yaml run --rm actionlint
+
+      # The token lets zizmor check that each pinned SHA belongs to the action and tag it claims, and that no pinned
+      # version has a known advisory. It is this job's read-only token.
+      - name: Audit the workflows and Dependabot's configuration (zizmor)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: docker compose --file .github/tools/compose.yaml run --rm zizmor
+
+  image:
+    # The Fargate task is ARM64, so the image is built natively on an ARM runner: no emulation, and the same build as
+    # a developer's Apple-silicon machine. It is built without a layer cache, so no cache can reach a released image.
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    outputs:
+      id: ${{ steps.build.outputs.id }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build the ARM64 image once
+        id: build
+        run: |
+          docker build --platform linux/arm64 --label "org.opencontainers.image.revision=$GITHUB_SHA" \
+            --tag branchbook:ci .
+          echo "id=$(docker image inspect --format '{{.Id}}' branchbook:ci)" >> "$GITHUB_OUTPUT"
+          docker save --output branchbook-image.tar branchbook:ci
+
+      # Only vulnerabilities with a fixed version fail the build: those are the ones a dependency or base-image update
+      # can close. The rest stay visible in ECR's scan of the published image. The vulnerability and Java databases
+      # can take minutes to download, hence the long timeout.
+      - name: Scan the image for known vulnerabilities (Trivy)
+        run: >-
+          docker compose --file .github/tools/compose.yaml run --rm trivy
+          image --input branchbook-image.tar --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed
+          --exit-code 1 --no-progress --skip-version-check --timeout 15m
+
+      - name: Write the software bill of materials (CycloneDX)
+        run: >-
+          docker compose --file .github/tools/compose.yaml run --rm trivy
+          image --input branchbook-image.tar --format cyclonedx --output sbom.cdx.json
+          --no-progress --skip-version-check --timeout 15m
+
+      - name: Keep the image for the jobs that test, publish and deploy it
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: branchbook-image
+          path: branchbook-image.tar
+          # The layers are already compressed.
+          compression-level: 0
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Keep the software bill of materials
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom
+          path: sbom.cdx.json
+          retention-days: 90
+          if-no-files-found: error
+
+  stack:
+    needs: image
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fetch the image the image job built
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: branchbook-image
+
+      # compose.yaml runs branchbook:local. Tagging the loaded build with that name, and starting with --no-build,
+      # makes the stack run exactly the image that was scanned and will be published.
+      - name: Load that image as branchbook:local
+        env:
+          IMAGE_ID: ${{ needs.image.outputs.id }}
+        run: |
+          docker load --input branchbook-image.tar
+          docker tag branchbook:ci branchbook:local
+          test "$(docker image inspect --format '{{.Id}}' branchbook:local)" = "$IMAGE_ID"
+
+      # A password made for this run only, masked in the log; compose.yaml requires one.
+      - name: Generate the database password
+        run: |
+          password="$(openssl rand -hex 24)"
+          echo "::add-mask::$password"
+          echo "DB_PASSWORD=$password" >> "$GITHUB_ENV"
+
+      - name: Start the stack from that image, as make up does
+        run: docker compose up --no-build --detach --wait --wait-timeout 300
 
       - name: Smoke-test the running application
         run: scripts/smoke.sh http://127.0.0.1:8080
 
       # The end-to-end tests drive the same stack in Chromium, at 390 and 1280 px, failing on any CSP violation or
-      # console error (e2e/README.md). The browser is cached by Playwright's version, so it downloads only when that
-      # changes.
+      # console error (e2e/README.md). The browser is cached by Playwright's version and the runner's architecture,
+      # because an x64 browser does not run on this ARM runner.
       - name: Set up Node.js for the end-to-end tests
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .nvmrc
           cache: npm
@@ -167,10 +344,10 @@ jobs:
 
       - name: Cache the Playwright browser
         id: browsers
-        uses: actions/cache@v6
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('e2e/package-lock.json') }}
+          key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('e2e/package-lock.json') }}
 
       - name: Install Chromium for Playwright
         if: steps.browsers.outputs.cache-hit != 'true'
@@ -195,9 +372,39 @@ jobs:
       - name: Race twenty bookings for the last seat (make demo-409)
         run: scripts/demo-409.sh http://127.0.0.1:8080
 
+      # load/booking.js carries its own pass/fail thresholds (load/README.md); k6 exits non-zero when one is crossed.
+      # Thirty seconds at the script's default rates is enough to catch a regression without slowing every run.
+      - name: Load-test bookings briefly (k6)
+        timeout-minutes: 5
+        run: >-
+          docker compose --file .github/tools/compose.yaml run --rm k6
+          run --env BASE_URL=http://127.0.0.1:8080 --env DURATION=30s /load/booking.js
+
+      # A passive scan of what ZAP's spider finds, with the rules in .github/zap/rules.tsv: any warning that file does
+      # not explain fails the build.
+      - name: Scan the running application (OWASP ZAP baseline)
+        run: |
+          mkdir zap-work
+          cp .github/zap/rules.tsv zap-work/
+          # ZAP runs as its own user and writes its reports here.
+          chmod 0777 zap-work
+          docker compose --file .github/tools/compose.yaml run --rm zap \
+            zap-baseline.py -t http://127.0.0.1:8080 -c rules.tsv -r zap-report.html -w zap-report.md
+
+      - name: Keep the ZAP report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: zap-report
+          path: |
+            zap-work/zap-report.html
+            zap-work/zap-report.md
+          retention-days: 30
+          if-no-files-found: ignore
+
       - name: Keep the end-to-end report and traces of a failed run
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: e2e-report
           path: |
@@ -205,10 +412,16 @@ jobs:
             e2e/test-results/
           if-no-files-found: ignore
 
+      # The password is masked, so a line that held it would show as *** here.
       - name: Check that the logs hold no credentials
         run: |
-          if docker compose logs app db | grep --ignore-case --extended-regexp 'password|local-dev-only'; then
-            echo "A log line above mentions a credential." >&2
+          docker compose logs --no-color app db > stack.log
+          if grep --quiet --fixed-strings -- "$DB_PASSWORD" stack.log; then
+            echo "A log line holds this run's database password." >&2
+            exit 1
+          fi
+          if grep --ignore-case --fixed-strings 'password' stack.log; then
+            echo "A log line above mentions a password." >&2
             exit 1
           fi
 
@@ -218,7 +431,7 @@ jobs:
 
       - name: Keep the stack's logs of a failed run
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: compose-logs
           path: compose.log
@@ -228,108 +441,470 @@ jobs:
         if: always()
         run: docker compose down --volumes
 
-  infra:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: infra
-    steps:
-      - name: Check out the repository
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js 24
-        uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: infra/package-lock.json
-
-      - name: Install the pinned dependencies
-        run: npm ci
-
-      - name: Lint, including TSDoc on every export
-        run: npm run lint
-
-      - name: Type-check
-        run: npm run build
-
-      - name: Unit-test the synthesised templates
-        run: npm test -- --ci
-
-      - name: Synthesise every stack
-        # A placeholder address: the real one is supplied only when deploying, never committed. With the flag, it
-        # brings BranchbookAccount and the hosted demo's two stacks into the app.
-        env:
-          BRANCHBOOK_ALERT_EMAIL: alerts@example.com
-          BRANCHBOOK_HOSTED_DEMO: 'true'
-        run: npx cdk synth --quiet
-
-  deploy:
-    # A push to main, or a manual run; never a pull request. The aws-demo environment then admits only main and v*
-    # tags, so a manual run from any other ref stops here, before a token is issued.
-    if: github.event_name != 'pull_request'
-    needs: [api, web, stack, infra]
-    # The Fargate task is ARM64, so the image is built on an ARM runner: no emulation, and the same build as a
-    # developer's Apple-silicon machine.
+  publish:
+    # A push to main only; never a pull request or a manual run. The staging environment admits main alone, so this
+    # is also enforced before GitHub issues a token.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [api, web, infra, workflow-lint, image, stack]
     runs-on: ubuntu-24.04-arm
-    environment: aws-demo
-    timeout-minutes: 40
+    environment: staging
+    timeout-minutes: 20
     permissions:
-      id-token: write   # lets the job request a GitHub OIDC token for AWS
       contents: read
-    # Deployments queue rather than cancel each other, so a half-finished deployment is never interrupted.
+      id-token: write       # an OIDC token for AWS, and for Sigstore's signing certificate
+      attestations: write   # stores the provenance and SBOM attestations
+    # One publication at a time; a second waits rather than cancelling the first.
     concurrency:
-      group: deploy-aws
+      group: publish
       cancel-in-progress: false
-    defaults:
-      run:
-        working-directory: infra
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - name: Check out the repository
-        uses: actions/checkout@v7
-
-      - name: Set up Node.js 24
-        uses: actions/setup-node@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: 24
-          cache: npm
-          cache-dependency-path: infra/package-lock.json
+          persist-credentials: false
 
-      - name: Install the pinned dependencies
+      # No dependency cache in a job that holds AWS credentials and publishes.
+      - name: Set up Node.js from .nvmrc
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Install the CDK app's pinned dependencies
+        working-directory: infra
         run: npm ci
 
       - name: Sign in to AWS through OpenID Connect
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          role-session-name: deploy-${{ github.run_id }}
-          aws-region: af-south-1
+          role-session-name: publish-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: true
 
-      # The data stack first, then the app stack, whose image is built here and pushed to the bootstrap repository.
+      - name: Read the image repository's name from infra/config
+        run: .github/scripts/read-config.sh infra/config/registry.json IMAGE_REPOSITORY=repositoryName >> "$GITHUB_ENV"
+
+      # Without BRANCHBOOK_ENV the CDK app holds only the registry, the one stack both environments share.
+      - name: Deploy the image registry (BranchbookRegistry)
+        working-directory: infra
+        run: npx cdk deploy BranchbookRegistry --require-approval never --ci --progress events
+
+      - name: Fetch the image the checks passed
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: branchbook-image
+
+      - name: Load it, and check that it is the build the checks passed
+        env:
+          IMAGE_ID: ${{ needs.image.outputs.id }}
+        run: |
+          docker load --input branchbook-image.tar
+          test "$(docker image inspect --format '{{.Id}}' branchbook:ci)" = "$IMAGE_ID"
+
+      # The tag is the full commit SHA, and the repository's tags are immutable, so a tag always names one build.
+      - name: Push it to ECR as branchbook:<commit>
+        id: push
+        run: |
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          echo "::add-mask::$account"
+          repository="$account.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPOSITORY"
+          aws ecr get-login-password | docker login --username AWS --password-stdin "${repository%%/*}"
+          docker tag branchbook:ci "$repository:$GITHUB_SHA"
+          docker push "$repository:$GITHUB_SHA"
+          digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' \
+            "$repository:$GITHUB_SHA" | grep --fixed-strings "$repository@" | head -n 1 | cut -d@ -f2)"
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "No digest for the pushed image" >&2; exit 1; }
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "Published $IMAGE_REPOSITORY:$GITHUB_SHA as $digest"
+
+      # Attestations of a public repository are public, so the subject is named by the repository alone: the registry's
+      # host name holds the AWS account ID. Verification matches the digest, which is what deploy-production checks.
+      - name: Attest the image's build provenance
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_REPOSITORY }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+
+      - name: Fetch the software bill of materials
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sbom
+
+      - name: Attest the image's software bill of materials
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE_REPOSITORY }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          sbom-path: sbom.cdx.json
+
+  deploy-staging:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: publish
+    runs-on: ubuntu-24.04
+    environment:
+      name: staging
+      url: https://${{ steps.config.outputs.domain }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write   # an OIDC token for AWS
+    # Deployments to staging queue: one at a time, and one in progress is never cancelled.
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    env:
+      BRANCHBOOK_ENV: ${{ vars.BRANCHBOOK_ENV }}
+      BRANCHBOOK_IMAGE_DIGEST: ${{ needs.publish.outputs.digest }}
+    outputs:
+      deployed: ${{ steps.order.outputs.newer }}
+    steps:
+      - name: Check out the repository, with its history for the order check
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js from .nvmrc
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Install the CDK app's pinned dependencies
+        working-directory: infra
+        run: npm ci
+
+      # The address, the stacks' names and the prefix of the resources' names come from the environment's
+      # configuration, which the CDK app reads too, not from this file.
+      - name: Read the environment's settings from infra/config
+        id: config
+        run: |
+          .github/scripts/read-config.sh "infra/config/$BRANCHBOOK_ENV.json" \
+            PREFIX=resourcePrefix STACK_PREFIX=stackIdPrefix DOMAIN=domain.name >> "$GITHUB_ENV"
+          .github/scripts/read-config.sh "infra/config/$BRANCHBOOK_ENV.json" domain=domain.name >> "$GITHUB_OUTPUT"
+
+      - name: Sign in to AWS through OpenID Connect
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: deploy-staging-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      # Runs queue per environment, and a slower run can reach the queue after a newer one: this one then deploys
+      # nothing rather than replace a newer release with an older commit.
+      - name: Check that this commit is not older than the release staging runs
+        id: order
+        run: |
+          newer="$(.github/scripts/release.sh is-newer "$PREFIX" "$GITHUB_SHA")"
+          echo "newer=$newer" >> "$GITHUB_OUTPUT"
+          if [[ "$newer" != true ]]; then
+            echo "::notice::Staging already runs a newer commit, so this run deploys nothing."
+          fi
+
       # The alarms' e-mail address is personal data, so it comes from an environment secret when one is set; without
       # it the alarms still exist, on a topic with no subscriber.
-      - name: Deploy the hosted demo
+      - name: Deploy staging (BranchbookStagingData, BranchbookStagingApp)
+        if: steps.order.outputs.newer == 'true'
+        working-directory: infra
         env:
-          BRANCHBOOK_HOSTED_DEMO: 'true'
-          BRANCHBOOK_DEMO_ALERT_EMAIL: ${{ secrets.BRANCHBOOK_DEMO_ALERT_EMAIL }}
-        run: npx cdk deploy BranchbookData BranchbookApp --require-approval never --ci --progress events
+          BRANCHBOOK_DEMO_ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+        run: npx cdk deploy "${STACK_PREFIX}Data" "${STACK_PREFIX}App" --require-approval never --ci --progress events
 
-      # The same checks a reviewer's `make smoke` runs, against the live address: the new task answers behind the
-      # load balancer, with every security header, before this commit is recorded as deployed.
-      - name: Smoke-test the hosted demo
-        working-directory: .
-        run: scripts/smoke.sh "https://$(node -p "require('./infra/cdk.json').context.demoDomain")"
-
-      - name: Record the deployed commit
-        run: npx cdk deploy BranchbookRelease --require-approval never --ci --progress events
-
-      - name: Verify the recorded commit
+      # Staging's CAPTCHA rule lets requests carrying this secret through, so the checks below can book. It is masked
+      # before anything can print it.
+      - name: Read the synthetic-traffic token
+        if: steps.order.outputs.newer == 'true'
         run: |
-          deployed="$(aws ssm get-parameter --name /branchbook/release --query Parameter.Value --output text)"
-          if [ "$deployed" != "$GITHUB_SHA" ]; then
-            echo "AWS records $deployed, expected $GITHUB_SHA" >&2
-            exit 1
+          token="$(aws secretsmanager get-secret-value --secret-id "$PREFIX/synthetic-traffic-token" \
+            --query SecretString --output text)"
+          echo "::add-mask::$token"
+          echo "SYNTHETIC_TOKEN=$token" >> "$GITHUB_ENV"
+
+      - name: Smoke-test staging
+        if: steps.order.outputs.newer == 'true'
+        env:
+          EXPECT_PROD_PROFILE: '1'
+          EXPECT_CAPTCHA: '1'
+          EXPECT_DEMO_NUMBERS_ONLY: '1'
+        run: SMOKE_SYNTHETIC_TOKEN="$SYNTHETIC_TOKEN" scripts/smoke.sh "https://$DOMAIN"
+
+      # A deployment that holds credentials uses no cache, so the browser is installed fresh.
+      - name: Install the end-to-end test dependencies and Chromium
+        if: steps.order.outputs.newer == 'true'
+        working-directory: e2e
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+
+      - name: Run the end-to-end tests against staging
+        if: steps.order.outputs.newer == 'true'
+        working-directory: e2e
+        run: E2E_BASE_URL="https://$DOMAIN" E2E_SYNTHETIC_TOKEN="$SYNTHETIC_TOKEN" npx playwright test
+
+      - name: Keep the end-to-end report and traces of a failed run
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: e2e-report-staging
+          path: |
+            e2e/playwright-report/
+            e2e/test-results/
+          if-no-files-found: ignore
+
+      # Only now, after the smoke and end-to-end tests pass, does staging's record name this commit and image.
+      - name: Record the release (BranchbookStagingRelease)
+        if: steps.order.outputs.newer == 'true'
+        working-directory: infra
+        run: npx cdk deploy "${STACK_PREFIX}Release" --require-approval never --ci --progress events
+
+      - name: Verify the recorded commit and image
+        if: steps.order.outputs.newer == 'true'
+        run: .github/scripts/release.sh verify "$PREFIX" "$GITHUB_SHA" "$BRANCHBOOK_IMAGE_DIGEST"
+
+  deploy-production:
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main'
+      && needs.deploy-staging.outputs.deployed == 'true'
+    needs: [publish, deploy-staging]
+    runs-on: ubuntu-24.04
+    # The production environment requires a reviewer's approval before this job starts.
+    environment:
+      name: production
+      url: https://${{ steps.config.outputs.domain }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write       # an OIDC token for AWS
+      attestations: read    # gh attestation verify
+    # Deployments to production queue, and rollback-production shares the group, so a rollback never runs beside a
+    # deployment.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      BRANCHBOOK_ENV: ${{ vars.BRANCHBOOK_ENV }}
+      BRANCHBOOK_IMAGE_DIGEST: ${{ needs.publish.outputs.digest }}
+    outputs:
+      previous-commit: ${{ steps.previous.outputs.commit }}
+      previous-image: ${{ steps.previous.outputs.image }}
+      rollback: ${{ steps.verdict.outputs.rollback }}
+    steps:
+      - name: Check out the repository, with its history for the order check
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js from .nvmrc
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+
+      - name: Install the CDK app's pinned dependencies
+        working-directory: infra
+        run: npm ci
+
+      - name: Read the environment's settings from infra/config
+        id: config
+        run: |
+          .github/scripts/read-config.sh "infra/config/$BRANCHBOOK_ENV.json" \
+            PREFIX=resourcePrefix STACK_PREFIX=stackIdPrefix DOMAIN=domain.name >> "$GITHUB_ENV"
+          .github/scripts/read-config.sh "infra/config/$BRANCHBOOK_ENV.json" domain=domain.name >> "$GITHUB_OUTPUT"
+          .github/scripts/read-config.sh infra/config/registry.json IMAGE_REPOSITORY=repositoryName >> "$GITHUB_ENV"
+
+      - name: Sign in to AWS through OpenID Connect
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: deploy-production-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      # Production runs only an image that this workflow built from main on a GitHub-hosted runner and attested: the
+      # check reads the digest from ECR and the signed provenance from GitHub.
+      - name: Verify the image's build provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          account="$(aws sts get-caller-identity --query Account --output text)"
+          echo "::add-mask::$account"
+          repository="$account.dkr.ecr.$AWS_REGION.amazonaws.com/$IMAGE_REPOSITORY"
+          aws ecr get-login-password | docker login --username AWS --password-stdin "${repository%%/*}"
+          gh attestation verify "oci://$repository@$BRANCHBOOK_IMAGE_DIGEST" \
+            --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+            --source-ref refs/heads/main \
+            --deny-self-hosted-runners
+
+      - name: Check that this commit is not older than the release production runs
+        id: order
+        run: |
+          newer="$(.github/scripts/release.sh is-newer "$PREFIX" "$GITHUB_SHA")"
+          echo "newer=$newer" >> "$GITHUB_OUTPUT"
+          if [[ "$newer" != true ]]; then
+            echo "::notice::Production already runs a newer commit, so this run deploys nothing."
           fi
-          echo "AWS af-south-1 now records commit $deployed"
+
+      # What rollback-production returns to if this deployment fails: the last release that passed its smoke test.
+      - name: Capture the release to roll back to
+        id: previous
+        if: steps.order.outputs.newer == 'true'
+        run: |
+          commit="$(.github/scripts/release.sh read "/$PREFIX/release")"
+          image="$(.github/scripts/release.sh read "/$PREFIX/release-image")"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          if [[ -z "$image" ]]; then
+            echo "::warning::/$PREFIX/release-image is empty, so a failure here cannot be rolled back automatically."
+          else
+            echo "Rollback target: commit $commit, image $image"
+          fi
+
+      - name: Deploy production (BranchbookData, BranchbookApp)
+        id: deploy
+        if: steps.order.outputs.newer == 'true'
+        working-directory: infra
+        env:
+          BRANCHBOOK_DEMO_ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+        run: npx cdk deploy "${STACK_PREFIX}Data" "${STACK_PREFIX}App" --require-approval never --ci --progress events
+
+      # Production has no CAPTCHA bypass, so the smoke test checks that an unsolved booking is challenged and skips
+      # the refusals that would need one.
+      - name: Smoke-test production
+        id: smoke
+        if: steps.order.outputs.newer == 'true'
+        env:
+          EXPECT_PROD_PROFILE: '1'
+          EXPECT_CAPTCHA: '1'
+        run: scripts/smoke.sh "https://$DOMAIN"
+
+      - name: Record the release (BranchbookRelease)
+        if: steps.order.outputs.newer == 'true'
+        working-directory: infra
+        run: npx cdk deploy "${STACK_PREFIX}Release" --require-approval never --ci --progress events
+
+      - name: Verify the recorded commit and image
+        if: steps.order.outputs.newer == 'true'
+        run: .github/scripts/release.sh verify "$PREFIX" "$GITHUB_SHA" "$BRANCHBOOK_IMAGE_DIGEST"
+
+      # A failure before the deploy step changed nothing. A failed or interrupted deploy or smoke test may have left
+      # production on the new image, so rollback-production takes over.
+      - name: Decide whether production must be rolled back
+        id: verdict
+        if: always()
+        env:
+          DEPLOY: ${{ steps.deploy.outcome }}
+          SMOKE: ${{ steps.smoke.outcome }}
+        run: |
+          case "$DEPLOY/$SMOKE" in
+            failure/* | cancelled/* | */failure | */cancelled)
+              echo "rollback=true" >> "$GITHUB_OUTPUT"
+              echo "::error::Production changed and then failed; rollback-production redeploys the previous release."
+              ;;
+          esac
+
+  rollback-production:
+    if: >-
+      ${{ !cancelled() && needs.deploy-production.result == 'failure'
+      && needs.deploy-production.outputs.rollback == 'true' }}
+    needs: deploy-production
+    runs-on: ubuntu-24.04
+    # The production role trusts this environment alone, so the rollback also waits for a reviewer's approval.
+    environment:
+      name: production
+      url: https://${{ steps.config.outputs.domain }}
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      id-token: write   # an OIDC token for AWS
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      BRANCHBOOK_ENV: ${{ vars.BRANCHBOOK_ENV }}
+      PREVIOUS_COMMIT: ${{ needs.deploy-production.outputs.previous-commit }}
+      BRANCHBOOK_IMAGE_DIGEST: ${{ needs.deploy-production.outputs.previous-image }}
+    steps:
+      - name: Stop if no earlier release is recorded
+        if: env.PREVIOUS_COMMIT == '' || env.BRANCHBOOK_IMAGE_DIGEST == ''
+        run: |
+          echo "::error::No release was recorded before this deployment; restore production by hand (infra/README.md)."
+          exit 1
+
+      # This commit's checkout provides the release script; the previous release's provides the CDK app and the smoke
+      # test, so the rollback deploys the infrastructure and the image that passed together.
+      - name: Check out this commit, with its history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check out the previous release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.PREVIOUS_COMMIT }}
+          path: previous
+          persist-credentials: false
+
+      - name: Set up Node.js from the previous release's .nvmrc
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: previous/.nvmrc
+          package-manager-cache: false
+
+      - name: Install the previous release's CDK dependencies
+        working-directory: previous/infra
+        run: npm ci
+
+      - name: Read the environment's settings from the previous release's infra/config
+        id: config
+        run: |
+          .github/scripts/read-config.sh "previous/infra/config/$BRANCHBOOK_ENV.json" \
+            PREFIX=resourcePrefix STACK_PREFIX=stackIdPrefix DOMAIN=domain.name >> "$GITHUB_ENV"
+          .github/scripts/read-config.sh "previous/infra/config/$BRANCHBOOK_ENV.json" \
+            domain=domain.name >> "$GITHUB_OUTPUT"
+
+      - name: Sign in to AWS through OpenID Connect
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          role-session-name: rollback-production-${{ github.run_id }}
+          aws-region: ${{ vars.AWS_REGION }}
+          mask-aws-account-id: true
+
+      # This job can wait in the queue behind a newer deployment. If that one recorded a release, it replaced the
+      # failed one, and rolling back would undo it.
+      - name: Check that no newer release was recorded meanwhile
+        id: current
+        run: |
+          recorded="$(.github/scripts/release.sh read "/$PREFIX/release-image")"
+          if [[ "$recorded" == "$BRANCHBOOK_IMAGE_DIGEST" ]]; then
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::A newer release ($recorded) has been recorded since, so there is nothing to roll back."
+          fi
+
+      - name: Redeploy the previous release (BranchbookData, BranchbookApp)
+        if: steps.current.outputs.needed == 'true'
+        working-directory: previous/infra
+        env:
+          BRANCHBOOK_DEMO_ALERT_EMAIL: ${{ secrets.ALERT_EMAIL }}
+        run: npx cdk deploy "${STACK_PREFIX}Data" "${STACK_PREFIX}App" --require-approval never --ci --progress events
+
+      - name: Smoke-test production on the previous release
+        if: steps.current.outputs.needed == 'true'
+        env:
+          EXPECT_PROD_PROFILE: '1'
+          EXPECT_CAPTCHA: '1'
+        run: previous/scripts/smoke.sh "https://$DOMAIN"
+
+      # The failed deployment never recorded itself, so the record still names the release now running again.
+      - name: Verify the record names the release now running
+        if: steps.current.outputs.needed == 'true'
+        run: .github/scripts/release.sh verify "$PREFIX" "$PREVIOUS_COMMIT" "$BRANCHBOOK_IMAGE_DIGEST"

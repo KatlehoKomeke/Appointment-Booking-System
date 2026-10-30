@@ -1,0 +1,33 @@
+# .github/workflows/dependency-review.yml
+#
+# On every pull request, compares the dependencies it adds or changes (Maven, npm, Docker and GitHub Actions, as
+# GitHub's dependency graph sees them) with the GitHub Advisory Database, and fails if one has a known vulnerability
+# of high or critical severity. Only what the pull request changes is judged, so an advisory against a dependency
+# already on main does not block an unrelated change; Dependabot's security updates and the image job's Trivy scan
+# cover those.
+
+name: dependency-review
+
+on:
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: dependency-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # The action compares the pull request's base and head through GitHub's API, so it needs no checkout.
+      - name: Review the dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          # Build and test tools run in CI with access to the source, so their vulnerabilities count too.
+          fail-on-scopes: runtime, development, unknown
