@@ -37,6 +37,10 @@ LABEL org.opencontainers.image.title="BranchBook" \
       org.opencontainers.image.description="Branch appointment booking for the fictional Fynbos Bank" \
       org.opencontainers.image.source="https://github.com/KatlehoKomeke/Appointment-Booking-System" \
       org.opencontainers.image.licenses="MIT"
+# The base image's packages, upgraded to the latest fixes in its Alpine release, because the image scan fails the
+# build on a fixable CRITICAL or HIGH finding that the base image has not picked up yet. --no-cache leaves no package
+# index in the image.
+RUN apk upgrade --no-cache
 # A fixed, unprivileged user. The application files stay owned by root, so the process cannot modify its own code.
 RUN addgroup -S -g 10001 branchbook \
  && adduser -S -D -H -u 10001 -G branchbook -s /sbin/nologin branchbook

@@ -64,6 +64,15 @@
     <!-- The AWS Advanced JDBC Wrapper, whose iam plugin signs in to RDS with IAM database authentication. 4.5.0,
          published 2026-10-14, was the newest release at least two weeks old when it was added. -->
     <aws-advanced-jdbc-wrapper.version>4.5.0</aws-advanced-jdbc-wrapper.version>
+    <!-- Security fixes ahead of Spring Boot. The image scan fails the build on a fixable CRITICAL or HIGH finding, and
+         Spring Boot 4.1.1 manages Tomcat 11.0.24, Jackson 3.1.5 and Jackson 2.21.5, which have such findings. These
+         override its managed versions with patch releases of the same lines, each at least two weeks old when pinned
+         (Tomcat 11.0.25 published 2026-08-12, both Jackson BOMs 2026-09-21). Spring Boot 4.1.2, which would bring
+         them, was too new to take. Drop each property once the Spring Boot version in <parent> manages this version
+         or a later one. -->
+    <tomcat.version>11.0.25</tomcat.version>
+    <jackson-bom.version>3.1.7</jackson-bom.version>
+    <jackson-2-bom.version>2.21.7</jackson-2-bom.version>
     <!-- Test libraries that the Spring Boot parent does not manage. -->
     <archunit.version>1.5.1</archunit.version>
   </properties>
