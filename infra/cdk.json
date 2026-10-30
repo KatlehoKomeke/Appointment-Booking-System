@@ -17,11 +17,9 @@
     ]
   },
   "context": {
-    "githubRepository": "KatlehoKomeke/Appointment-Booking-System",
-    "githubOwnerId": "88820937",
-    "githubRepositoryId": "1423867330",
-    "githubEnvironment": "aws-demo",
-    "monthlyBudgetUsd": 110,
+    "@aws-cdk/core:permissionsBoundary": {
+      "name": "branchbook-permissions-boundary"
+    },
     "@aws-cdk-containers/ecs-service-extensions:enableDefaultLogDriver": true,
     "@aws-cdk/aws-apigateway:authorizerChangeDeploymentLogicalId": true,
     "@aws-cdk/aws-apigateway:disableCloudWatchRole": true,

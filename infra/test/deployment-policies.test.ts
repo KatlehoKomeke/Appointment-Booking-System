@@ -1,7 +1,8 @@
 /**
  * Checks the deployment policies against the stacks they must deploy, built exactly as `cdk synth` builds them: the
  * CloudFormation execution policy must allow every service those stacks' resources belong to, or a deployment under
- * the hardened bootstrap fails half-way.
+ * the hardened bootstrap fails half-way, and every role those stacks create must carry the permissions boundary, or
+ * the execution policy refuses to create it.
  */
 import { Stack } from 'aws-cdk-lib/core';
 import { Template } from 'aws-cdk-lib/assertions';
@@ -43,6 +44,14 @@ const SERVICE_PREFIXES: Readonly<Record<string, string>> = {
 /** The IAM resources the execution policy handles with its own narrow statements, rather than `iam:*`. */
 const IAM_TYPES = ['AWS::IAM::Role', 'AWS::IAM::Policy', 'AWS::IAM::ManagedPolicy'];
 
+/** The boundary infra/cdk.json attaches to every role the application stacks create. */
+const BOUNDARY_ARN = `arn:aws:iam::${ACCOUNT}:policy/branchbook-permissions-boundary`;
+
+/** The parts of a synthesised `AWS::IAM::Role` the assertions read. */
+interface RoleResource {
+  Properties: { PermissionsBoundary?: unknown };
+}
+
 /** The parts of a synthesised IAM statement the assertions read. */
 interface Statement {
   Sid?: string;
@@ -54,15 +63,16 @@ interface Statement {
  *
  * @param name - the environment
  */
-function build(name: EnvironmentName): { appStacks: Stack[]; execServices: string[] } {
+function build(name: EnvironmentName): { appStacks: Stack[]; adminStacks: Stack[]; execServices: string[] } {
   const stacks = buildApp(newApp(), {
     BRANCHBOOK_ENV: name,
     BRANCHBOOK_IMAGE_DIGEST: DIGEST,
     BRANCHBOOK_GUARDRAILS: 'true',
+    BRANCHBOOK_ALERT_EMAIL: 'alerts@example.com',
     CDK_DEFAULT_ACCOUNT: ACCOUNT,
   });
-  if (stacks.environment === undefined || stacks.guardrails === undefined) {
-    throw new Error('the app did not build the environment and the guardrails');
+  if (stacks.environment === undefined || stacks.guardrails === undefined || stacks.account === undefined) {
+    throw new Error('the app did not build the environment, the account stack and the guardrails');
   }
   const { data, app, release } = stacks.environment;
   const policies = Template.fromStack(stacks.guardrails).findResources('AWS::IAM::ManagedPolicy') as Record<
@@ -76,12 +86,13 @@ function build(name: EnvironmentName): { appStacks: Stack[]; execServices: strin
   }
   return {
     appStacks: [stacks.registry, data, app, release],
+    adminStacks: [stacks.account, stacks.guardrails],
     execServices: ([] as string[]).concat(services.Action),
   };
 }
 
 describe.each(ENVIRONMENT_NAMES)('the %s deployment', (name) => {
-  const { appStacks, execServices } = build(name);
+  const { appStacks, adminStacks, execServices } = build(name);
 
   test('the execution policy allows the service of every resource type the stacks it deploys contain', () => {
     const types = new Set(appStacks.flatMap((stack) => Object.values(Template.fromStack(stack).toJSON().Resources as Record<string, { Type: string }>).map((resource) => resource.Type)));
@@ -99,5 +110,27 @@ describe.each(ENVIRONMENT_NAMES)('the %s deployment', (name) => {
       }
     }
     expect(problems).toEqual([]);
+  });
+
+  test('every role the stacks it deploys create carries the permissions boundary, custom-resource roles included', () => {
+    const roles = appStacks.flatMap((stack) =>
+      Object.entries(Template.fromStack(stack).findResources('AWS::IAM::Role') as Record<string, RoleResource>),
+    );
+    const unbounded = roles.filter(([, role]) => role.Properties.PermissionsBoundary !== BOUNDARY_ARN).map(([id]) => id);
+    expect(unbounded).toEqual([]);
+    // The roles CDK creates for its own custom resources are among them, not just the ones the stacks declare.
+    const ids = roles.map(([id]) => id);
+    expect(ids).toEqual(expect.arrayContaining([expect.stringMatching(/^CustomVpcRestrictDefaultSGCustomResourceProviderRole/)]));
+    expect(ids).toEqual(expect.arrayContaining([expect.stringMatching(/^AWS679f53fac002430cb0da5b7982bd2287ServiceRole/)]));
+    expect(ids).toEqual(expect.arrayContaining([expect.stringMatching(/^MigrationProviderwaiterstatemachineRole/)]));
+  });
+
+  test('the administrator stacks keep their roles outside the boundary: the deploy roles must assume the bootstrap roles', () => {
+    for (const stack of adminStacks) {
+      const roles = Object.values(Template.fromStack(stack).findResources('AWS::IAM::Role') as Record<string, RoleResource>);
+      for (const role of roles) {
+        expect(role.Properties.PermissionsBoundary).toBeUndefined();
+      }
+    }
   });
 });
