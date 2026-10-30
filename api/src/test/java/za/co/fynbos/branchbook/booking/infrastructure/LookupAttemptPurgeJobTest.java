@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
@@ -44,6 +45,8 @@ class LookupAttemptPurgeJobTest {
   @Test
   void isAlwaysThereAndRunsEveryHourFromAnHourAfterStartUp() {
     new ApplicationContextRunner()
+        // application.yml, which holds the job's timing (branchbook.jobs).
+        .withInitializer(new ConfigDataApplicationContextInitializer())
         .withBean(LookupAttemptStore.class, () -> store)
         .withBean(Clock.class, () -> Clock.fixed(NOW, ZoneOffset.UTC))
         .withUserConfiguration(ScannedAndScheduledLikeTheApplication.class)

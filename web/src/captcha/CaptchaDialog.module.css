@@ -1,0 +1,50 @@
+/*
+ * The CAPTCHA check: a card over the dimmed page. The page behind is inert while it is open (CaptchaProvider), so
+ * the dimming only shows what the browser already enforces.
+ */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  padding: var(--gutter);
+  overflow-y: auto;
+  background: rgb(43 43 43 / 55%);
+}
+
+/* Centred when it fits; on a short screen it starts at the top and the backdrop scrolls, so nothing is cut off. */
+.dialog {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  width: 100%;
+  max-width: var(--content-max);
+  margin: auto;
+  padding: var(--space-4);
+  border: 1px solid var(--colour-border);
+  border-radius: var(--radius);
+  background: var(--colour-card);
+  box-shadow: var(--shadow-card);
+}
+
+.heading {
+  font-size: var(--type-section-heading-size);
+  line-height: var(--type-section-heading-line);
+}
+
+.lead {
+  color: var(--colour-text-muted);
+}
+
+.status {
+  font-size: var(--type-small-size);
+  line-height: var(--type-small-line);
+  color: var(--colour-text-muted);
+}
+
+/* AWS draws the puzzle here, at its own width; this keeps it centred and gives it room before it appears. */
+.puzzle {
+  display: flex;
+  justify-content: center;
+  min-height: var(--button-height);
+}

@@ -9,8 +9,9 @@ import za.co.fynbos.branchbook.booking.application.IdempotencyKeyStore;
 
 /**
  * Deletes expired idempotency keys every hour, so the table holds only about a day of keys. Expiry
- * itself does not wait for it: a key stops being honoured exactly 24 hours after its booking,
- * purged or not (BR-12; {@link JdbcIdempotencyKeyStore}). The first run is an hour after start-up.
+ * itself does not wait for it: a key stops being honoured exactly its time to live after its
+ * booking, purged or not (BR-12; {@link JdbcIdempotencyKeyStore}). The first run is an hour after
+ * start-up. Both times are {@code branchbook.jobs.idempotency-key-purge}.
  */
 @Component
 class IdempotencyKeyPurgeJob {
@@ -25,7 +26,9 @@ class IdempotencyKeyPurgeJob {
     this.clock = clock;
   }
 
-  @Scheduled(fixedDelayString = "PT1H", initialDelayString = "PT1H")
+  @Scheduled(
+      fixedDelayString = "${branchbook.jobs.idempotency-key-purge.interval}",
+      initialDelayString = "${branchbook.jobs.idempotency-key-purge.initial-delay}")
   void purge() {
     int purged = keys.purgeExpired(clock.instant());
     log.info("idempotency.purged count={}", purged);

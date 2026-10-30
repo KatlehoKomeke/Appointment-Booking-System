@@ -5,6 +5,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import za.co.fynbos.branchbook.booking.domain.DemoNumberBlock;
 import za.co.fynbos.branchbook.notification.application.DispatcherProperties;
 import za.co.fynbos.branchbook.notification.application.MessageGateway;
 import za.co.fynbos.branchbook.notification.application.SmsProperties;
@@ -26,7 +27,8 @@ class SmsGatewayConfiguration {
   private static final Logger log = LoggerFactory.getLogger(SmsGatewayConfiguration.class);
 
   @Bean
-  MessageGateway messageGateway(SmsProperties sms, DispatcherProperties dispatcher) {
+  MessageGateway messageGateway(
+      SmsProperties sms, DispatcherProperties dispatcher, DemoNumberBlock demoNumbers) {
     SimulatedSmsGateway simulated = new SimulatedSmsGateway(dispatcher);
     String cap =
         sms.recipientDailyCap() == 0
@@ -43,15 +45,15 @@ class SmsGatewayConfiguration {
     AwsSmsGateway aws = AwsSmsGateway.create(settings);
     log.info(
         "SMS gateway: AWS End User Messaging SMS in {} for every number outside the demo block"
-            + " 082 555 0000 to 0199, which stays simulated (branchbook.sms.gateway is aws); {};"
-            + " {}{}.",
+            + " {}, which stays simulated (branchbook.sms.gateway is aws); {}; {}{}.",
         aws.region(),
+        demoNumbers,
         hasText(settings.protectConfigurationId())
             ? "a protect configuration is set"
             : "no protect configuration",
         cap,
         settings.dryRun() ? "; dry run, so AWS checks each message and sends none" : "");
-    return new RoutingSmsGateway(simulated, aws);
+    return new RoutingSmsGateway(simulated, aws, demoNumbers);
   }
 
   private static boolean hasText(@Nullable String value) {

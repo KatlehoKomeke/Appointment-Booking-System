@@ -36,7 +36,7 @@ import za.co.fynbos.branchbook.shared.config.BookingProperties;
  * check made before any of them was counted, the race the M3 review found. Lookups with the right
  * digits are released when they end, so a customer who keeps their appointment page open is never
  * blocked for the hour. A lookup refused only because others are still in flight is told to retry
- * after a second.
+ * after {@code lookup-in-flight-retry-after}, a second by default.
  *
  * <p>The counts live in {@code lookup_attempts} (V8), one row per reference with an open window,
  * shared by every instance and kept across restarts. Each {@link #begin} and {@link #end} is its
@@ -47,14 +47,14 @@ import za.co.fynbos.branchbook.shared.config.BookingProperties;
  * transaction. A window that has closed is ignored and replaced at the next lookup; an hourly job
  * deletes closed windows only to keep the table small.
  *
- * <p>The lookups in flight hold their place on a lease of {@link #IN_FLIGHT_LEASE}, counted from
- * the newest admission, so a lookup that is never settled does bounded harm: one an instance never
- * ended, because it crashed, stops counting once the lease runs out, and so does one whose settle
- * failed. The customer's answer is decided before {@link #end} runs, so a settle that fails, on a
- * lock, a connection or anything else in the database, is logged and dropped rather than allowed to
- * replace a {@code 200} with a {@code 503}; that lookup stays in flight until its lease runs out,
- * which is why the lease exists. A settle after its own lease changes nothing, since an admission
- * may already have reset the count it was part of.
+ * <p>The lookups in flight hold their place on a lease of {@code lookup-in-flight-lease}, 30
+ * seconds by default, counted from the newest admission, so a lookup that is never settled does
+ * bounded harm: one an instance never ended, because it crashed, stops counting once the lease runs
+ * out, and so does one whose settle failed. The customer's answer is decided before {@link #end}
+ * runs, so a settle that fails, on a lock, a connection or anything else in the database, is logged
+ * and dropped rather than allowed to replace a {@code 200} with a {@code 503}; that lookup stays in
+ * flight until its lease runs out, which is why the lease exists. A settle after its own lease
+ * changes nothing, since an admission may already have reset the count it was part of.
  *
  * <p>Blocking a reference logs one warning, the signal that someone may be guessing digits. It
  * names no reference, which is half of what opens an appointment; the request's correlation id ties
@@ -65,20 +65,20 @@ public class LookupAttemptLimiter {
 
   private static final Logger log = LoggerFactory.getLogger(LookupAttemptLimiter.class);
 
-  /** How long a lookup refused only because others are in flight should wait. */
-  static final Duration IN_FLIGHT_RETRY_AFTER = Duration.ofSeconds(1);
-
-  /**
-   * How long an admitted lookup counts as in flight if it is never settled. Far above any lookup:
-   * the session's 2 second lock timeout and 5 second statement timeout and the 3 second wait for a
-   * connection bound a lookup, read and view included, to well under it.
-   */
-  static final Duration IN_FLIGHT_LEASE = Duration.ofSeconds(30);
-
   private final LookupAttemptStore store;
   private final TransactionOperations transactions;
   private final int maxFailures;
   private final Duration windowLength;
+
+  /**
+   * How long an admitted lookup counts as in flight if it is never settled. Far above any lookup by
+   * default: the session's lock and statement timeouts and the wait for a connection bound a
+   * lookup, read and view included, to well under it.
+   */
+  private final Duration inFlightLease;
+
+  /** How long a lookup refused only because others are in flight should wait. */
+  private final Duration inFlightRetryAfter;
 
   /**
    * The limiter the application uses: each count is a transaction of its own, whatever the caller
@@ -102,6 +102,8 @@ public class LookupAttemptLimiter {
     this.transactions = transactions;
     this.maxFailures = booking.lookupMaxFailures();
     this.windowLength = booking.lookupWindow();
+    this.inFlightLease = booking.lookupInFlightLease();
+    this.inFlightRetryAfter = booking.lookupInFlightRetryAfter();
   }
 
   private static TransactionTemplate countTransaction(
@@ -133,7 +135,7 @@ public class LookupAttemptLimiter {
 
   /** Inside the count's transaction: the reference's window, locked, with this lookup counted. */
   private Window admit(String reference, Instant now) {
-    Instant lease = now.plus(IN_FLIGHT_LEASE);
+    Instant lease = now.plus(inFlightLease);
     Window fresh = new Window(reference, now, now.plus(windowLength), lease, 0, 1);
     Optional<Window> locked = store.lockWindow(reference);
     while (locked.isEmpty()) {
@@ -157,7 +159,7 @@ public class LookupAttemptLimiter {
       throw new LookupRateLimitedException(
           window.failures() >= maxFailures
               ? Duration.between(now, window.closesAt())
-              : IN_FLIGHT_RETRY_AFTER);
+              : inFlightRetryAfter);
     }
     Window admitted = window.withCounts(window.failures(), live + 1).withLease(lease);
     store.update(admitted);
@@ -176,7 +178,7 @@ public class LookupAttemptLimiter {
    * @param now the current instant
    */
   public void end(Attempt attempt, boolean wrongDigits, Instant now) {
-    if (!attempt.begunAt().plus(IN_FLIGHT_LEASE).isAfter(now)) {
+    if (!attempt.begunAt().plus(inFlightLease).isAfter(now)) {
       // Its lease has run out: an admission since may have reset the count it was part of, so the
       // count is no longer this lookup's to change.
       return;

@@ -1,7 +1,6 @@
 package za.co.fynbos.branchbook.booking.application;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
@@ -60,9 +59,6 @@ import za.co.fynbos.branchbook.shared.problem.ProblemException;
 public class BookAppointmentHandler {
 
   private static final Logger log = LoggerFactory.getLogger(BookAppointmentHandler.class);
-
-  /** How long a caller should wait after a second transaction conflict. */
-  private static final Duration CONFLICT_RETRY_AFTER = Duration.ofSeconds(2);
 
   private final TransactionTemplate transaction;
   private final IdempotencyKeyStore keys;
@@ -134,7 +130,7 @@ public class BookAppointmentHandler {
           ProblemCode.TRY_AGAIN,
           "We could not complete your request. Please try again.",
           Map.of(),
-          CONFLICT_RETRY_AFTER);
+          booking.conflictRetryAfter());
     }
   }
 

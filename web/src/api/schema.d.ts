@@ -124,6 +124,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/client-config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Describe this deployment's client settings
+         * @description Where a CAPTCHA protects bookings and cancels, the AWS WAF CAPTCHA JavaScript API to load and the API key to render it with; a booking or cancel without a valid token is then answered 405 with the header x-amzn-waf-action: captcha. Null where there is none.
+         */
+        get: operations["getClientConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/messages": {
         parameters: {
             query?: never;
@@ -326,6 +346,14 @@ export interface components {
             opensSunday: boolean;
             province: string;
             suburb: string;
+        };
+        CaptchaConfig: {
+            apiKey: string;
+            /** @example https://abcd1234.af-south-1.captcha-sdk.awswaf.com/abcd1234/jsapi.js */
+            scriptUrl: string;
+        };
+        ClientConfig: {
+            captcha: components["schemas"]["CaptchaConfig"] | null;
         };
         ClosedDate: {
             /**
@@ -812,6 +840,26 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+        };
+    };
+    getClientConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The client settings */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClientConfig"];
                 };
             };
         };

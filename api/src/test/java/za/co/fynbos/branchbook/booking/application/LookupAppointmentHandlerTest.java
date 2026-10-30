@@ -11,7 +11,6 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.Period;
 import java.time.ZoneOffset;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -19,7 +18,7 @@ import org.springframework.dao.QueryTimeoutException;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.SimpleTransactionStatus;
 import org.springframework.transaction.support.TransactionOperations;
-import za.co.fynbos.branchbook.shared.config.BookingProperties;
+import za.co.fynbos.branchbook.support.BookingRules;
 
 /**
  * BR-13, at the handler: how a lookup's outcome reaches the limiter. The repository is a stub, so
@@ -39,8 +38,7 @@ class LookupAppointmentHandlerTest {
           new AppointmentAccess(
               appointments,
               new LookupAttemptLimiter(
-                  new BookingProperties(
-                      Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false),
+                  BookingRules.defaults(),
                   new InMemoryLookupAttemptStore(),
                   TransactionOperations.withoutTransaction())),
           mock(AppointmentViews.class),

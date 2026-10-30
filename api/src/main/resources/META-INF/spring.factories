@@ -1,0 +1,5 @@
+# Registers the application's environment post-processors, which Spring Boot runs once the configuration has been read
+# and before anything is created: the migrate-only mode's overrides, then the prod profile's safety guard.
+org.springframework.boot.EnvironmentPostProcessor=\
+za.co.fynbos.branchbook.shared.config.MigrateOnlyMode,\
+za.co.fynbos.branchbook.shared.config.ProductionProfileGuard

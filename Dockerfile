@@ -2,7 +2,8 @@
 #
 # Dockerfile: builds BranchBook into one image. The React app is compiled and packaged inside the Spring Boot jar,
 # and the jar runs on a Java runtime as an unprivileged user. `make up` builds it through docker compose, CI builds
-# it on every push, and the hosted demo runs the same image.
+# it on every push, and staging and production run the same image, also as the one-off migration task
+# (BRANCHBOOK_MIGRATE_ONLY=true).
 #
 # Stages:
 #   web      compiles web/ with Node 24 into static files.
@@ -36,10 +37,22 @@ LABEL org.opencontainers.image.title="BranchBook" \
       org.opencontainers.image.description="Branch appointment booking for the fictional Fynbos Bank" \
       org.opencontainers.image.source="https://github.com/KatlehoKomeke/Appointment-Booking-System" \
       org.opencontainers.image.licenses="MIT"
+# The base image's packages, upgraded to the latest fixes in its Alpine release, because the image scan fails the
+# build on a fixable CRITICAL or HIGH finding that the base image has not picked up yet. --no-cache leaves no package
+# index in the image.
+RUN apk upgrade --no-cache
 # A fixed, unprivileged user. The application files stay owned by root, so the process cannot modify its own code.
 RUN addgroup -S -g 10001 branchbook \
  && adduser -S -D -H -u 10001 -G branchbook -s /sbin/nologin branchbook
 WORKDIR /app
+# The certificate authorities of Amazon RDS, so staging and production verify the database server's certificate
+# (sslmode=verify-full&sslrootcert=/app/certs/rds-global-bundle.pem in DB_URL) instead of trusting any certificate.
+# Fetched at build time and pinned by checksum: a changed bundle fails the build until the checksum is reviewed and
+# updated here, rather than slipping into the image. World-readable, owned by root like the application. The folder is
+# made first, because ADD would give the folders it creates the file's mode, which the unprivileged user cannot enter.
+RUN mkdir -m 755 /app/certs
+ADD --checksum=sha256:90a6f1a7978a1b1b096dca6c57511ca48d3b8cf052f8e704baf358f34ea2f21b --chmod=644 \
+    https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/certs/rds-global-bundle.pem
 # Least-changing layers first: a code change rebuilds only the last, small layer.
 COPY --from=api /extracted/dependencies/ ./
 COPY --from=api /extracted/spring-boot-loader/ ./

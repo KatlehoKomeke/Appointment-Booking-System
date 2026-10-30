@@ -15,7 +15,8 @@ import za.co.fynbos.branchbook.notification.application.RecipientSendLedger;
  * <p>It always runs, cap or no cap, so rows written before a deployment switched the cap off still
  * go. Like the key purge in booking, it runs on Spring Boot's default scheduler; like the retention
  * job, its first run is a minute after start-up, so a task that restarts often still purges. Each
- * run logs one line with its count and nothing else (BR-19).
+ * run logs one line with its count and nothing else (BR-19). Both times are {@code
+ * branchbook.jobs.cap-ledger-purge}.
  */
 @Component
 class RecipientSendLedgerPurgeJob {
@@ -30,7 +31,9 @@ class RecipientSendLedgerPurgeJob {
     this.clock = clock;
   }
 
-  @Scheduled(fixedDelayString = "PT1H", initialDelayString = "PT1M")
+  @Scheduled(
+      fixedDelayString = "${branchbook.jobs.cap-ledger-purge.interval}",
+      initialDelayString = "${branchbook.jobs.cap-ledger-purge.initial-delay}")
   void purge() {
     int purged = ledger.purgeExpired(clock.instant());
     log.info("cap_ledger.purged count={}", purged);

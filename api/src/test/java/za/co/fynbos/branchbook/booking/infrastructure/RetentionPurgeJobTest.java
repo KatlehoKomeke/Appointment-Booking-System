@@ -11,6 +11,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
@@ -45,6 +46,8 @@ class RetentionPurgeJobTest {
 
   private final ApplicationContextRunner context =
       new ApplicationContextRunner()
+          // application.yml, which holds the job's timing (branchbook.jobs.retention-purge).
+          .withInitializer(new ConfigDataApplicationContextInitializer())
           .withBean(RetentionPurge.class, () -> retention)
           .withBean(Clock.class, () -> Clock.fixed(NOW, ZoneOffset.UTC))
           .withUserConfiguration(ScannedAndScheduledLikeTheApplication.class);

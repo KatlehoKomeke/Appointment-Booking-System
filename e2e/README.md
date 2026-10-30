@@ -29,6 +29,16 @@ address, set `E2E_BASE_URL`, for example `make e2e E2E_BASE_URL=http://localhost
 Each test books real appointments, so run them against a local or demo stack, never one whose data matters. They
 need no reset between runs: see [Running them again](#running-them-again).
 
+### Against a deployment
+
+| Variable | What it does |
+|---|---|
+| `E2E_BASE_URL` | The app to test; default http://localhost:8080 |
+| `E2E_SYNTHETIC_TOKEN` | When set, sent as the `x-branchbook-synthetic` header on every request, the browser's and the API fixture's (Playwright's `extraHTTPHeaders`). On staging the firewall puts a CAPTCHA in front of every booking and cancel, and lets through a request that carries the staging synthetic-traffic token; production has no such bypass. With it set, no trace is kept, since a trace records every request's headers and the report is uploaded as a CI artifact. |
+
+A test that needs the simulated inbox calls `skipWithoutInbox` first, and skips itself, saying why, when
+`GET /api/v1/messages` answers 404: the `prod` profile that staging and production run switches the inbox off.
+
 ## What they prove
 
 | Spec | Projects | Proves |
@@ -37,6 +47,7 @@ need no reset between runs: see [Running them again](#running-them-again).
 | [cancel.spec.ts](cancel.spec.ts) | mobile, desktop | A customer opens the inline cancel step from the confirmation page, keeps the appointment and gets focus back on the Cancel button, then cancels. The page says "This appointment was cancelled" with "Its details have been deleted", offers no second cancel, and the time has one more seat free than before ([BR-14](../docs/domain-rules.md#br-14)). A refresh shows the same answer from what the tab remembers, and the API then answers 404 `APPOINTMENT_NOT_FOUND` even to the right last four digits. |
 | [keyboard.spec.ts](keyboard.spec.ts) | desktop | A booking made with Tab, Shift+Tab, Enter, Space and the arrow keys alone. The skip link is the first stop and moves focus to `main`, each step's heading takes focus, and every control tabbed to shows a focus outline. |
 | [failed-delivery.spec.ts](failed-delivery.spec.ts) | desktop | A booking for 082 555 0000, which the simulated gateway always refuses, shows "Not delivered" within 60 s once the dispatcher's five attempts are spent ([BR-17](../docs/domain-rules.md#br-17)), and says the booking still stands. |
+| [inbox.spec.ts](inbox.spec.ts) | desktop | From the confirmation page, the simulated inbox lists the booking's confirmation SMS once, its recipient redacted as `082 *** ****`, shows it Sent within 15 s, and its reference opens the appointment again. Skipped where the inbox is switched off. |
 
 Every test also fails if the page breaks the Content Security Policy, throws an uncaught error, or writes an error
 to the console that the test did not declare. Two 404s are declared: a deliberately wrong lookup, and a poll already

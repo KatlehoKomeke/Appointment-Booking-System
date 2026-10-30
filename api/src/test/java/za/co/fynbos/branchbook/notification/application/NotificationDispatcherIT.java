@@ -11,6 +11,7 @@ import static za.co.fynbos.branchbook.support.Bookings.lookup;
 import static za.co.fynbos.branchbook.support.Bookings.retry;
 
 import com.jayway.jsonpath.JsonPath;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker.State;
 import java.nio.charset.StandardCharsets;
 import java.sql.Timestamp;
 import java.time.Duration;
@@ -18,11 +19,13 @@ import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,15 +42,21 @@ import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
 import za.co.fynbos.branchbook.support.LockWaits;
 import za.co.fynbos.branchbook.support.MutableClock;
+import za.co.fynbos.branchbook.support.TestClockConfiguration;
 
 /**
  * BR-17, FR-15, NFR-13: the dispatcher delivers PENDING messages through the gateway, one
  * transaction each, backing off after a retryable refusal and failing a message at once on a
  * permanent one. BR-24, FR-18: it never delivers a confirmation after its appointment's
  * cancellation, and a retry waits for a send in flight. BR-14: a cancellation, which outlives its
- * deleted appointment, is deleted once it is final. Its own loop is off in the tests, so each test
- * calls {@link NotificationDispatcher#runOnce} with the instant it wants: no test sleeps. The
- * numbers are synthetic; the simulated gateway refuses those ending 0000.
+ * deleted appointment, is deleted once it is final. NFR-13: while the circuit breaker is open, no
+ * message is claimed and no attempt is spent, and the breaker recovers through half-open. Its own
+ * loop is off in the tests, so each test calls {@link NotificationDispatcher#runOnce} with the
+ * instant it wants: no test sleeps. The numbers are synthetic; the simulated gateway refuses those
+ * ending 0000.
+ *
+ * <p>The application's dispatcher has the default jitter, so a test that uses it reads each wait
+ * from the row; a dispatcher a test builds itself has none, so its waits are exact.
  */
 @IntegrationTest
 @ExtendWith(DatabaseReset.class)
@@ -74,6 +83,14 @@ class NotificationDispatcherIT {
   @Autowired private AppointmentDirectory appointments;
 
   @Autowired private OutboxPendingGauge pending;
+
+  @Autowired private OutboxHealthGauges health;
+
+  @Autowired private DispatcherProperties settings;
+
+  /** The clock the circuits built by these tests wait on, apart from the application's. */
+  private final MutableClock circuitClock =
+      new MutableClock(TestClockConfiguration.DEFAULT_INSTANT);
 
   /** FR-15, FR-16: a delivered SMS is SENT with the gateway's id, and the appointment says so. */
   @Test
@@ -102,33 +119,37 @@ class NotificationDispatcherIT {
   }
 
   /**
-   * BR-17: a refused SMS is tried again after 2, 4, 8 and 16 seconds, and the fifth refusal marks
-   * it FAILED with DELIVERY_FAILED: 30 seconds of backoff. A message is never tried early. The
-   * simulated gateway's refusal of a number ending 0000 is retryable, so the demo still shows all
-   * five attempts.
+   * BR-17: a refused SMS is tried again after up to 2, 4, 8 and 16 seconds, each wait shortened at
+   * random by at most a fifth, and the fifth refusal marks it FAILED with DELIVERY_FAILED: within
+   * 30 seconds of the first attempt, never later. A message is never tried before its wait is over.
+   * The simulated gateway's refusal of a number ending 0000 is retryable, so the demo still shows
+   * all five attempts.
    */
   @Test
   void retriesWithBackoffThenMarksFailedAfterFiveAttempts() {
     book(mvc, body("SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0000"));
     Instant start = clock.instant();
 
-    int elapsed = 0;
-    for (int wait : new int[] {0, 2, 4, 8}) {
-      elapsed += wait;
-      assertThat(dispatcher.runOnce(start.plusSeconds(elapsed))).isOne();
+    Instant attempt = start;
+    for (int retry = 1; retry <= 4; retry++) {
+      assertThat(dispatcher.runOnce(attempt)).isOne();
       Map<String, Object> row = onlyMessage();
-      int attempts = (Integer) row.get("attempts");
       assertThat(row)
           .containsEntry("status", "PENDING")
+          .containsEntry("attempts", retry)
           .containsEntry("last_error", "SIMULATED_FAILURE");
-      Duration backoff = Duration.ofSeconds(1L << attempts);
-      assertThat(instant(row, "next_attempt_at"))
-          .isEqualTo(start.plusSeconds(elapsed).plus(backoff));
-      assertThat(dispatcher.runOnce(start.plusSeconds(elapsed).plus(backoff).minusMillis(1)))
-          .as("not due a millisecond early")
-          .isZero();
+      Duration nominal = Duration.ofSeconds(1L << retry);
+      Instant due = instant(row, "next_attempt_at");
+      assertThat(Duration.between(attempt, due))
+          .as("within a fifth below the nominal %s", nominal)
+          .isBetween(nominal.multipliedBy(4).dividedBy(5), nominal);
+      assertThat(dispatcher.runOnce(due.minusMillis(1))).as("not due a millisecond early").isZero();
+      attempt = due;
     }
-    assertThat(dispatcher.runOnce(start.plusSeconds(30))).isOne();
+    assertThat(attempt)
+        .as("the fifth attempt is due by 30 s")
+        .isBeforeOrEqualTo(start.plusSeconds(30));
+    assertThat(dispatcher.runOnce(attempt)).isOne();
 
     assertThat(onlyMessage())
         .containsEntry("status", "FAILED")
@@ -567,8 +588,7 @@ class NotificationDispatcherIT {
     ConcurrentLinkedQueue<UUID> sent = new ConcurrentLinkedQueue<>();
 
     int handled =
-        new NotificationDispatcher(
-                transactionManager, messages, recordingInto(sent), unanswering, pending)
+        dispatcherWith(recordingInto(sent), unanswering, circuit(defaultCircuit()), settings)
             .runOnce(clock.instant());
 
     assertThat(handled).as("the tick ends at the failed check").isZero();
@@ -671,9 +691,199 @@ class NotificationDispatcherIT {
         kind);
   }
 
-  /** A dispatcher like the application's, with a gateway of the test's own. */
+  /**
+   * NFR-13, BR-17: once enough calls to the provider fail, the circuit opens and the tick ends at
+   * once. While it is open, however often the dispatcher ticks and however long the messages have
+   * been due, none is claimed and none spends an attempt: the provider's outage does not use up the
+   * customers' five attempts.
+   */
+  @Test
+  @ExtendWith(OutputCaptureExtension.class)
+  void whileTheCircuitIsOpenNoMessageIsClaimedAndNoAttemptIsSpent(CapturedOutput output) {
+    bookSix();
+    ConcurrentLinkedQueue<UUID> tried = new ConcurrentLinkedQueue<>();
+    DeliveryCircuit circuit = circuit(smallCircuit());
+    NotificationDispatcher guarded =
+        dispatcherWith(refusingInto(tried, MessageGateway.Refused.retryable(THROTTLED)), circuit);
+    Instant start = clock.instant();
+
+    assertThat(guarded.runOnce(start)).as("the fourth failure opens it").isEqualTo(4);
+    assertThat(circuit.state()).isEqualTo(State.OPEN);
+    for (int minute = 1; minute <= 10; minute++) {
+      assertThat(guarded.runOnce(start.plusSeconds(60L * minute))).isZero();
+    }
+
+    assertThat(tried).hasSize(4).doesNotHaveDuplicates();
+    assertThat(attemptsByStatus())
+        .as("four tried once, two never tried, all still PENDING")
+        .containsExactlyInAnyOrder(
+            "PENDING 0", "PENDING 0", "PENDING 1", "PENDING 1", "PENDING 1", "PENDING 1");
+    assertThat(output.getAll())
+        .containsOnlyOnce("outbox.circuit from=CLOSED to=OPEN")
+        .doesNotContainPattern(anyFormOf("01[0-9][0-9]"));
+  }
+
+  /**
+   * NFR-13: once the open state's wait is over, the next tick sends two messages as probes; when
+   * the provider accepts them the circuit closes and the same tick delivers everything else due.
+   */
+  @Test
+  void theCircuitRecoversThroughHalfOpenWhenTheProviderIsBack() {
+    bookSix();
+    AtomicReference<MessageGateway.Delivery> answer =
+        new AtomicReference<>(MessageGateway.Refused.retryable(THROTTLED));
+    ConcurrentLinkedQueue<UUID> tried = new ConcurrentLinkedQueue<>();
+    MessageGateway provider =
+        message -> {
+          tried.add(message.id());
+          return answer.get();
+        };
+    DeliveryCircuit circuit = circuit(smallCircuit());
+    NotificationDispatcher guarded = dispatcherWith(provider, circuit);
+    Instant start = clock.instant();
+    assertThat(guarded.runOnce(start)).isEqualTo(4);
+    answer.set(new MessageGateway.Accepted("back"));
+
+    circuitClock.advance(Duration.ofSeconds(30));
+    assertThat(guarded.runOnce(start.plusSeconds(60))).as("still open").isZero();
+    circuitClock.advance(Duration.ofMillis(1));
+    int handled = guarded.runOnce(start.plusSeconds(60));
+
+    assertThat(circuit.state()).isEqualTo(State.CLOSED);
+    assertThat(handled).as("two probes, then the other four").isEqualTo(6);
+    assertThat(tried).hasSize(10);
+    assertThat(attemptsByStatus())
+        .containsExactlyInAnyOrder("SENT 1", "SENT 1", "SENT 2", "SENT 2", "SENT 2", "SENT 2");
+  }
+
+  /**
+   * NFR-13: a permanent refusal is a working provider's answer, so however many there are, the
+   * circuit stays closed and the tick carries on through the batch.
+   */
+  @Test
+  void permanentRefusalsNeverOpenTheCircuit() {
+    bookSix();
+    DeliveryCircuit circuit = circuit(smallCircuit());
+    ConcurrentLinkedQueue<UUID> tried = new ConcurrentLinkedQueue<>();
+
+    int handled =
+        dispatcherWith(refusingInto(tried, MessageGateway.Refused.permanent(NOT_VERIFIED)), circuit)
+            .runOnce(clock.instant());
+
+    assertThat(handled).isEqualTo(6);
+    assertThat(circuit.state()).isEqualTo(State.CLOSED);
+    assertThat(attemptsByStatus()).containsOnly("FAILED 1");
+  }
+
+  /**
+   * BR-17: the batch size and the attempt that fails a message for good come from {@code
+   * branchbook.dispatcher}, here three a tick and two attempts.
+   */
+  @Test
+  void theBatchSizeAndTheLastAttemptComeFromTheSettings() {
+    bookSix();
+    DispatcherProperties tuned =
+        new DispatcherProperties(
+            false,
+            settings.interval(),
+            settings.simulatedLatency(),
+            3,
+            2,
+            noJitter(),
+            settings.circuitBreaker());
+    NotificationDispatcher guarded =
+        dispatcherWith(
+            refusingInto(new ConcurrentLinkedQueue<>(), MessageGateway.Refused.retryable("X")),
+            appointments,
+            circuit(switchedOff()),
+            tuned);
+    Instant start = clock.instant();
+
+    assertThat(guarded.runOnce(start)).isEqualTo(3);
+    assertThat(guarded.runOnce(start)).isEqualTo(3);
+    assertThat(guarded.runOnce(start.plusSeconds(2))).isEqualTo(3);
+    assertThat(guarded.runOnce(start.plusSeconds(2))).isEqualTo(3);
+
+    assertThat(attemptsByStatus()).containsOnly("FAILED 2");
+  }
+
+  /** Six bookings, at three branches, for six demo numbers that the simulated gateway accepts. */
+  private void bookSix() {
+    String[][] bookings = {
+      {"SAN", "FICA", "2026-10-27T09:30:00+02:00", "082 555 0171"},
+      {"SAN", "FICA", "2026-10-27T10:00:00+02:00", "082 555 0172"},
+      {"BEL", "CARD", "2026-10-28T10:00:00+02:00", "082 555 0173"},
+      {"BEL", "CARD", "2026-10-28T10:30:00+02:00", "082 555 0174"},
+      {"UMH", "CARD", "2026-10-27T09:00:00+02:00", "082 555 0175"},
+      {"UMH", "CARD", "2026-10-27T09:30:00+02:00", "082 555 0176"}
+    };
+    for (String[] booking : bookings) {
+      assertThat(book(mvc, body(booking[0], booking[1], booking[2], booking[3])))
+          .hasStatus(HttpStatus.CREATED);
+    }
+  }
+
+  /** Every message's status and attempts, such as "PENDING 1". */
+  private List<String> attemptsByStatus() {
+    return jdbc.queryForList(
+        "SELECT status || ' ' || attempts FROM notification_messages", String.class);
+  }
+
+  /** A circuit that judges the last four calls, once four are made, and opens at half failed. */
+  private static DispatcherProperties.CircuitBreaker smallCircuit() {
+    return new DispatcherProperties.CircuitBreaker(
+        true, 50, 100, Duration.ofSeconds(8), 4, 4, Duration.ofSeconds(30), 2);
+  }
+
+  /** A circuit that never opens, for a test about something else that fails every call. */
+  private static DispatcherProperties.CircuitBreaker switchedOff() {
+    return new DispatcherProperties.CircuitBreaker(
+        false, 50, 100, Duration.ofSeconds(8), 10, 5, Duration.ofSeconds(30), 2);
+  }
+
+  private DispatcherProperties.CircuitBreaker defaultCircuit() {
+    return settings.circuitBreaker();
+  }
+
+  /** A circuit of the test's own, on the tests' circuit clock, uncounting simulated refusals. */
+  private DeliveryCircuit circuit(DispatcherProperties.CircuitBreaker breaker) {
+    return new DeliveryCircuit(breaker, circuitClock, Set.of("SIMULATED_FAILURE"));
+  }
+
+  /** The default backoff without jitter: exactly 2, 4, 8 and 16 seconds. */
+  private DispatcherProperties.Backoff noJitter() {
+    DispatcherProperties.Backoff backoff = settings.backoff();
+    return new DispatcherProperties.Backoff(backoff.base(), backoff.multiplier(), backoff.cap(), 0);
+  }
+
+  /**
+   * A dispatcher like the application's, with a gateway of the test's own, a closed circuit of its
+   * own with the default settings, and no jitter.
+   */
   private NotificationDispatcher dispatcherWith(MessageGateway gateway) {
-    return new NotificationDispatcher(transactionManager, messages, gateway, appointments, pending);
+    return dispatcherWith(gateway, circuit(defaultCircuit()));
+  }
+
+  /** A dispatcher like the application's, with a gateway and a circuit of the test's own. */
+  private NotificationDispatcher dispatcherWith(MessageGateway gateway, DeliveryCircuit circuit) {
+    return dispatcherWith(gateway, appointments, circuit, settings);
+  }
+
+  private NotificationDispatcher dispatcherWith(
+      MessageGateway gateway,
+      AppointmentDirectory directory,
+      DeliveryCircuit circuit,
+      DispatcherProperties dispatcherSettings) {
+    return new NotificationDispatcher(
+        transactionManager,
+        messages,
+        gateway,
+        directory,
+        pending,
+        health,
+        circuit,
+        new RetryBackoff(noJitter(), () -> 0.0),
+        dispatcherSettings);
   }
 
   private Map<String, Object> onlyMessage() {

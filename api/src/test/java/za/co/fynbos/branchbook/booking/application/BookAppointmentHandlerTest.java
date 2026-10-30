@@ -12,7 +12,6 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.Period;
 import java.time.ZoneOffset;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,8 +24,8 @@ import za.co.fynbos.branchbook.booking.domain.IdempotencyKey;
 import za.co.fynbos.branchbook.booking.domain.MobileNumber;
 import za.co.fynbos.branchbook.catalogue.application.BranchCalendarProvider;
 import za.co.fynbos.branchbook.scheduling.application.AlternativeSlots;
-import za.co.fynbos.branchbook.shared.config.BookingProperties;
 import za.co.fynbos.branchbook.shared.problem.ProblemCode;
+import za.co.fynbos.branchbook.support.BookingRules;
 
 /**
  * BR-12, BR-14, at the handler: a replay is rendered after its transaction commits, so a cancel can
@@ -60,8 +59,7 @@ class BookAppointmentHandlerTest {
           mock(AlternativeSlots.class),
           views,
           Clock.fixed(NOW, ZoneOffset.UTC),
-          new BookingProperties(
-              Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false));
+          BookingRules.defaults());
 
   @Test
   void replayWhoseAppointmentACancelDeletesBeforeItIsReadIsRefusedAsCancelled() {
