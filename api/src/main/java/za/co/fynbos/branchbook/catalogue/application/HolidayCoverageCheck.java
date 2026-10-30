@@ -50,9 +50,14 @@ class HolidayCoverageCheck {
     this.booking = booking;
   }
 
-  /** Runs at start-up and at 06:00 every day in Johannesburg, before the branches open. */
+  /**
+   * Runs at start-up and, by default, at 06:00 every day in Johannesburg, before the branches open
+   * ({@code branchbook.jobs.holiday-check}).
+   */
   @EventListener(ApplicationReadyEvent.class)
-  @Scheduled(cron = "0 0 6 * * *", zone = "Africa/Johannesburg")
+  @Scheduled(
+      cron = "${branchbook.jobs.holiday-check.cron}",
+      zone = "${branchbook.jobs.holiday-check.zone}")
   void warnIfBookingsOutrunTheHolidays() {
     LocalDate coveredThrough =
         new PublicHolidayCalendar(catalogue.publicHolidays()).coveredThrough();

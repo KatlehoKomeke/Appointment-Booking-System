@@ -159,7 +159,7 @@ class DemoNumbersOnlyIT {
 
     assertThat(output)
         .contains(
-            "Bookings take only the published demo numbers"
+            "Bookings take only the published demo numbers, 082 555 0000 to 082 555 0199"
                 + " (branchbook.booking.demo-numbers-only is on).");
   }
 

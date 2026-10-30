@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.time.Duration;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.regex.Pattern;
@@ -139,7 +140,16 @@ class RecipientFingerprintsTest {
         SmsProperties.Gateway.SIMULATED,
         cap,
         key,
-        new SmsProperties.Aws(null, null, null, null, "0.20", false));
+        new SmsProperties.Aws(
+            null,
+            null,
+            null,
+            null,
+            "0.20",
+            false,
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(10)));
   }
 
   /** The fingerprint as the test works it out: HMAC-SHA256 under the key, in lower-case hex. */

@@ -2,6 +2,7 @@ package za.co.fynbos.branchbook.notification.application;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -73,7 +74,10 @@ class SmsPropertiesTest {
                           "branchbook-sms",
                           "pool-0a1b2c",
                           "0.05",
-                          true));
+                          true,
+                          Duration.ofSeconds(2),
+                          Duration.ofSeconds(5),
+                          Duration.ofSeconds(10)));
             });
   }
 

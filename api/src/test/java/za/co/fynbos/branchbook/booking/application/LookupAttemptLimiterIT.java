@@ -226,7 +226,7 @@ class LookupAttemptLimiterIT {
       wrongLookup(REFERENCE, FIRST);
     }
     limiter.begin(REFERENCE, FIRST);
-    Instant afterTheLease = FIRST.plus(LookupAttemptLimiter.IN_FLIGHT_LEASE).plusSeconds(1);
+    Instant afterTheLease = FIRST.plus(booking.lookupInFlightLease()).plusSeconds(1);
 
     assertThatNoException().isThrownBy(() -> limiter.begin(REFERENCE, afterTheLease));
     assertThatExceptionOfType(LookupRateLimitedException.class)
@@ -242,7 +242,7 @@ class LookupAttemptLimiterIT {
   void aSettleAfterItsLeaseChangesNothing() {
     LookupAttemptLimiter.Attempt late = limiter.begin(REFERENCE, FIRST);
 
-    limiter.end(late, true, FIRST.plus(LookupAttemptLimiter.IN_FLIGHT_LEASE).plusSeconds(1));
+    limiter.end(late, true, FIRST.plus(booking.lookupInFlightLease()).plusSeconds(1));
 
     assertThat(
             jdbc.queryForObject(

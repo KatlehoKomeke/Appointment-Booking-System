@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -16,6 +17,7 @@ import za.co.fynbos.branchbook.notification.application.MessageGateway.Accepted;
 import za.co.fynbos.branchbook.notification.application.OutgoingMessage;
 import za.co.fynbos.branchbook.notification.application.SmsProperties;
 import za.co.fynbos.branchbook.notification.domain.NotificationChannel;
+import za.co.fynbos.branchbook.support.BookingRules;
 
 /**
  * The safety rule where {@code branchbook.sms.gateway} is {@code aws}: every number in the
@@ -39,7 +41,8 @@ class RoutingSmsGatewayTest {
         return new Accepted("aws-1");
       };
 
-  private final RoutingSmsGateway routing = new RoutingSmsGateway(simulated, real);
+  private final RoutingSmsGateway routing =
+      new RoutingSmsGateway(simulated, real, BookingRules.DEMO_NUMBERS);
 
   @ParameterizedTest
   @ValueSource(strings = {"+27825550000", "+27825550101", "+27825550199"})
@@ -64,9 +67,20 @@ class RoutingSmsGatewayTest {
   void closingTheRouterClosesTheAwsClient() {
     PinpointSmsVoiceV2Client client = mock(PinpointSmsVoiceV2Client.class);
     AwsSmsGateway aws =
-        new AwsSmsGateway(client, new SmsProperties.Aws(null, null, null, null, "0.20", false));
+        new AwsSmsGateway(
+            client,
+            new SmsProperties.Aws(
+                null,
+                null,
+                null,
+                null,
+                "0.20",
+                false,
+                Duration.ofSeconds(2),
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(10)));
 
-    new RoutingSmsGateway(simulated, aws).close();
+    new RoutingSmsGateway(simulated, aws, BookingRules.DEMO_NUMBERS).close();
 
     verify(client).close();
   }

@@ -15,28 +15,31 @@ import org.springframework.stereotype.Repository;
 import za.co.fynbos.branchbook.booking.application.IdempotencyKeyStore;
 import za.co.fynbos.branchbook.booking.application.TransactionConflictException;
 import za.co.fynbos.branchbook.booking.domain.IdempotencyKey;
+import za.co.fynbos.branchbook.shared.config.BookingProperties;
 
 /**
  * Stores the keys of successful bookings in {@code idempotency_keys} (BR-12).
  *
  * <p>The claim is one {@code INSERT ... ON CONFLICT} statement: it takes a new key, and takes over
- * a key whose {@link #KEY_TTL} has run out, so a key is honoured for exactly that long whether or
- * not the hourly purge has removed it yet. When another transaction holds the same key uncommitted,
- * the insert waits for it, bounded by the session's {@code lock_timeout}; once it has committed,
- * the key's row says what it booked, and once it has rolled back, the key is free. A completed key
- * whose appointment a cancel has deleted keeps {@code response_status} 201 with no appointment
- * (V6), which says the booking it made was cancelled.
+ * a key whose time to live, {@code branchbook.booking.idempotency-key-ttl}, has run out, so a key
+ * is honoured for exactly that long whether or not the hourly purge has removed it yet. When
+ * another transaction holds the same key uncommitted, the insert waits for it, bounded by the
+ * session's {@code lock_timeout}; once it has committed, the key's row says what it booked, and
+ * once it has rolled back, the key is free. A completed key whose appointment a cancel has deleted
+ * keeps {@code response_status} 201 with no appointment (V6), which says the booking it made was
+ * cancelled.
  */
 @Repository
 class JdbcIdempotencyKeyStore implements IdempotencyKeyStore {
 
-  /** How long a key is honoured after its booking; from then on it books anew. */
-  static final Duration KEY_TTL = Duration.ofHours(24);
-
   private final JdbcClient jdbc;
 
-  JdbcIdempotencyKeyStore(JdbcClient jdbc) {
+  /** How long a key is honoured after its booking; from then on it books anew. */
+  private final Duration keyTtl;
+
+  JdbcIdempotencyKeyStore(JdbcClient jdbc, BookingProperties booking) {
     this.jdbc = jdbc;
+    this.keyTtl = booking.idempotencyKeyTtl();
   }
 
   @Override
@@ -57,7 +60,7 @@ class JdbcIdempotencyKeyStore implements IdempotencyKeyStore {
                     .param("key", key.value())
                     .param("requestHash", requestHash)
                     .param("createdAt", utc(now))
-                    .param("expiresAt", utc(now.plus(KEY_TTL)))
+                    .param("expiresAt", utc(now.plus(keyTtl)))
                     .query(UUID.class)
                     .optional());
     if (claimed.isPresent()) {

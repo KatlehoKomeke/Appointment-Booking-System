@@ -1,6 +1,5 @@
 package za.co.fynbos.branchbook.notification.infrastructure;
 
-import java.time.Duration;
 import java.util.EnumSet;
 import org.jspecify.annotations.Nullable;
 import software.amazon.awssdk.awscore.retry.AwsRetryStrategy;
@@ -33,10 +32,10 @@ import za.co.fynbos.branchbook.notification.application.SmsProperties;
  * <p>One client is built at start-up and closed on shutdown. Its credentials come from the SDK's
  * default provider chain, which in the hosted demo is the ECS task role, so no key is ever
  * configured. It does not retry: a refusal goes back to the dispatcher, and a call that hangs gives
- * up after {@link #CALL_TIMEOUT}, so the dispatcher's thread and its row lock are never held for
- * long. A refusal that sending again cannot cure, such as a number the SMS sandbox has not
- * verified, is permanent, so the dispatcher marks the message FAILED at once; any other gets the
- * dispatcher's backoff and fifth failed attempt, as the simulated gateway's refusal does.
+ * up after {@code branchbook.sms.aws.call-timeout}, so the dispatcher's thread and its row lock are
+ * never held for long. A refusal that sending again cannot cure, such as a number the SMS sandbox
+ * has not verified, is permanent, so the dispatcher marks the message FAILED at once; any other
+ * gets the dispatcher's backoff and fifth failed attempt, as the simulated gateway's refusal does.
  *
  * <p>A refusal is recorded as a fixed code built from the exception's type and, where AWS gives
  * one, its typed reason, such as {@code AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED}. An
@@ -44,15 +43,6 @@ import za.co.fynbos.branchbook.notification.application.SmsProperties;
  * gateway, it logs nothing.
  */
 final class AwsSmsGateway implements MessageGateway, AutoCloseable {
-
-  /** How long opening a connection to AWS may take. */
-  static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(2);
-
-  /** How long AWS may take to answer once the request is sent. */
-  static final Duration READ_TIMEOUT = Duration.ofSeconds(5);
-
-  /** How long one {@code SendTextMessage} call may take in all. */
-  static final Duration CALL_TIMEOUT = Duration.ofSeconds(10);
 
   /** What AWS is asked to send every message as: a message the customer is waiting for. */
   static final MessageType MESSAGE_TYPE = MessageType.TRANSACTIONAL;
@@ -100,13 +90,13 @@ final class AwsSmsGateway implements MessageGateway, AutoCloseable {
         PinpointSmsVoiceV2Client.builder()
             .httpClientBuilder(
                 UrlConnectionHttpClient.builder()
-                    .connectionTimeout(CONNECT_TIMEOUT)
-                    .socketTimeout(READ_TIMEOUT))
+                    .connectionTimeout(settings.connectTimeout())
+                    .socketTimeout(settings.readTimeout()))
             .overrideConfiguration(
                 override ->
                     override
                         .retryStrategy(AwsRetryStrategy.doNotRetry())
-                        .apiCallTimeout(CALL_TIMEOUT));
+                        .apiCallTimeout(settings.callTimeout()));
     if (hasText(settings.region())) {
       builder.region(Region.of(settings.region().strip()));
     }

@@ -1,5 +1,6 @@
 package za.co.fynbos.branchbook.booking.application;
 
+import jakarta.validation.constraints.Positive;
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -24,10 +25,15 @@ import org.springframework.validation.annotation.Validated;
  *     only in the hosted demo's task definition
  * @param afterEnd how long after its appointment ends a booking is deleted, with its messages and
  *     its idempotency keys; {@code PT0S} by default, and never negative
+ * @param batchSize the most appointments one of the purge's transactions deletes, so none holds
+ *     many locks; 500 by default
  */
 @Validated
 @ConfigurationProperties("branchbook.retention")
-public record RetentionProperties(boolean enabled, @DefaultValue("PT0S") Duration afterEnd) {
+public record RetentionProperties(
+    boolean enabled,
+    @DefaultValue("PT0S") Duration afterEnd,
+    @Positive @DefaultValue("500") int batchSize) {
 
   /** Refuses a missing or negative {@code after-end}. */
   public RetentionProperties {
