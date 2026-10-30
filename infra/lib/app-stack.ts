@@ -19,6 +19,8 @@ import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
 import { CaptchaApiKey } from './captcha-api-key';
 import { EnvironmentConfig, retentionDays } from './config';
+import { FaultInjection } from './constructs/fault-injection';
+import { Observability, allowMetricsExport, metricsExportEnvironment } from './constructs/observability';
 import { DATABASE_NAME, POSTGRES_PORT, SUBNET_GROUPS, syntheticTrafficSecretName } from './data-stack';
 import { SchemaMigration } from './schema-migration';
 import { ANY_RESOURCE_FINDING, LAMBDA_BASIC_EXECUTION_FINDING } from './nag';
@@ -56,6 +58,14 @@ export const CONTAINER_NAMES = { app: 'App', migrate: 'Migrate' } as const;
 
 /** The scratch volume mounted at /tmp, the one writable path in the container's read-only file system. */
 const TMP_VOLUME = 'tmp';
+
+/** The alert topic and the three alarms the app stack raises itself. */
+interface BaseAlarms {
+  readonly topic: sns.Topic;
+  readonly serverErrors: cloudwatch.Alarm;
+  readonly noHealthyTask: cloudwatch.Alarm;
+  readonly databaseStorage: cloudwatch.Alarm;
+}
 
 /**
  * Configuration for {@link AppStack}.
@@ -126,6 +136,18 @@ export class AppStack extends Stack {
 
   /** The topic every alarm publishes to. */
   public readonly alarmTopic: sns.Topic;
+
+  /** Raised when the app answers 5xx to too many requests; it also rolls a deployment back. */
+  public readonly serverErrorsAlarm: cloudwatch.Alarm;
+
+  /** Raised when no task has passed the load balancer's health check for a while. */
+  public readonly noHealthyTaskAlarm: cloudwatch.Alarm;
+
+  /** The app's metrics, the alarms on them and on AWS's metrics, the dashboard and the canary. */
+  public readonly observability: Observability;
+
+  /** The fault injection experiment templates, where the environment has them. */
+  public readonly faultInjection?: FaultInjection;
 
   /** The web ACL in front of the load balancer. */
   public readonly webAcl: wafv2.CfnWebACL;
@@ -205,6 +227,9 @@ export class AppStack extends Stack {
     // The runtime role signs in with IAM authentication: the task role may connect as branchbook_app and as no
     // other database user.
     props.database.grantConnect(task.taskRole, config.database.appUser);
+    // The app exports its outbox and circuit breaker meters to CloudWatch for the alarms, into this environment's
+    // namespace alone.
+    allowMetricsExport(task.taskRole, config.monitoring.metricsNamespace);
 
     const environment: Record<string, string> = {
       ...config.appEnvironment,
@@ -221,6 +246,7 @@ export class AppStack extends Stack {
       PUBLIC_BASE_URL: this.url,
       BRANCHBOOK_SMS_GATEWAY: config.sms.gateway,
       BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP: String(config.sms.recipientDailyCap),
+      ...metricsExportEnvironment(config),
     };
     if (config.sms.gateway === 'aws') {
       Object.assign(environment, this.smsSettings(config, task, props.smsDryRun === true));
@@ -366,7 +392,29 @@ export class AppStack extends Stack {
     });
     this.wafLogging(config, this.webAcl);
 
-    this.alarmTopic = this.alarms(props, config);
+    const alarms = this.alarms(props, config);
+    this.alarmTopic = alarms.topic;
+    this.serverErrorsAlarm = alarms.serverErrors;
+    this.noHealthyTaskAlarm = alarms.noHealthyTask;
+    this.observability = new Observability(this, 'Observability', {
+      config,
+      service: this.service,
+      loadBalancer: this.loadBalancer,
+      targetGroup: this.targetGroup,
+      database: this.database,
+      webAcl: this.webAcl,
+      alarmTopic: this.alarmTopic,
+      url: this.url,
+      existingAlarms: [alarms.serverErrors, alarms.noHealthyTask, alarms.databaseStorage],
+    });
+    if (config.faultInjection.enabled) {
+      this.faultInjection = new FaultInjection(this, 'FaultInjection', {
+        config,
+        service: this.service,
+        database: this.database,
+        stopConditions: [alarms.serverErrors, alarms.noHealthyTask],
+      });
+    }
 
     new CfnOutput(this, 'Url', { value: this.url, description: `The ${config.name} environment` });
     new CfnOutput(this, 'LogGroup', {
@@ -612,12 +660,12 @@ export class AppStack extends Stack {
 
   /**
    * Three alarms: the app failing requests, no healthy task, and the database running out of space. The first also
-   * rolls back an ECS deployment that raises it.
+   * rolls back an ECS deployment that raises it. The rest are in {@link Observability}.
    *
    * @param props - the stack's configuration: the optional alert address
    * @param config - the environment's thresholds
    */
-  private alarms(props: AppStackProps, config: EnvironmentConfig): sns.Topic {
+  private alarms(props: AppStackProps, config: EnvironmentConfig): BaseAlarms {
     const { alarms } = config;
     const topic = new sns.Topic(this, 'Alarms', {
       displayName: `BranchBook ${config.name} alarms`,
@@ -644,24 +692,26 @@ export class AppStack extends Stack {
     // answer 5xx is rolled back too.
     this.service.enableDeploymentAlarms([serverErrors.alarmName], { behavior: ecs.AlarmBehavior.ROLLBACK_ON_ALARM });
 
-    new cloudwatch.Alarm(this, 'NoHealthyTask', {
+    const noHealthyTask = new cloudwatch.Alarm(this, 'NoHealthyTask', {
       alarmDescription: `No task has passed the /readyz health check for ${String(alarms.noHealthyTaskMinutes)} minutes.`,
       metric: this.targetGroup.metrics.healthyHostCount({ period: Duration.minutes(1), statistic: 'Minimum' }),
       threshold: 1,
       evaluationPeriods: alarms.noHealthyTaskMinutes,
       comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.BREACHING,
-    }).addAlarmAction(notify);
+    });
+    noHealthyTask.addAlarmAction(notify);
 
-    new cloudwatch.Alarm(this, 'DatabaseStorage', {
+    const databaseStorage = new cloudwatch.Alarm(this, 'DatabaseStorage', {
       alarmDescription: `The database has less than ${String(alarms.databaseFreeStorageGiB)} GB of storage left.`,
       metric: this.database.metricFreeStorageSpace({ period: Duration.minutes(5), statistic: 'Minimum' }),
       threshold: alarms.databaseFreeStorageGiB * 1024 ** 3,
       evaluationPeriods: 1,
       comparisonOperator: cloudwatch.ComparisonOperator.LESS_THAN_THRESHOLD,
-    }).addAlarmAction(notify);
+    });
+    databaseStorage.addAlarmAction(notify);
 
-    return topic;
+    return { topic, serverErrors, noHealthyTask, databaseStorage };
   }
 
   /**
@@ -678,7 +728,7 @@ export class AppStack extends Stack {
       },
       {
         id: LAMBDA_BASIC_EXECUTION_FINDING,
-        reason: 'CDK\'s AWS SDK custom resource handler uses AWSLambdaBasicExecutionRole, which grants only writing its own logs.',
+        reason: 'CDK\'s own custom resource handlers (the AWS SDK call, and where the canary\'s artifacts are deleted with the stack, the bucket emptier) use AWSLambdaBasicExecutionRole, which grants only writing their own logs.',
       },
     );
     Validations.of(this.loadBalancer).acknowledge(
@@ -691,12 +741,14 @@ export class AppStack extends Stack {
         reason: 'The load balancer serves the public site: it must accept 80 (redirected) and 443 from anywhere; WAF filters what reaches the tasks.',
       },
     );
-    for (const definition of [this.service.taskDefinition, this.migrationTask]) {
-      Validations.of(definition).acknowledge({
-        id: ANY_RESOURCE_FINDING,
-        reason: 'ecr:GetAuthorizationToken, which the execution role needs to pull the image, accepts no resource ARN.',
-      });
-    }
+    Validations.of(this.service.taskDefinition).acknowledge({
+      id: ANY_RESOURCE_FINDING,
+      reason: 'ecr:GetAuthorizationToken, which the execution role needs to pull the image, accepts no resource ARN; nor does cloudwatch:PutMetricData, which the task role may call only for its environment\'s namespace (a condition).',
+    });
+    Validations.of(this.migrationTask).acknowledge({
+      id: ANY_RESOURCE_FINDING,
+      reason: 'ecr:GetAuthorizationToken, which the execution role needs to pull the image, accepts no resource ARN.',
+    });
     if (!config.service.containerInsights) {
       Validations.of(this.service.cluster).acknowledge({
         id: 'AwsSolutions-ECS4',

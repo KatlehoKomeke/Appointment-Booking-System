@@ -248,7 +248,8 @@ describe.each([
   });
 
   test('raises three alarms with the configured thresholds', () => {
-    app.resourceCountIs('AWS::CloudWatch::Alarm', 3);
+    // The first three alarms keep their logical IDs; the rest are tested in observability.test.ts.
+    expect(Object.keys(app.findResources('AWS::CloudWatch::Alarm')).filter((id) => /^(ServerErrors|NoHealthyTask|DatabaseStorage)[0-9A-F]{8}$/.test(id))).toHaveLength(3);
     app.hasResourceProperties('AWS::CloudWatch::Alarm', {
       Threshold: config.alarms.serverErrorThreshold,
       Period: config.alarms.serverErrorPeriodMinutes * 60,

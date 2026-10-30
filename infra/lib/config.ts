@@ -46,6 +46,9 @@ export const COMPUTED_VARIABLES: readonly string[] = [
   'BRANCHBOOK_MIGRATE_ONLY',
   'BRANCHBOOK_DB_APP_ROLE',
   'SPRING_MAIN_WEB_APPLICATION_TYPE',
+  'BRANCHBOOK_METRICS_CLOUDWATCH_ENABLED',
+  'BRANCHBOOK_METRICS_CLOUDWATCH_NAMESPACE',
+  'BRANCHBOOK_METRICS_CLOUDWATCH_STEP',
 ];
 
 /** The retention periods CloudWatch Logs accepts, in days. */
@@ -250,6 +253,75 @@ export interface AlarmsConfig {
   readonly databaseFreeStorageGiB: number;
 }
 
+/**
+ * The app's own metrics in CloudWatch, and the alarms on them and on AWS's metrics of the load balancer, the database
+ * and the service (infra/lib/constructs/observability.ts).
+ */
+export interface MonitoringConfig {
+  /** The CloudWatch namespace the app exports its meters to, for example `BranchBook/production`. */
+  readonly metricsNamespace: string;
+  /** How often the app exports its meters, in seconds; also the period of the alarms on them. */
+  readonly metricsStepSeconds: number;
+  /** The age, in seconds, of the oldest message still waiting to be sent above which the alarm is raised. */
+  readonly outboxOldestPendingSeconds: number;
+  /** How many messages may turn FAILED within {@link outboxFailedPeriodMinutes} before the alarm is raised. */
+  readonly outboxFailedIncrease: number;
+  /** The window of {@link outboxFailedIncrease}, in minutes. */
+  readonly outboxFailedPeriodMinutes: number;
+  /** Seconds since the dispatcher's last tick above which it counts as stalled. */
+  readonly dispatcherStalledSeconds: number;
+  /** Consecutive export periods the dispatcher must look stalled, or be silent, before the alarm is raised. */
+  readonly dispatcherStalledPeriods: number;
+  /** The load balancer's 99th-percentile response time, in milliseconds, above which the alarm is raised. */
+  readonly responseTimeP99Milliseconds: number;
+  /** The period of the response-time alarm, in minutes. */
+  readonly responseTimePeriodMinutes: number;
+  /** Consecutive periods over {@link responseTimeP99Milliseconds} before the alarm is raised. */
+  readonly responseTimePeriods: number;
+  /** The database's average CPU, in percent, above which the alarm is raised. */
+  readonly databaseCpuPercent: number;
+  /** The share of the database's connection budget, in percent, above which the alarm is raised. */
+  readonly databaseConnectionsPercent: number;
+  /** The database's freeable memory, in MiB, below which the alarm is raised. */
+  readonly databaseFreeableMemoryMiB: number;
+  /** The service's average CPU, in percent, above which the alarm is raised. */
+  readonly serviceCpuPercent: number;
+  /** The busiest task's memory, in percent of its reservation, above which the alarm is raised. */
+  readonly serviceMemoryPercent: number;
+  /** The period of the database and service alarms, in minutes. */
+  readonly resourcePeriodMinutes: number;
+  /** Consecutive periods over a database or service threshold before its alarm is raised. */
+  readonly resourcePeriods: number;
+}
+
+/** The CloudWatch Synthetics canary that calls the environment from outside, as a customer would. */
+export interface CanaryConfig {
+  /** Whether the canary exists. */
+  readonly enabled: boolean;
+  /** How often it runs, in minutes (1 to 60). */
+  readonly scheduleMinutes: number;
+  /** How long one run may take, in seconds; at most the schedule. */
+  readonly timeoutSeconds: number;
+  /** The share of successful runs, in percent, below which a period counts as failing. */
+  readonly successPercentThreshold: number;
+  /** Consecutive failing periods before the alarm is raised. */
+  readonly failingPeriods: number;
+  /** How long run results and the artifacts in S3 are kept, in days. */
+  readonly artifactRetentionDays: number;
+  /** Whether deleting the stack empties and deletes the artifacts bucket; otherwise the bucket is kept. */
+  readonly autoDeleteArtifacts: boolean;
+  /** The branch whose availability the canary reads. */
+  readonly branchCode: string;
+  /** The service whose availability the canary reads; the branch must offer it. */
+  readonly serviceCode: string;
+}
+
+/** The AWS FIS experiment templates (infra/lib/constructs/fault-injection.ts). */
+export interface FaultInjectionConfig {
+  /** Whether the templates exist. A template does nothing until someone starts an experiment from it. */
+  readonly enabled: boolean;
+}
+
 /** Everything one environment needs, as read from `infra/config/<name>.json`. */
 export interface EnvironmentConfig {
   /** The environment's name; it must match the file's name. */
@@ -282,6 +354,12 @@ export interface EnvironmentConfig {
   readonly sms: SmsConfig;
   /** Alarm thresholds. */
   readonly alarms: AlarmsConfig;
+  /** The app's metrics and the alarms on them and on AWS's metrics. */
+  readonly monitoring: MonitoringConfig;
+  /** The outside-in canary. */
+  readonly canary: CanaryConfig;
+  /** The fault injection experiment templates. */
+  readonly faultInjection: FaultInjectionConfig;
   /**
    * The app's own settings, passed to every task as environment variables. Secrets never go here: they come from
    * Secrets Manager. Neither do the variables in {@link COMPUTED_VARIABLES}.
@@ -306,6 +384,14 @@ const STACK_PREFIX = /^[A-Z][A-Za-z0-9]{1,40}$/;
 const VARIABLE = /^[A-Z][A-Z0-9_]*$/;
 const SECRET_LIKE = /(PASSWORD|SECRET|TOKEN|CREDENTIALS?|_KEY)$/;
 const CIDR = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
+// CloudWatch reserves namespaces that start with AWS/ for AWS's own metrics.
+const METRICS_NAMESPACE = /^(?!AWS\/)[A-Za-z0-9][A-Za-z0-9/_.#:-]{0,254}$/;
+
+/**
+ * The export steps the alarms accept, in seconds: CloudWatch's standard resolution is a minute, and an alarm's period
+ * must be a multiple of it.
+ */
+export const METRICS_STEPS: readonly number[] = [60, 120, 300];
 
 /**
  * One JSON object being read. It records which keys were read, so {@link end} can refuse a key nobody reads: a
@@ -521,6 +607,39 @@ export function parseEnvironmentConfig(raw: unknown, source: string): Environmen
       noHealthyTaskMinutes: s.integer('noHealthyTaskMinutes', 1, 60),
       databaseFreeStorageGiB: s.integer('databaseFreeStorageGiB', 1, 65536),
     })),
+    monitoring: root.section('monitoring', (s) => ({
+      metricsNamespace: s.string('metricsNamespace', METRICS_NAMESPACE, 'a CloudWatch namespace such as BranchBook/production'),
+      metricsStepSeconds: s.oneOfNumbers('metricsStepSeconds', METRICS_STEPS),
+      outboxOldestPendingSeconds: s.integer('outboxOldestPendingSeconds', 60, 86_400),
+      outboxFailedIncrease: s.integer('outboxFailedIncrease', 1, 10_000),
+      outboxFailedPeriodMinutes: s.integer('outboxFailedPeriodMinutes', 1, 60),
+      dispatcherStalledSeconds: s.integer('dispatcherStalledSeconds', 30, 3600),
+      dispatcherStalledPeriods: s.integer('dispatcherStalledPeriods', 1, 60),
+      responseTimeP99Milliseconds: s.integer('responseTimeP99Milliseconds', 50, 60_000),
+      responseTimePeriodMinutes: s.integer('responseTimePeriodMinutes', 1, 60),
+      responseTimePeriods: s.integer('responseTimePeriods', 1, 60),
+      databaseCpuPercent: s.integer('databaseCpuPercent', 10, 100),
+      databaseConnectionsPercent: s.integer('databaseConnectionsPercent', 10, 100),
+      databaseFreeableMemoryMiB: s.integer('databaseFreeableMemoryMiB', 16, 1_048_576),
+      serviceCpuPercent: s.integer('serviceCpuPercent', 10, 100),
+      serviceMemoryPercent: s.integer('serviceMemoryPercent', 10, 100),
+      resourcePeriodMinutes: s.integer('resourcePeriodMinutes', 1, 60),
+      resourcePeriods: s.integer('resourcePeriods', 1, 60),
+    })),
+    canary: root.section('canary', (s) => ({
+      enabled: s.boolean('enabled'),
+      scheduleMinutes: s.integer('scheduleMinutes', 1, 60),
+      timeoutSeconds: s.integer('timeoutSeconds', 15, 840),
+      successPercentThreshold: s.integer('successPercentThreshold', 1, 100),
+      failingPeriods: s.integer('failingPeriods', 1, 60),
+      artifactRetentionDays: s.integer('artifactRetentionDays', 1, 455),
+      autoDeleteArtifacts: s.boolean('autoDeleteArtifacts'),
+      branchCode: s.string('branchCode', /^[A-Z]{2,8}$/, 'a branch code of 2 to 8 capital letters such as SAN'),
+      serviceCode: s.string('serviceCode', /^[A-Z]{2,12}$/, 'a service code of 2 to 12 capital letters such as FICA'),
+    })),
+    faultInjection: root.section('faultInjection', (s) => ({
+      enabled: s.boolean('enabled'),
+    })),
     appEnvironment: root.stringMap('appEnvironment'),
   };
   root.end();
@@ -599,6 +718,10 @@ export function checkEnvironment(config: EnvironmentConfig): string[] {
   if (domain.name !== domain.hostedZoneName && !domain.name.endsWith(`.${domain.hostedZoneName}`)) {
     problems.push(`domain.name ${domain.name} is not in the hosted zone ${domain.hostedZoneName}`);
   }
+  const { canary } = config;
+  if (canary.timeoutSeconds > canary.scheduleMinutes * 60) {
+    problems.push('canary.timeoutSeconds is longer than canary.scheduleMinutes: a run would overlap the next');
+  }
 
   for (const name of Object.keys(config.appEnvironment)) {
     if (COMPUTED_VARIABLES.includes(name)) {
@@ -633,6 +756,9 @@ export function checkEnvironment(config: EnvironmentConfig): string[] {
     }
     if (network.natGateways !== config.availabilityZones.length) {
       problems.push('production must have one NAT gateway per availability zone');
+    }
+    if (canary.autoDeleteArtifacts) {
+      problems.push('production must keep the canary\'s artifacts when its stack is deleted');
     }
   }
   return problems;

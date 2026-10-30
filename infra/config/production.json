@@ -83,6 +83,39 @@
     "noHealthyTaskMinutes": 3,
     "databaseFreeStorageGiB": 2
   },
+  "monitoring": {
+    "metricsNamespace": "BranchBook/production",
+    "metricsStepSeconds": 60,
+    "outboxOldestPendingSeconds": 300,
+    "outboxFailedIncrease": 1,
+    "outboxFailedPeriodMinutes": 5,
+    "dispatcherStalledSeconds": 60,
+    "dispatcherStalledPeriods": 2,
+    "responseTimeP99Milliseconds": 1500,
+    "responseTimePeriodMinutes": 5,
+    "responseTimePeriods": 3,
+    "databaseCpuPercent": 80,
+    "databaseConnectionsPercent": 80,
+    "databaseFreeableMemoryMiB": 128,
+    "serviceCpuPercent": 85,
+    "serviceMemoryPercent": 85,
+    "resourcePeriodMinutes": 5,
+    "resourcePeriods": 3
+  },
+  "canary": {
+    "enabled": true,
+    "scheduleMinutes": 5,
+    "timeoutSeconds": 60,
+    "successPercentThreshold": 90,
+    "failingPeriods": 2,
+    "artifactRetentionDays": 14,
+    "autoDeleteArtifacts": false,
+    "branchCode": "SAN",
+    "serviceCode": "FICA"
+  },
+  "faultInjection": {
+    "enabled": true
+  },
   "appEnvironment": {
     "SPRING_PROFILES_ACTIVE": "prod",
     "BRANCHBOOK_MIGRATE_ON_START": "false",

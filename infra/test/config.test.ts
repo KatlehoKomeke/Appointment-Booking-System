@@ -132,6 +132,24 @@ describe('environment configuration', () => {
     expect(production((json) => (json.domain.name = 'a-much-too-long.branchbook.click'))).toThrow(/at most 20 characters/);
     expect(production((json) => (json.domain.name = 'branchbook.link'))).toThrow(/is not in the hosted zone branchbook\.click/);
   });
+
+  test('refuses the metrics switches in the app environment, which the stack sets for the service alone', () => {
+    expect(production((json) => (json.appEnvironment.BRANCHBOOK_METRICS_CLOUDWATCH_ENABLED = 'true'))).toThrow(/is set by the stack itself/);
+    expect(production((json) => (json.appEnvironment.BRANCHBOOK_METRICS_CLOUDWATCH_NAMESPACE = 'X'))).toThrow(/is set by the stack itself/);
+  });
+
+  test('refuses a namespace CloudWatch reserves for AWS, or an export step no alarm period matches', () => {
+    const monitoring = (json: Json) => json.monitoring as Record<string, unknown>;
+    expect(production((json) => (monitoring(json).metricsNamespace = 'AWS/BranchBook'))).toThrow(/monitoring\.metricsNamespace must be a CloudWatch namespace/);
+    expect(production((json) => (monitoring(json).metricsStepSeconds = 30))).toThrow(/monitoring\.metricsStepSeconds must be one of 60, 120, 300/);
+  });
+
+  test('refuses a canary run longer than its schedule, and a production canary whose artifacts die with the stack', () => {
+    const canary = (json: Json) => json.canary as Record<string, unknown>;
+    expect(production((json) => (canary(json).timeoutSeconds = 301))).toThrow(/canary\.timeoutSeconds is longer than canary\.scheduleMinutes/);
+    expect(production((json) => (canary(json).autoDeleteArtifacts = true))).toThrow(/production must keep the canary's artifacts/);
+    expect(production((json) => (canary(json).branchCode = 'san'))).toThrow(/canary\.branchCode must be a branch code/);
+  });
 });
 
 describe('registry configuration', () => {
