@@ -1,5 +1,6 @@
 package za.co.fynbos.branchbook.shared.security;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -40,8 +41,11 @@ import org.springframework.security.web.util.matcher.RequestMatcher;
  * <p>One exception: the Swagger UI pages under {@code /swagger-ui/} set inline styles, so their
  * policy also allows {@code style-src 'unsafe-inline'}. Scripts stay limited to this origin there
  * too, and every other path, the app and the API included, keeps the strict policy.
+ *
+ * <p>It exists only in a web application: a migrate-only run serves nothing.
  */
 @Configuration(proxyBeanMethods = false)
+@ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 class SecurityConfig {
 
   /**
