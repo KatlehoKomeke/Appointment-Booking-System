@@ -22,9 +22,10 @@ import za.co.fynbos.branchbook.support.MutableClock;
 
 /**
  * FR-30, NFR-13: {@code /actuator/prometheus} serves the alarm gauges beside {@code
- * outbox_pending}, as Prometheus reads them: the oldest PENDING message's age, the FAILED count and
- * the seconds since the last tick, and the SMS circuit breaker's state. The ages follow the clock
- * between ticks; nothing in their names or tags is personal data. The numbers are synthetic.
+ * outbox_pending}, as Prometheus reads them: the oldest PENDING message's age, the FAILED count
+ * (without the simulated gateway's deliberate failures) and the seconds since the last tick, and
+ * the SMS circuit breaker's state. The ages follow the clock between ticks; nothing in their names
+ * or tags is personal data. The numbers are synthetic.
  */
 @IntegrationTest
 @ExtendWith(DatabaseReset.class)
@@ -69,8 +70,16 @@ class OutboxHealthMetricsIT {
     scrape = scrape();
 
     assertThat(value(scrape, "outbox_oldest_pending_age_seconds")).isZero();
-    assertThat(value(scrape, "outbox_failed")).isOne();
+    assertThat(value(scrape, "outbox_failed"))
+        .as(
+            "the 0000 number's failure is the simulated gateway's, on purpose, so it raises no alarm")
+        .isZero();
     assertThat(value(scrape, "outbox_last_tick_age_seconds")).isZero();
+
+    jdbc.update(
+        "UPDATE notification_messages SET last_error = 'GATEWAY_ERROR' WHERE status = 'FAILED'");
+    assertThat(dispatcher.runOnce(clock.instant())).isZero();
+    assertThat(value(scrape(), "outbox_failed")).as("any other failure counts").isOne();
   }
 
   private String scrape() {

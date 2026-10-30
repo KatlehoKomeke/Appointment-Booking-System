@@ -21,7 +21,8 @@ import org.springframework.stereotype.Component;
  *       when none waits. A message backing off waits at most about 30 seconds, so a larger value
  *       means delivery is stuck, for example while the circuit breaker holds the dispatcher back.
  *   <li>{@value #FAILED}, which Prometheus reads as {@code outbox_failed}: how many messages are
- *       FAILED, for any reason.
+ *       FAILED, for any reason but the simulated gateway's deliberate refusal of a demo number
+ *       ending 0000, which anyone may book to see a failure.
  *   <li>{@value #LAST_TICK_AGE}, in seconds, which Prometheus reads as {@code
  *       outbox_last_tick_age_seconds}: how long ago the dispatcher last finished a tick. It counts
  *       from start-up until the first tick, and a dispatcher that has stopped or hangs shows a
@@ -79,7 +80,7 @@ class OutboxHealthGauges {
         .strongReference(true)
         .register(registry);
     Gauge.builder(FAILED, this, OutboxHealthGauges::failed)
-        .description("Messages FAILED, for any reason")
+        .description("Messages FAILED, except the simulated gateway's deliberate failures")
         .strongReference(true)
         .register(registry);
     Gauge.builder(LAST_TICK_AGE, this, OutboxHealthGauges::lastTickAge)

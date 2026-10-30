@@ -22,7 +22,8 @@ public interface OutboxStatistics {
    *
    * @param oldestPendingCreatedAt when the oldest PENDING message was written, or {@code null} when
    *     none is PENDING
-   * @param failed how many messages are FAILED, for any reason
+   * @param failed how many messages are FAILED, for any reason but the simulated gateway's
+   *     deliberate refusal of a demo number ending 0000
    */
   record Snapshot(@Nullable Instant oldestPendingCreatedAt, long failed) {}
 }
