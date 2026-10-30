@@ -13,29 +13,20 @@ import { type QueryClient, queryOptions } from '@tanstack/react-query';
 
 import { ApiProblem, defaultBaseUrl } from './client';
 import { queryKeys } from './queries';
-
-/** Where AWS WAF's CAPTCHA JavaScript API is loaded from, and the key it renders the puzzle with. */
-export interface CaptchaSettings {
-  /** The account's CAPTCHA integration URL followed by `jsapi.js`; always `https:`. */
-  scriptUrl: string;
-  /** The CAPTCHA API key. It is public by design: AWS binds it to the domains it may issue tokens for. */
-  apiKey: string;
-}
+import type { components, paths } from './schema';
 
 /**
- * The client settings, as `GET /api/v1/client-config` answers them.
- *
- * Written by hand until the contract (docs/openapi.yaml) lists the endpoint. It is then replaced by the generated
- * `components['schemas']['ClientConfig']` from `schema.d.ts`, and {@link fetchClientConfig} calls
- * `api.GET('/api/v1/client-config')`.
+ * Where AWS WAF's CAPTCHA JavaScript API is loaded from (the account's integration URL followed by `jsapi.js`, always
+ * `https:`), and the key it renders the puzzle with. The key is public by design: AWS binds it to the domains it may
+ * issue tokens for.
  */
-export interface ClientConfig {
-  /** The CAPTCHA, or `null` where none is configured, as on a local run. */
-  captcha: CaptchaSettings | null;
-}
+export type CaptchaSettings = components['schemas']['CaptchaConfig'];
 
-/** Where the API serves the client settings. */
-export const CLIENT_CONFIG_PATH = '/api/v1/client-config';
+/** The client settings, as the contract (docs/openapi.yaml) says `GET /api/v1/client-config` answers them. */
+export type ClientConfig = components['schemas']['ClientConfig'];
+
+/** Where the API serves the client settings; typed against the contract's paths, so a rename there fails here. */
+export const CLIENT_CONFIG_PATH = '/api/v1/client-config' satisfies keyof paths;
 
 /**
  * Reads the client settings from an answer's body, trusting nothing. Anything but a CAPTCHA with an `https:` script
@@ -71,6 +62,10 @@ function isHttpsUrl(value: string): boolean {
 
 /**
  * Asks the API for the client settings.
+ *
+ * It uses the browser's fetch, not the app's `api` client: that client sends every request through the CAPTCHA
+ * handling (`captcha.ts`), which itself asks for these settings, so going through it would make the two modules
+ * depend on each other as they load.
  *
  * @throws {ApiProblem} when the API answers with an error, such as a 404 from an API that predates the endpoint; a
  *   network failure rejects with the browser's own error
