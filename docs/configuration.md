@@ -79,6 +79,25 @@ does not set the variable. Staging and production values are set by the CDK app 
 | `branchbook.dispatcher.enabled` | `BRANCHBOOK_DISPATCHER_ENABLED` | `true` | Whether the outbox dispatcher runs (BR-17) | no | default | default | default |
 | `branchbook.dispatcher.interval` | `BRANCHBOOK_DISPATCHER_INTERVAL` | `PT2S` | Time between dispatcher ticks | no | default | default | default |
 | `branchbook.dispatcher.simulated-latency` | `BRANCHBOOK_DISPATCHER_SIMULATED_LATENCY` | `PT0.15S` | How long the simulated gateway takes per message | no | default | default | default |
+| `branchbook.dispatcher.batch-size` | `BRANCHBOOK_DISPATCHER_BATCH_SIZE` | `20` | Most messages one tick handles (1 to 1000) | no | default | default | default |
+| `branchbook.dispatcher.max-attempts` | `BRANCHBOOK_DISPATCHER_MAX_ATTEMPTS` | `5` | The attempt whose refusal marks a message FAILED (1 to 5, the database's limit) | no | default | default | default |
+| `branchbook.dispatcher.backoff.base` | `BRANCHBOOK_DISPATCHER_BACKOFF_BASE` | `PT2S` | Wait after the first retryable refusal | no | default | default | default |
+| `branchbook.dispatcher.backoff.multiplier` | `BRANCHBOOK_DISPATCHER_BACKOFF_MULTIPLIER` | `2` | Each later wait is the previous one times this (at least 1) | no | default | default | default |
+| `branchbook.dispatcher.backoff.cap` | `BRANCHBOOK_DISPATCHER_BACKOFF_CAP` | `PT16S` | Longest wait; with the defaults a message is FAILED within 30 seconds | no | default | default | default |
+| `branchbook.dispatcher.backoff.jitter` | `BRANCHBOOK_DISPATCHER_BACKOFF_JITTER` | `0.2` | Largest share taken off each wait at random, so retries spread out; never lengthens one | no | default | default | default |
+| `branchbook.dispatcher.circuit-breaker.enabled` | `BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_ENABLED` | `true` | Stops calling an SMS provider that keeps failing; open, nothing is claimed and no attempt is spent | no | default | default | default |
+| `branchbook.dispatcher.circuit-breaker.sliding-window-size` | `BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_SLIDING_WINDOW_SIZE` | `10` | Calls the breaker judges | no | default | default | default |
+| `branchbook.dispatcher.circuit-breaker.minimum-number-of-calls` | `BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_MINIMUM_NUMBER_OF_CALLS` | `5` | Calls before it judges at all | no | default | default | default |
+| `branchbook.dispatcher.circuit-breaker.failure-rate-threshold` | `BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_FAILURE_RATE_THRESHOLD` | `50` | Percentage of failed calls that opens it | no | default | default | default |
+| `branchbook.dispatcher.circuit-breaker.slow-call-rate-threshold` | `BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_SLOW_CALL_RATE_THRESHOLD` | `100` | Percentage of slow calls that opens it | no | default | default | default |
+| `branchbook.dispatcher.circuit-breaker.slow-call-duration` | `BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_SLOW_CALL_DURATION` | `PT8S` | A call slower than this counts as slow | no | default | default | default |
+| `branchbook.dispatcher.circuit-breaker.wait-in-open-state` | `BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_WAIT_IN_OPEN_STATE` | `PT30S` | How long it stays open before probing | no | default | default | default |
+| `branchbook.dispatcher.circuit-breaker.permitted-calls-in-half-open-state` | `BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_PERMITTED_CALLS_IN_HALF_OPEN_STATE` | `2` | Probe messages sent while half open | no | default | default | default |
+| `branchbook.metrics.cloudwatch.enabled` | `BRANCHBOOK_METRICS_CLOUDWATCH_ENABLED` | `false` | Exports the chosen meters to CloudWatch for the alarms | no | default | `true` (task definition) | `true` (task definition) |
+| `branchbook.metrics.cloudwatch.namespace` | `BRANCHBOOK_METRICS_CLOUDWATCH_NAMESPACE` | `BranchBook` | Where the metrics go; the task role may write only there | no | default | `BranchBook/staging` | `BranchBook/production` |
+| `branchbook.metrics.cloudwatch.step` | `BRANCHBOOK_METRICS_CLOUDWATCH_STEP` | `PT1M` | How often they are sent | no | default | default | default |
+| `branchbook.metrics.cloudwatch.region` | `BRANCHBOOK_METRICS_CLOUDWATCH_REGION` | empty: SDK chain | Region to send to | no | default | default | default |
+| `branchbook.metrics.cloudwatch.include` | `BRANCHBOOK_METRICS_CLOUDWATCH_INCLUDE` | `outbox.,resilience4j.circuitbreaker.,appointments.booked` | Meter-name prefixes exported; everything else stays out | no | default | default | default |
 | `branchbook.sms.gateway` | `BRANCHBOOK_SMS_GATEWAY` | `simulated` | `aws` sends real SMS to numbers outside the demo block | no | default | `simulated` | `aws` |
 | `branchbook.sms.recipient-daily-cap` | `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` | `0` (off) | Most SMS one number is written in 24 hours (BR-17) | no | default | from config | from config |
 | `branchbook.sms.recipient-cap-key` | `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY` | empty: random per start | HMAC key of the cap's ledger, at least 32 characters; required under `prod` when the cap is on | **yes** | default | Secrets Manager `branchbook-staging/sms-cap-key` | Secrets Manager `branchbook/sms-cap-key` |

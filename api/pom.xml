@@ -73,6 +73,8 @@
     <tomcat.version>11.0.25</tomcat.version>
     <jackson-bom.version>3.1.7</jackson-bom.version>
     <jackson-2-bom.version>2.21.7</jackson-2-bom.version>
+    <!-- Resilience4j's circuit breaker and its Micrometer meters, used as plain libraries (no Spring Boot starter). -->
+    <resilience4j.version>2.4.0</resilience4j.version>
     <!-- Test libraries that the Spring Boot parent does not manage. -->
     <archunit.version>1.5.1</archunit.version>
   </properties>
@@ -195,6 +197,38 @@
         <exclusion>
           <groupId>software.amazon.awssdk</groupId>
           <artifactId>netty-nio-client</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <!-- The circuit breaker around the SMS gateway (DeliveryCircuit), used as a plain library rather than through a
+         Spring Boot starter, so it does not depend on which Spring Boot versions Resilience4j supports. 2.4.0 was
+         published on 2026-03-14, well past the two-week wait. -->
+    <dependency>
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-circuitbreaker</artifactId>
+      <version>${resilience4j.version}</version>
+    </dependency>
+    <!-- Publishes the circuit breaker's state and calls as Micrometer meters. -->
+    <dependency>
+      <groupId>io.github.resilience4j</groupId>
+      <artifactId>resilience4j-micrometer</artifactId>
+      <version>${resilience4j.version}</version>
+    </dependency>
+    <!-- Exports chosen meters to Amazon CloudWatch where BRANCHBOOK_METRICS_CLOUDWATCH_ENABLED is true
+         (CloudWatchMetricsConfiguration); Spring Boot 4.1 has no auto-configuration for it. The version is managed by
+         Spring Boot's Micrometer BOM, the AWS SDK's by the BOM above. Only the asynchronous Netty client the registry
+         needs is kept. -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-registry-cloudwatch2</artifactId>
+      <exclusions>
+        <exclusion>
+          <groupId>software.amazon.awssdk</groupId>
+          <artifactId>apache-client</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>software.amazon.awssdk</groupId>
+          <artifactId>apache5-client</artifactId>
         </exclusion>
       </exclusions>
     </dependency>

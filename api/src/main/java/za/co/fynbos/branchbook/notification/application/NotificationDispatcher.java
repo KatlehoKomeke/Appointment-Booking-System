@@ -1,8 +1,10 @@
 package za.co.fynbos.branchbook.notification.application;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,18 +24,27 @@ import za.co.fynbos.branchbook.shared.correlation.CorrelationIds;
 /**
  * Delivers PENDING messages through the {@link MessageGateway} (BR-17, ADR-0003).
  *
- * <p>Each tick handles up to {@value #BATCH} due messages, each in its own transaction: claim one
- * due row with {@code FOR UPDATE SKIP LOCKED}, hand it to the gateway, mark the outcome, commit. So
- * a crash re-sends at most the one message in flight, and two dispatchers never hold the same row.
- * A refused message is tried again after 2, 4, 8 and 16 seconds, measured from the instant the tick
- * was given, and the fifth refusal marks it FAILED with {@code DELIVERY_FAILED}. A refusal the
- * gateway calls permanent, such as AWS's for a number the SMS sandbox has not verified, marks it
- * FAILED with {@code DELIVERY_FAILED} on that attempt, since sending it again cannot succeed; a
- * gateway that throws counts as a retryable refusal. Either way {@code last_error} holds the
- * refusal's code. If marking a message fails, it is set FAILED with {@code DISPATCH_ERROR} and
- * {@code MARK_FAILED} in a transaction of its own, so a poisoned row is sent at most once more and
- * never loops, and the rest of the batch carries on. An appointment never depends on its messages:
- * delivery changes only the message.
+ * <p>Each tick handles up to {@code batch-size} due messages, twenty by default, each in its own
+ * transaction: claim one due row with {@code FOR UPDATE SKIP LOCKED}, hand it to the gateway, mark
+ * the outcome, commit. So a crash re-sends at most the one message in flight, and two dispatchers
+ * never hold the same row. A refused message is tried again after the {@link RetryBackoff}'s wait,
+ * by default up to 2, 4, 8 and 16 seconds less a random share of at most a fifth, measured from the
+ * instant the tick was given, and the refusal of attempt {@code max-attempts}, the fifth by
+ * default, marks it FAILED with {@code DELIVERY_FAILED}. A refusal the gateway calls permanent,
+ * such as AWS's for a number the SMS sandbox has not verified, marks it FAILED with {@code
+ * DELIVERY_FAILED} on that attempt, since sending it again cannot succeed; a gateway that throws
+ * counts as a retryable refusal. Either way {@code last_error} holds the refusal's code. If marking
+ * a message fails, it is set FAILED with {@code DISPATCH_ERROR} and {@code MARK_FAILED} in a
+ * transaction of its own, so a poisoned row is sent at most once more and never loops, and the rest
+ * of the batch carries on. An appointment never depends on its messages: delivery changes only the
+ * message. The settings are {@code branchbook.dispatcher}'s ({@link DispatcherProperties}).
+ *
+ * <p>Before each claim it asks the {@link DeliveryCircuit} for a permission. While the circuit is
+ * open, because the provider keeps failing, the tick ends there: nothing is claimed, so every
+ * message stays PENDING with no attempt spent, and an outage of the provider cannot use up a
+ * customer's attempts. Once the circuit's wait is over, the next ticks send a few messages as
+ * probes, and their outcome closes the circuit or opens it again. A permission the tick does not
+ * use, because nothing was due or the message was superseded, is given back.
  *
  * <p>A cancellation outlives its appointment, which the cancel deleted, only until it is final
  * (BR-14). So where a confirmation would be marked SENT, FAILED with {@code DELIVERY_FAILED}, or
@@ -63,12 +74,6 @@ public class NotificationDispatcher {
 
   private static final Logger log = LoggerFactory.getLogger(NotificationDispatcher.class);
 
-  /** The most messages one tick handles, so one tick never runs for long. */
-  static final int BATCH = 20;
-
-  /** The attempt whose refusal, even a retryable one, marks a message FAILED. */
-  static final int MAX_ATTEMPTS = 5;
-
   /** What a message that could not be marked records as its last error. */
   static final String MARK_FAILED = "MARK_FAILED";
 
@@ -80,13 +85,22 @@ public class NotificationDispatcher {
   private final MessageGateway gateway;
   private final AppointmentDirectory appointments;
   private final OutboxPendingGauge pending;
+  private final OutboxHealthGauges health;
+  private final DeliveryCircuit circuit;
+  private final RetryBackoff backoff;
+  private final int batchSize;
+  private final int maxAttempts;
 
   NotificationDispatcher(
       PlatformTransactionManager transactionManager,
       NotificationMessageRepository messages,
       MessageGateway gateway,
       AppointmentDirectory appointments,
-      OutboxPendingGauge pending) {
+      OutboxPendingGauge pending,
+      OutboxHealthGauges health,
+      DeliveryCircuit circuit,
+      RetryBackoff backoff,
+      DispatcherProperties settings) {
     TransactionTemplate template = new TransactionTemplate(transactionManager);
     template.setIsolationLevel(TransactionDefinition.ISOLATION_READ_COMMITTED);
     template.setName("NotificationDispatcher.dispatchNext");
@@ -95,21 +109,32 @@ public class NotificationDispatcher {
     this.gateway = gateway;
     this.appointments = appointments;
     this.pending = pending;
+    this.health = health;
+    this.circuit = circuit;
+    this.backoff = backoff;
+    this.batchSize = settings.batchSize();
+    this.maxAttempts = settings.maxAttempts();
   }
 
   /**
-   * Runs one tick: delivers the messages that are due, up to {@value #BATCH}, then counts those
-   * still PENDING for the {@code outbox.pending} gauge.
+   * Runs one tick: delivers the messages that are due, up to {@code batch-size}, unless the circuit
+   * is open, then refreshes the {@code outbox.pending} gauge and the {@link OutboxHealthGauges}.
    *
    * @param now the current instant, from the application's clock; the tests pass their own
    * @return how many messages the tick handled
    */
   public int runOnce(Instant now) {
     int handled = 0;
-    while (handled < BATCH) {
+    while (handled < batchSize) {
+      if (!circuit.tryAcquire()) {
+        // Open: nothing is claimed, so no message spends an attempt on a provider that is down.
+        break;
+      }
       AtomicReference<NotificationMessage> claimed = new AtomicReference<>();
+      AtomicBoolean called = new AtomicBoolean();
       try {
-        if (!Boolean.TRUE.equals(transaction.execute(status -> dispatchNext(now, claimed)))) {
+        if (!Boolean.TRUE.equals(
+            transaction.execute(status -> dispatchNext(now, claimed, called)))) {
           break;
         }
       } catch (RuntimeException | Error failure) {
@@ -126,15 +151,24 @@ public class NotificationDispatcher {
         if (!marked) {
           break;
         }
+      } finally {
+        if (!called.get()) {
+          circuit.release();
+        }
       }
       handled++;
     }
     pending.refresh();
+    health.tickCompleted();
     return handled;
   }
 
-  /** Claims, sends and marks one due message; returns false when none is due. */
-  private boolean dispatchNext(Instant now, AtomicReference<NotificationMessage> claimed) {
+  /**
+   * Claims, sends and marks one due message; returns false when none is due. Sets {@code called}
+   * once the gateway has been called and its outcome given to the circuit.
+   */
+  private boolean dispatchNext(
+      Instant now, AtomicReference<NotificationMessage> claimed, AtomicBoolean called) {
     Optional<NotificationMessage> due = messages.claimNextDue(now);
     if (due.isEmpty()) {
       return false;
@@ -151,7 +185,7 @@ public class NotificationDispatcher {
       }
       claimed.set(message);
       int attempts = message.attempts() + 1;
-      switch (send(message)) {
+      switch (send(message, called)) {
         case Accepted accepted -> {
           if (keptOnceFinal(message)) {
             messages.markSent(message.id(), attempts, accepted.providerMessageId(), now);
@@ -165,7 +199,7 @@ public class NotificationDispatcher {
             deleteFinal(message);
           }
         }
-        case Refused refused when refused.permanent() || attempts >= MAX_ATTEMPTS -> {
+        case Refused refused when refused.permanent() || attempts >= maxAttempts -> {
           if (keptOnceFinal(message)) {
             messages.markFailed(message.id(), attempts, "DELIVERY_FAILED", refused.errorCode());
           }
@@ -179,13 +213,13 @@ public class NotificationDispatcher {
           }
         }
         case Refused refused -> {
-          Duration wait = backoffAfter(attempts);
+          Duration wait = backoff.after(attempts);
           messages.markRetry(message.id(), attempts, now.plus(wait), refused.errorCode());
           log.info(
               "outbox.retry messageId={} attempts={} retryInSeconds={} code={}",
               message.id(),
               attempts,
-              wait.toSeconds(),
+              seconds(wait),
               refused.errorCode());
         }
       }
@@ -208,24 +242,30 @@ public class NotificationDispatcher {
   }
 
   /**
-   * A gateway that throws is treated as one that refused retryably, so the message is tried again.
+   * Calls the gateway and gives the circuit its outcome. A gateway that throws is treated as one
+   * that refused retryably, so the message is tried again; an {@link Error} is recorded as a
+   * failure and thrown on.
    */
-  private Delivery send(NotificationMessage message) {
+  private Delivery send(NotificationMessage message, AtomicBoolean called) {
+    long start = System.nanoTime();
+    Delivery delivery;
     try {
-      return gateway.send(OutgoingMessage.of(message));
+      delivery = gateway.send(OutgoingMessage.of(message));
     } catch (RuntimeException failure) {
-      return Refused.retryable(GATEWAY_ERROR);
+      delivery = Refused.retryable(GATEWAY_ERROR);
+    } catch (Error failure) {
+      called.set(true);
+      circuit.recordError(Duration.ofNanos(System.nanoTime() - start), failure);
+      throw failure;
     }
+    called.set(true);
+    circuit.record(Duration.ofNanos(System.nanoTime() - start), delivery);
+    return delivery;
   }
 
-  /**
-   * The wait after the given failed attempt: 2, 4, 8 and then 16 seconds.
-   *
-   * @param attempts the attempts made so far, from 1 to 4
-   * @return the wait before the next attempt
-   */
-  static Duration backoffAfter(int attempts) {
-    return Duration.ofSeconds(1L << attempts);
+  /** A wait in seconds to the millisecond, without trailing zeros: {@code 2} or {@code 1.734}. */
+  private static String seconds(Duration wait) {
+    return BigDecimal.valueOf(wait.toMillis(), 3).stripTrailingZeros().toPlainString();
   }
 
   /** An out-of-memory or similar error ends the tick once the message is marked. */

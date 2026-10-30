@@ -134,10 +134,46 @@ branchbook:
   dispatcher:
     # The dispatcher delivers PENDING messages through the SMS gateway that branchbook.sms below chooses (BR-17):
     # every 2 seconds, on its own thread, up to 20 messages a tick. The tests switch it off and drive it themselves.
-    enabled: true
-    interval: PT2S
+    enabled: ${BRANCHBOOK_DISPATCHER_ENABLED:true}
+    interval: ${BRANCHBOOK_DISPATCHER_INTERVAL:PT2S}
     # How long the simulated gateway takes to accept a message, so the confirmation page shows "Sending" first.
-    simulated-latency: PT0.15S
+    simulated-latency: ${BRANCHBOOK_DISPATCHER_SIMULATED_LATENCY:PT0.15S}
+    # The most messages one tick handles, so one tick never holds the dispatcher's thread for long
+    # (BRANCHBOOK_DISPATCHER_BATCH_SIZE, 1 to 1000).
+    batch-size: ${BRANCHBOOK_DISPATCHER_BATCH_SIZE:20}
+    # The attempt whose refusal, even a retryable one, marks a message FAILED with DELIVERY_FAILED
+    # (BRANCHBOOK_DISPATCHER_MAX_ATTEMPTS). At most 5, the most notification_messages.attempts allows; anything else
+    # stops start-up.
+    max-attempts: ${BRANCHBOOK_DISPATCHER_MAX_ATTEMPTS:5}
+    backoff:
+      # The wait after a retryable refusal is base after the first attempt, times multiplier after each next one, at
+      # most cap: 2, 4, 8 and 16 seconds by default, so a message reaches FAILED within 30 seconds. A random share
+      # of each wait, up to jitter of it, is then taken off, so messages refused together during an outage are not
+      # all due again at once; jitter never lengthens a wait, so cap stays a true ceiling. Base must be positive,
+      # multiplier at least 1, cap at least base and jitter from 0 up to, but not including, 1.
+      base: ${BRANCHBOOK_DISPATCHER_BACKOFF_BASE:PT2S}
+      multiplier: ${BRANCHBOOK_DISPATCHER_BACKOFF_MULTIPLIER:2}
+      cap: ${BRANCHBOOK_DISPATCHER_BACKOFF_CAP:PT16S}
+      jitter: ${BRANCHBOOK_DISPATCHER_BACKOFF_JITTER:0.2}
+    circuit-breaker:
+      # Stops the dispatcher calling an SMS provider that keeps failing (Resilience4j's breaker). Open, it claims no
+      # message, so every message stays PENDING with no attempt spent until the provider recovers. A retryable
+      # refusal or a gateway that throws is a failure; a permanent refusal, the answer of a working provider, is
+      # not, and neither is the simulated gateway's refusal of numbers ending 0000. Off, every call goes through
+      # (BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_ENABLED).
+      enabled: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_ENABLED:true}
+      # It judges the last sliding-window-size calls once at least minimum-number-of-calls are made, and opens when
+      # failure-rate-threshold percent of them failed, or slow-call-rate-threshold percent took longer than
+      # slow-call-duration. The AWS gateway gives up on a call after 10 seconds, which comes back as a failure.
+      sliding-window-size: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_SLIDING_WINDOW_SIZE:10}
+      minimum-number-of-calls: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_MINIMUM_NUMBER_OF_CALLS:5}
+      failure-rate-threshold: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_FAILURE_RATE_THRESHOLD:50}
+      slow-call-rate-threshold: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_SLOW_CALL_RATE_THRESHOLD:100}
+      slow-call-duration: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_SLOW_CALL_DURATION:PT8S}
+      # How long it stays open before the dispatcher sends permitted-calls-in-half-open-state messages as probes;
+      # they close it if they pass and open it again if they fail.
+      wait-in-open-state: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_WAIT_IN_OPEN_STATE:PT30S}
+      permitted-calls-in-half-open-state: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_PERMITTED_CALLS_IN_HALF_OPEN_STATE:2}
   sms:
     # Which gateway sends each SMS. simulated, the default, sends nothing, as in docker compose, make dev-api and the
     # tests. aws sends a real SMS through AWS End User Messaging SMS to every number outside the published demo block,
@@ -241,6 +277,22 @@ branchbook:
       # the branches open (BR-3). A six-field Spring cron expression and the zone it is read in.
       cron: "${BRANCHBOOK_JOBS_HOLIDAY_CHECK_CRON:0 0 6 * * *}"
       zone: ${BRANCHBOOK_JOBS_HOLIDAY_CHECK_ZONE:Africa/Johannesburg}
+  metrics:
+    cloudwatch:
+      # Exports the meters named in include to Amazon CloudWatch, where the alarms on the outbox and the circuit
+      # breaker read them. Off, as locally and in the tests, nothing builds an AWS client or looks for credentials;
+      # each deployed environment switches it on in its task definition.
+      enabled: ${BRANCHBOOK_METRICS_CLOUDWATCH_ENABLED:false}
+      # The namespace the metrics are put in; each environment sets its own (BranchBook/staging, BranchBook/production)
+      # so its alarms read only its own meters, and the task role may write to that namespace alone.
+      namespace: ${BRANCHBOOK_METRICS_CLOUDWATCH_NAMESPACE:BranchBook}
+      # How often the meters are sent: CloudWatch's standard one-minute resolution.
+      step: ${BRANCHBOOK_METRICS_CLOUDWATCH_STEP:PT1M}
+      # The region to send to. Empty leaves it to the AWS SDK's default chain, which on Amazon ECS is the task's own.
+      region: ${BRANCHBOOK_METRICS_CLOUDWATCH_REGION:}
+      # The meter-name prefixes that are exported, comma-separated. Every other meter stays out, so the JVM's and the
+      # web server's many series cost nothing in CloudWatch.
+      include: ${BRANCHBOOK_METRICS_CLOUDWATCH_INCLUDE:outbox.,resilience4j.circuitbreaker.,appointments.booked}
 
 logging:
   pattern:
