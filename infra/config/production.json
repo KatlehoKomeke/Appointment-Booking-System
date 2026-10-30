@@ -113,6 +113,9 @@
     "branchCode": "SAN",
     "serviceCode": "FICA"
   },
+  "faultInjection": {
+    "enabled": true
+  },
   "appEnvironment": {
     "SPRING_PROFILES_ACTIVE": "prod",
     "BRANCHBOOK_MIGRATE_ON_START": "false",

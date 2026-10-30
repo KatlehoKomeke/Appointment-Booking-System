@@ -19,6 +19,7 @@ import * as wafv2 from 'aws-cdk-lib/aws-wafv2';
 import { Construct } from 'constructs';
 import { CaptchaApiKey } from './captcha-api-key';
 import { EnvironmentConfig, retentionDays } from './config';
+import { FaultInjection } from './constructs/fault-injection';
 import { Observability, allowMetricsExport, metricsExportEnvironment } from './constructs/observability';
 import { DATABASE_NAME, POSTGRES_PORT, SUBNET_GROUPS } from './data-stack';
 import { SchemaMigration } from './schema-migration';
@@ -144,6 +145,9 @@ export class AppStack extends Stack {
 
   /** The app's metrics, the alarms on them and on AWS's metrics, the dashboard and the canary. */
   public readonly observability: Observability;
+
+  /** The fault injection experiment templates, where the environment has them. */
+  public readonly faultInjection?: FaultInjection;
 
   /** The web ACL in front of the load balancer. */
   public readonly webAcl: wafv2.CfnWebACL;
@@ -403,6 +407,14 @@ export class AppStack extends Stack {
       url: this.url,
       existingAlarms: [alarms.serverErrors, alarms.noHealthyTask, alarms.databaseStorage],
     });
+    if (config.faultInjection.enabled) {
+      this.faultInjection = new FaultInjection(this, 'FaultInjection', {
+        config,
+        service: this.service,
+        database: this.database,
+        stopConditions: [alarms.serverErrors, alarms.noHealthyTask],
+      });
+    }
 
     new CfnOutput(this, 'Url', { value: this.url, description: `The ${config.name} environment` });
     new CfnOutput(this, 'LogGroup', {

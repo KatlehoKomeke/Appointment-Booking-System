@@ -1,7 +1,7 @@
 /**
  * Unit tests for what an operator watches and rehearses in each environment: the app's metrics export, the alarms,
- * the dashboard and the canary (lib/constructs/observability.ts), built from infra/config exactly as `cdk synth`
- * builds them.
+ * the dashboard, the canary (lib/constructs/observability.ts) and the fault injection templates
+ * (lib/constructs/fault-injection.ts), built from infra/config exactly as `cdk synth` builds them.
  */
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { EnvironmentConfig, EnvironmentName, loadEnvironmentConfig, loadRegistryConfig } from '../lib/config';
@@ -323,10 +323,65 @@ describe.each(['production', 'staging'] as const)('%s', (name) => {
     });
   });
 
+  test('stops one of the service\'s tasks, stopped by the 5xx and no-healthy-task alarms', () => {
+    app.hasResourceProperties('AWS::FIS::ExperimentTemplate', {
+      Targets: {
+        ServiceTasks: {
+          ResourceType: 'aws:ecs:task',
+          Parameters: { cluster: { Ref: Match.stringLikeRegexp('^Cluster') }, service: { 'Fn::GetAtt': [Match.stringLikeRegexp('^Service'), 'Name'] } },
+          SelectionMode: 'COUNT(1)',
+        },
+      },
+      Actions: { StopTask: Match.objectLike({ ActionId: 'aws:ecs:stop-task', Targets: { Tasks: 'ServiceTasks' } }) },
+      StopConditions: [
+        { Source: 'aws:cloudwatch:alarm', Value: { 'Fn::GetAtt': [Match.stringLikeRegexp('^ServerErrors'), 'Arn'] } },
+        { Source: 'aws:cloudwatch:alarm', Value: { 'Fn::GetAtt': [Match.stringLikeRegexp('^NoHealthyTask'), 'Arn'] } },
+      ],
+    });
+  });
+
+  test('lets FIS assume its role only for this account\'s experiments, and stop only this cluster\'s tasks', () => {
+    app.hasResourceProperties('AWS::IAM::Role', {
+      AssumeRolePolicyDocument: {
+        Statement: [
+          Match.objectLike({
+            Principal: { Service: 'fis.amazonaws.com' },
+            Condition: { StringEquals: { 'aws:SourceAccount': Match.anyValue() }, ArnLike: { 'aws:SourceArn': Match.anyValue() } },
+          }),
+        ],
+      },
+    });
+    app.hasResourceProperties('AWS::IAM::Policy', {
+      Roles: [{ Ref: Match.stringLikeRegexp('^FaultInjectionRole') }],
+      PolicyDocument: {
+        Statement: Match.arrayWith([
+          Match.objectLike({
+            Action: ['ecs:DescribeTasks', 'ecs:StopTask'],
+            Condition: { ArnEquals: { 'ecs:cluster': { 'Fn::GetAtt': [Match.stringLikeRegexp('^Cluster'), 'Arn'] } } },
+          }),
+        ]),
+      },
+    });
+  });
 });
 
 describe('production', () => {
   const { app } = built.production;
+
+  test('fails the Multi-AZ database over to its standby, under the same stop conditions', () => {
+    app.resourceCountIs('AWS::FIS::ExperimentTemplate', 2);
+    app.hasResourceProperties('AWS::FIS::ExperimentTemplate', {
+      Targets: { Database: Match.objectLike({ ResourceType: 'aws:rds:db', SelectionMode: 'ALL' }) },
+      Actions: {
+        Failover: Match.objectLike({
+          ActionId: 'aws:rds:reboot-db-instances',
+          Parameters: { forceFailover: 'true' },
+          Targets: { DBInstances: 'Database' },
+        }),
+      },
+      StopConditions: Match.arrayWith([Match.objectLike({ Value: { 'Fn::GetAtt': [Match.stringLikeRegexp('^NoHealthyTask'), 'Arn'] } })]),
+    });
+  });
 
   test('keeps the canary\'s artifacts when the stack is deleted', () => {
     app.hasResource('AWS::S3::Bucket', { DeletionPolicy: 'Retain' });
@@ -337,16 +392,24 @@ describe('production', () => {
 describe('staging', () => {
   const { app } = built.staging;
 
+  test('has no failover experiment, since its database is Single-AZ', () => {
+    app.resourceCountIs('AWS::FIS::ExperimentTemplate', 1);
+    expect(JSON.stringify(app.findResources('AWS::FIS::ExperimentTemplate'))).not.toContain('aws:rds:reboot-db-instances');
+    expect(JSON.stringify(app.findResources('AWS::IAM::Policy'))).not.toContain('rds:RebootDBInstance');
+  });
+
   test('empties and deletes the canary\'s artifacts with the stack', () => {
     app.resourceCountIs('Custom::S3AutoDeleteObjects', 1);
   });
 });
 
 describe('switched off', () => {
-  test('creates no canary when the configuration turns it off', () => {
+  test('creates no experiment template, role or canary when the configuration turns them off', () => {
     const production = built.production.config;
-    const app = build({ ...production, canary: { ...production.canary, enabled: false } });
+    const app = build({ ...production, faultInjection: { enabled: false }, canary: { ...production.canary, enabled: false } });
+    app.resourceCountIs('AWS::FIS::ExperimentTemplate', 0);
     app.resourceCountIs('AWS::Synthetics::Canary', 0);
+    expect(JSON.stringify(app.findResources('AWS::IAM::Role'))).not.toContain('fis.amazonaws.com');
     // The dashboard and the other alarms stay.
     app.resourceCountIs('AWS::CloudWatch::Dashboard', 1);
     app.resourceCountIs('AWS::CloudWatch::Alarm', 13);

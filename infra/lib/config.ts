@@ -316,6 +316,12 @@ export interface CanaryConfig {
   readonly serviceCode: string;
 }
 
+/** The AWS FIS experiment templates (infra/lib/constructs/fault-injection.ts). */
+export interface FaultInjectionConfig {
+  /** Whether the templates exist. A template does nothing until someone starts an experiment from it. */
+  readonly enabled: boolean;
+}
+
 /** Everything one environment needs, as read from `infra/config/<name>.json`. */
 export interface EnvironmentConfig {
   /** The environment's name; it must match the file's name. */
@@ -352,6 +358,8 @@ export interface EnvironmentConfig {
   readonly monitoring: MonitoringConfig;
   /** The outside-in canary. */
   readonly canary: CanaryConfig;
+  /** The fault injection experiment templates. */
+  readonly faultInjection: FaultInjectionConfig;
   /**
    * The app's own settings, passed to every task as environment variables. Secrets never go here: they come from
    * Secrets Manager. Neither do the variables in {@link COMPUTED_VARIABLES}.
@@ -628,6 +636,9 @@ export function parseEnvironmentConfig(raw: unknown, source: string): Environmen
       autoDeleteArtifacts: s.boolean('autoDeleteArtifacts'),
       branchCode: s.string('branchCode', /^[A-Z]{2,8}$/, 'a branch code of 2 to 8 capital letters such as SAN'),
       serviceCode: s.string('serviceCode', /^[A-Z]{2,12}$/, 'a service code of 2 to 12 capital letters such as FICA'),
+    })),
+    faultInjection: root.section('faultInjection', (s) => ({
+      enabled: s.boolean('enabled'),
     })),
     appEnvironment: root.stringMap('appEnvironment'),
   };
