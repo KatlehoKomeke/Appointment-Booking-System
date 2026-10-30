@@ -184,24 +184,35 @@ their own machine, or with the placeholder `alerts@example.com` in the credentia
 never sets it, so it cannot synthesise that stack, let alone deploy it. That guard lives in the repository,
 so a change to the repository can remove it.
 
-**Not prevented by IAM today:**
+**Built in code, not yet deployed: the IAM limits on a deployment** ([guardrails-stack.ts](lib/guardrails-stack.ts),
+[account-stack.ts](lib/account-stack.ts); the steps are under [First-time setup](#first-time-setup)):
 
-- `AssumeCdkBootstrapRolesOnly` allows `cdk-hnb659fds-*`, which also matches the `us-east-1` bootstrap roles.
-- The cfn-exec role keeps CDK's default `AdministratorAccess`, because the bootstrap commands under
-  [First-time setup](#first-time-setup) pass no `--cloudformation-execution-policies`. A stack the pipeline deploys
-  can therefore create any resource, IAM included.
+- Each environment's deploy role assumes only its own bootstrap's roles in `af-south-1` (`cdk-bbstg-*` for staging,
+  `cdk-hnb659fds-*` for production), never the `us-east-1` ones.
+- Each bootstrap's execution role carries `branchbook-cdk-cfn-exec-<env>` instead of `AdministratorAccess`: the
+  application services, and IAM only on that environment's stacks' roles, which must carry
+  `branchbook-permissions-boundary`. The boundary denies IAM users and keys, leaving or changing the boundary,
+  Organizations and account changes, tampering with CloudTrail, GuardDuty, AWS Config and Security Hub, and borrowing
+  an unbounded role.
+- A deploy scope keeps each bootstrap's deploy role off the other environment's stacks and the administrator's.
+- So `BranchbookAccount` and `BranchbookGuardrails` are out of the pipeline's reach in IAM, not only in code: a
+  workflow that set `BRANCHBOOK_ALERT_EMAIL` would find that no deploy role can reach the `us-east-1` bootstrap, or
+  run CloudFormation on either stack.
+
+**Not prevented by IAM, even then:**
+
+- Both environments share one account, so a stack one environment deploys could still reach the other's resources
+  through the services the execution policy allows (a security group rule, a DNS record in the shared hosted zone).
+  Only separate accounts would close that.
+- A role a deployment creates may still be given any permissions inside the boundary, and a trust policy naming
+  another account: the boundary stops an account takeover, not access to the data.
 - `main` requires its checks to pass but no review ([docs/delivery.md](../docs/delivery.md#known-gaps)), so a
-  workflow merged to `main` that set `BRANCHBOOK_ALERT_EMAIL` could deploy `BranchbookAccount`.
+  change merged to `main` can still change what each environment's own stacks do.
 
-What limits this today is the repository, not AWS: it has one collaborator, who is an administrator, and the
-`aws-demo` branch policy admits only `main` and `v*` tags.
+What else limits this is the repository: it has one collaborator, who is an administrator, and each GitHub
+environment's branch policy admits only `main`.
 
-**Hardening options, not done:**
-
-- Scope `AssumeCdkBootstrapRolesOnly` to the bootstrap roles of `af-south-1`, whose names end in `-af-south-1`.
-- Bootstrap with a custom execution policy (`--cloudformation-execution-policies`) or a permissions boundary, so
-  cfn-exec cannot create or widen IAM roles.
-- Require a review on `main`, and add a `CODEOWNERS` entry for `.github/` and `infra/`.
+**Option, not done:** require a review on `main`, and add a `CODEOWNERS` entry for `.github/` and `infra/`.
 
 ## Environments: staging and production
 
@@ -539,6 +550,7 @@ npm run lint        # ESLint, including TSDoc on every export
 npm run build       # type-check
 npm test            # unit tests on the synthesised templates, cdk-nag included
 BRANCHBOOK_ALERT_EMAIL=alerts@example.com \
+BRANCHBOOK_GUARDRAILS=true \
 BRANCHBOOK_ENV=production \
 BRANCHBOOK_IMAGE_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
   npx cdk synth     # render CloudFormation without touching AWS; repeat with BRANCHBOOK_ENV=staging
@@ -548,11 +560,15 @@ The lint rules are in [eslint.config.mjs](eslint.config.mjs). They use typescrip
 compiler API that TypeScript 7 does not yet provide, so this package uses TypeScript 6.0, the same as `web/`.
 
 `BRANCHBOOK_ALERT_EMAIL` is where budget alerts go, read from the environment so that no personal address is ever
-committed, and `BRANCHBOOK_ENV` asks for one environment ([Configuration](#configuration)). Each brings its stacks
-into the app; `BranchbookRegistry` is always in it. Any
-placeholder address works for `synth`; use the real one only when deploying. The budget's amount,
-`monthlyBudgetUsd` in [cdk.json](cdk.json), lives in `BranchbookAccount`, which the pipeline never deploys: after
-changing it, the administrator runs `cdk deploy BranchbookAccount` with `BRANCHBOOK_ALERT_EMAIL` set.
+committed; it brings `BranchbookAccount` into the app. `BRANCHBOOK_GUARDRAILS=true` brings `BranchbookGuardrails`,
+and `BRANCHBOOK_ENV` one environment's three stacks ([Configuration](#configuration)). `BranchbookRegistry` is always
+in the app, and with none of the three set it is the only stack ([lib/app.ts](lib/app.ts), proved by
+[app.test.ts](test/app.test.ts)). Any placeholder address works for `synth`; use the real one only when deploying.
+The account-level settings (the GitHub repository's IDs, each environment's GitHub environment and bootstrap
+qualifier, the budget and the guardrails) are in [config/account.json](config/account.json); everything about an
+environment itself is read from its own file, never repeated there. Only an administrator deploys the two stacks they
+feed: after changing one, run `cdk deploy BranchbookAccount` with `BRANCHBOOK_ALERT_EMAIL` set, or
+`cdk deploy BranchbookGuardrails` with `BRANCHBOOK_GUARDRAILS=true`.
 
 ## First-time setup
 
@@ -579,48 +595,116 @@ These steps need you personally, and only happen once.
    `aws login` stores temporary credentials and refreshes them; no access key is created. Run it again when the
    session expires.
 
-5. **Bootstrap CDK** in `us-east-1`, the Region of `BranchbookAccount`. This creates the roles, S3 bucket and ECR
-   repository CDK deploys through; it trusts no other AWS account:
+5. **Bootstrap CDK in `us-east-1`**, the Region of `BranchbookAccount`. It keeps CDK's default execution policy:
+   only an administrator deploys through it, and no deploy role can assume its roles.
 
    ```bash
-   npx cdk bootstrap \
-     "aws://$(aws sts get-caller-identity --profile branchbook-admin --query Account --output text)/us-east-1" \
-     --profile branchbook-admin --tags project=branchbook
+   ACCOUNT=$(aws sts get-caller-identity --profile branchbook-admin --query Account --output text)
+   npx cdk bootstrap "aws://$ACCOUNT/us-east-1" --profile branchbook-admin --tags project=branchbook
    ```
 
-   Bootstrap `af-south-1` the same way: the pipeline deploys there. Neither command passes
-   `--cloudformation-execution-policies`, so the cfn-exec role keeps CDK's default `AdministratorAccess`
-   ([Who can change what in AWS](#who-can-change-what-in-aws)).
+6. **Prepare for the guardrails.** AWS Config records through its service-linked role, which the stack does not
+   create because creating it fails if it already exists. Create it once, and check that `af-south-1` has no GuardDuty
+   detector, Security Hub or Config recorder yet: the stack creates each, and AWS allows one.
 
-6. **Deploy `BranchbookAccount`:**
+   ```bash
+   aws iam get-role --role-name AWSServiceRoleForConfig --profile branchbook-admin >/dev/null 2>&1 \
+     || aws iam create-service-linked-role --aws-service-name config.amazonaws.com --profile branchbook-admin
+   aws guardduty list-detectors --region af-south-1 --profile branchbook-admin            # expect []
+   aws configservice describe-configuration-recorders --region af-south-1 --profile branchbook-admin
+   aws securityhub describe-hub --region af-south-1 --profile branchbook-admin            # expect an error
+   ```
+
+7. **Deploy `BranchbookGuardrails`.** It runs with your own credentials, not the bootstrap roles, and creates the
+   audit trail, the detective controls, the permissions boundary and one execution policy per environment:
+
+   ```bash
+   BRANCHBOOK_GUARDRAILS=true npx cdk deploy BranchbookGuardrails --profile branchbook-admin
+   ```
+
+8. **Bootstrap `af-south-1` twice**, once per environment, each with its own qualifier, toolkit stack and execution
+   policy, so one environment's pipeline can never deploy through the other's roles. Production keeps CDK's default
+   qualifier, `hnb659fds`, and toolkit stack, `CDKToolkit`, which its live stacks were deployed with; staging uses
+   `bbstg` and `CDKToolkitStaging`. The qualifiers are `deploy.environments.<env>.cdkBootstrapQualifier` in
+   [config/account.json](config/account.json).
+
+   ```bash
+   npx cdk bootstrap "aws://$ACCOUNT/af-south-1" --profile branchbook-admin --tags project=branchbook \
+     --cloudformation-execution-policies "arn:aws:iam::$ACCOUNT:policy/branchbook-cdk-cfn-exec-production"
+   npx cdk bootstrap "aws://$ACCOUNT/af-south-1" --profile branchbook-admin --tags project=branchbook \
+     --qualifier bbstg --toolkit-stack-name CDKToolkitStaging \
+     --cloudformation-execution-policies "arn:aws:iam::$ACCOUNT:policy/branchbook-cdk-cfn-exec-staging"
+   ```
+
+   Each execution policy allows the services the application stacks use, but IAM only on roles and managed policies
+   named after that environment's own stacks (`BranchbookData-*`, `BranchbookApp-*` and `BranchbookRelease-*` for
+   production; `BranchbookStaging*-*` and `BranchbookRegistry-*` for staging), and creates or grants a role only with
+   the permissions boundary `branchbook-permissions-boundary` attached. [cdk.json](cdk.json) attaches that boundary to
+   every role the application stacks create (`@aws-cdk/core:permissionsBoundary`).
+   `BranchbookRegistry` belongs to staging because the pipeline creates it in its first job, in the `staging`
+   environment, before any environment is deployed; production only pulls the image by digest and never changes it.
+   Pass the staging qualifier and toolkit stack name on every later `cdk bootstrap` for staging, or the command
+   updates production's bootstrap instead.
+
+9. **Deploy `BranchbookAccount`**, after both bootstraps: besides the deploy roles, it attaches a deploy scope to each
+   bootstrap's deploy role, which must therefore exist. The bootstrap lets that role run CloudFormation on any stack;
+   the scope denies it every stack of the other environment and the two administrator stacks.
 
    ```bash
    BRANCHBOOK_ALERT_EMAIL=<your address> \
      npx cdk deploy BranchbookAccount --profile branchbook-admin
    ```
 
-7. **Tell GitHub about it (console).** In the repository settings, under **Environments**, create `aws-demo`. Under
-   **Deployment branches and tags**, choose **Selected branches and tags**, and add `main` (branch) and `v*` (tag).
-   The trust policy names the environment, not a branch, so this rule is what keeps a feature branch out. Check it:
+10. **Tell GitHub about it (console).** In the repository settings, under **Environments**, create `staging` and
+    `production`. In each, under **Deployment branches and tags**, choose **Selected branches and tags** and add
+    `main`; give `production` a required reviewer. The trust policies name the environment, not a branch, so this
+    rule is what keeps a feature branch out. Check it:
 
-   ```bash
-   gh api repos/KatlehoKomeke/Appointment-Booking-System/environments/aws-demo/deployment-branch-policies \
-     --jq '.branch_policies[] | "\(.type) \(.name)"'
-   ```
+    ```bash
+    gh api repos/KatlehoKomeke/Appointment-Booking-System/environments/staging/deployment-branch-policies \
+      --jq '.branch_policies[] | "\(.type) \(.name)"'
+    ```
 
-   Inside that environment, add the secret `AWS_DEPLOY_ROLE_ARN` with the role ARN. An environment secret is only
-   readable by jobs that declare the environment, which is tighter than a repository-wide secret. This copies the ARN
-   to the clipboard without printing your account ID:
+    In each environment, add the secret `AWS_DEPLOY_ROLE_ARN` with that environment's role ARN. An environment
+    secret is only readable by jobs that declare the environment. This copies staging's ARN to the clipboard without
+    printing your account ID (use `ProductionDeployRoleArn` for production):
 
-   ```bash
-   aws cloudformation describe-stacks --stack-name BranchbookAccount \
-     --region us-east-1 --profile branchbook-admin \
-     --query "Stacks[0].Outputs[?OutputKey=='DeployRoleArn'].OutputValue" \
-     --output text | tr -d '\n' | pbcopy
-   ```
+    ```bash
+    aws cloudformation describe-stacks --stack-name BranchbookAccount \
+      --region us-east-1 --profile branchbook-admin \
+      --query "Stacks[0].Outputs[?OutputKey=='StagingDeployRoleArn'].OutputValue" \
+      --output text | tr -d '\n' | pbcopy
+    ```
 
-8. **Prove the connection.** Under **Actions**, run **aws-connection-check**. It assumes the role and reports which
-   role it obtained, with the account ID masked.
+11. **Prove the connection.** Under **Actions**, run **aws-connection-check**. It assumes the role and reports which
+    role it obtained, with the account ID masked.
+
+### Hardening the account that already runs production
+
+The account deployed on 2026-10-26 has both `CDKToolkit` stacks with CDK's default `AdministratorAccess` execution
+role, the single role `branchbook-github-deploy` and production's roles without the boundary. Steps 6 and 7 above
+apply unchanged. Then, in this order:
+
+1. **Bootstrap staging** with the second command of step 8 (`--qualifier bbstg`). It creates new roles only.
+2. **Deploy `BranchbookAccount`** (step 9) and store both role ARNs in the new GitHub environments (step 10). This
+   deletes `branchbook-github-deploy`, so the old pipeline stops at sign-in until the new one is merged: do it with
+   that merge.
+3. **Let the pipeline deploy production once** under the old execution role. That deploy adds the boundary to each of
+   production's thirteen roles, an in-place update (`PermissionsBoundary` needs no replacement). Check one:
+   `aws iam get-role --role-name <a BranchbookApp-... role> --query Role.PermissionsBoundary --profile branchbook-admin`.
+4. **Harden production's bootstrap** with the first command of step 8, then re-run the pipeline: it must deploy
+   production with no change.
+
+**Rollback.** `cdk bootstrap` keeps a parameter's previous value unless it is passed, so restore the default execution
+policy by passing it explicitly; the roles keep their names, and the stacks continue as before:
+
+```bash
+npx cdk bootstrap "aws://$ACCOUNT/af-south-1" --profile branchbook-admin \
+  --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess
+npx cdk bootstrap "aws://$ACCOUNT/af-south-1" --profile branchbook-admin \
+  --qualifier bbstg --toolkit-stack-name CDKToolkitStaging \
+  --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess
+```
 
 ## Removing it
 
@@ -634,7 +718,7 @@ bootstrap goes last.
    npx cdk destroy BranchbookRelease --profile branchbook-admin
    ```
 
-3. Destroy the GitHub trust, the deploy role and the budget. The variable must be set, because the stack is in the
+3. Destroy the GitHub trust, the deploy roles, the deploy scopes and the budget. The variable must be set, because the stack is in the
    app only when it is; any placeholder works:
 
    ```bash
@@ -642,19 +726,27 @@ bootstrap goes last.
      npx cdk destroy BranchbookAccount --profile branchbook-admin
    ```
 
-4. Delete `CDKToolkit` in both Regions:
+4. Destroy the guardrails. The audit bucket and the trail's KMS key are retained on purpose; empty and delete the
+   bucket, and schedule the key's deletion, only once the audit records may go:
 
    ```bash
+   BRANCHBOOK_GUARDRAILS=true npx cdk destroy BranchbookGuardrails --profile branchbook-admin
+   ```
+
+5. Delete the three bootstrap stacks:
+
+   ```bash
+   aws cloudformation delete-stack --stack-name CDKToolkitStaging --region af-south-1 --profile branchbook-admin
    aws cloudformation delete-stack --stack-name CDKToolkit --region af-south-1 --profile branchbook-admin
    aws cloudformation delete-stack --stack-name CDKToolkit --region us-east-1 --profile branchbook-admin
    ```
 
    The ECR repository must be empty for the delete to succeed; in `af-south-1` it holds the hosted demo's images,
    so delete them first in the ECR console. CloudFormation keeps each assets bucket
-   (`cdk-hnb659fds-assets-<account>-<region>`) on purpose. In the S3 console, empty it, which also removes its old
+   (`cdk-<qualifier>-assets-<account>-<region>`) on purpose. In the S3 console, empty it, which also removes its old
    versions, then delete it.
 
-5. Delete the `AWS_DEPLOY_ROLE_ARN` secret from the `aws-demo` environment, last. Every later push to `main` fails
+6. Delete the `AWS_DEPLOY_ROLE_ARN` secrets from the `staging` and `production` environments, last. Every later push to `main` fails
    `ci`'s `deploy` job at sign-in; remove that job from `ci.yml` to stop it running.
 
 ## Dependency notes
@@ -671,7 +763,10 @@ bootstrap goes last.
 
 | Path | Purpose |
 |---|---|
-| `bin/branchbook.ts` | The CDK app: which stacks exist and where they deploy |
+| `bin/branchbook.ts` | The CDK app's entry point; it calls `buildApp` |
+| `lib/app.ts` | `buildApp`: which stacks exist for the deploy-time variables, and where they deploy |
+| `config/account.json` | Account-level settings: the GitHub repository's IDs, each environment's GitHub environment and bootstrap qualifier, the budget and the guardrails |
+| `lib/guardrails-stack.ts` | `GuardrailsStack`: CloudTrail, GuardDuty, AWS Config, Security Hub, Access Analyzer, the permissions boundary and each environment's execution policy |
 | `config/staging.json`, `config/production.json` | Every per-environment value, and `appEnvironment`, the app's settings |
 | `config/registry.json` | The ECR repository's Region, name and how many images it keeps |
 | `lib/config.ts` | Reads and checks the configuration; fails synthesis naming the file and field |
@@ -680,12 +775,15 @@ bootstrap goes last.
 | `lib/schema-migration.ts`, `lambda/schema-migration/` | The custom resource that runs the migration task and fails the deployment if it fails |
 | `lib/captcha-api-key.ts` | The custom resources that create the CAPTCHA API key and read the integration URL |
 | `lib/nag.ts` | The cdk-nag finding IDs acknowledged in more than one place |
-| `lib/account-stack.ts` | `AccountStack`: the GitHub OIDC trust, the deploy role and the budget |
+| `lib/account-stack.ts` | `AccountStack`: the GitHub OIDC trust, each environment's deploy role and bootstrap deploy scope, and the budget; the account configuration's loader |
 | `lib/release-stack.ts` | `ReleaseStack`: records the deployed commit and image digest in `/<prefix>/release` and `/<prefix>/release-image` |
 | `lib/data-stack.ts` | `DataStack`: an environment's VPC, database, SMS daily cap key and (staging) synthetic-traffic token |
 | `lib/app-stack.ts` | `AppStack`: an environment's certificate, WAF, load balancer, Fargate service, migration task, SMS protect configuration, alarms and DNS record |
 | `lib/sms-countries.ts` | The countries AWS lists for a protect configuration; the hosted demo blocks every one but South Africa |
-| `test/account-stack.test.ts` | Unit tests that check the connection's security properties |
+| `test/account-stack.test.ts` | Unit tests that check the connection's security properties and the account configuration |
+| `test/guardrails-stack.test.ts` | Unit tests for the audit trail, the detective controls, the execution policies and the boundary |
+| `test/deployment-policies.test.ts` | Checks the execution policies cover every resource type each environment deploys, every application role carries the boundary, and every stack uses its environment's bootstrap |
+| `test/app.test.ts` | Which stacks the app holds for each combination of deploy-time variables |
 | `test/release-stack.test.ts` | Unit tests for the release record the pipeline verifies |
 | `test/config.test.ts` | Unit tests for the configuration's checks |
 | `test/environments.test.ts` | Unit tests for both environments: network, database, migration order, task hardening, autoscaling, WAF and SMS |
