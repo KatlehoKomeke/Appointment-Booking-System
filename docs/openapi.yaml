@@ -15,6 +15,8 @@ servers:
 tags:
 - description: "The branches customers can book at, and what each offers."
   name: Branches
+- description: How the web app should talk to this deployment.
+  name: Client configuration
 - description: The slots a service can be booked in at a branch.
   name: Availability
 - description: "Every booking's simulated messages, recipients redacted, and their\
@@ -371,6 +373,23 @@ paths:
       summary: List one day's slots for one service at one branch
       tags:
       - Availability
+  /api/v1/client-config:
+    get:
+      description: "Where a CAPTCHA protects bookings and cancels, the AWS WAF CAPTCHA\
+        \ JavaScript API to load and the API key to render it with; a booking or cancel\
+        \ without a valid token is then answered 405 with the header x-amzn-waf-action:\
+        \ captcha. Null where there is none."
+      operationId: getClientConfig
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ClientConfig"
+          description: The client settings
+      summary: Describe this deployment's client settings
+      tags:
+      - Client configuration
   /api/v1/messages:
     get:
       description: "The newest messages of every appointment, with recipients redacted\
@@ -790,6 +809,26 @@ components:
       - opensSunday
       - province
       - suburb
+    CaptchaConfig:
+      type: object
+      properties:
+        apiKey:
+          type: string
+        scriptUrl:
+          type: string
+          example: https://abcd1234.af-south-1.captcha-sdk.awswaf.com/abcd1234/jsapi.js
+      required:
+      - apiKey
+      - scriptUrl
+    ClientConfig:
+      type: object
+      properties:
+        captcha:
+          anyOf:
+          - $ref: "#/components/schemas/CaptchaConfig"
+          - type: "null"
+      required:
+      - captcha
     ClosedDate:
       type: object
       properties:

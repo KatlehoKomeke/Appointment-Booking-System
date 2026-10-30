@@ -109,6 +109,39 @@ public class OpenApiConfig {
                 });
   }
 
+  /**
+   * Describes every nullable property whose type is another schema, such as {@code
+   * ClientConfig.captcha}, as that schema or {@code null}. springdoc writes such a property as a
+   * {@code $ref} beside {@code type: "null"}, which JSON Schema reads as both at once, a value
+   * nothing can match; {@code anyOf} says either.
+   *
+   * @return the customizer springdoc applies to the finished document
+   */
+  @Bean
+  GlobalOpenApiCustomizer nullableReferencesAllowNull() {
+    return openApi ->
+        openApi
+            .getComponents()
+            .getSchemas()
+            .values()
+            .forEach(
+                schema -> {
+                  Map<String, Schema> properties = schema.getProperties();
+                  if (properties != null) {
+                    properties.replaceAll((name, property) -> referenceOrNull(property));
+                  }
+                });
+  }
+
+  private static Schema referenceOrNull(Schema property) {
+    Set<String> types = property.getTypes();
+    if (property.get$ref() == null || types == null || !types.contains("null")) {
+      return property;
+    }
+    return new Schema()
+        .anyOf(List.of(new Schema().$ref(property.get$ref()), new Schema().types(Set.of("null"))));
+  }
+
   private static void allowNullInEnum(Object property) {
     Schema schema = (Schema) property;
     Set<String> types = schema.getTypes();
