@@ -31,6 +31,11 @@ import za.co.fynbos.branchbook.support.TestcontainersConfiguration;
  * database is empty, so this context migrates at start-up, which staging and production leave to
  * the migrate-only task. The public base URL is https, as the profile's guard requires. Metrics are
  * exported as the application exports them, which Spring Boot switches off in tests by default.
+ *
+ * <p>The console keeps plain-text lines here. The profile's ECS JSON lines would otherwise stay in
+ * force for every later test in the JVM, since Spring Boot sets up logging only for the first
+ * context to start, and several tests read plain-text lines; {@code StructuredLogRedactionIT}
+ * proves the ECS format instead.
  */
 @SpringBootTest(
     webEnvironment = WebEnvironment.RANDOM_PORT,
@@ -45,7 +50,8 @@ import za.co.fynbos.branchbook.support.TestcontainersConfiguration;
       "branchbook.sms.gateway=simulated",
       "branchbook.sms.recipient-daily-cap=0",
       "branchbook.captcha.script-url=",
-      "branchbook.captcha.api-key="
+      "branchbook.captcha.api-key=",
+      "logging.structured.format.console="
     })
 @ActiveProfiles("prod")
 @AutoConfigureMetrics
