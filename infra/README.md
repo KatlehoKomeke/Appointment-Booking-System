@@ -328,6 +328,81 @@ Deploy-time inputs are environment variables:
 | `BRANCHBOOK_ALERT_EMAIL` | No | Brings `BranchbookAccount` into the app (administrator only) |
 | `BRANCHBOOK_HOSTED_DEMO` | Never | Retired: synthesis fails with a pointer to `BRANCHBOOK_ENV` |
 
+## Observability and fault injection
+
+*Status: Built. [lib/constructs/observability.ts](lib/constructs/observability.ts) and
+[lib/constructs/fault-injection.ts](lib/constructs/fault-injection.ts), tested by
+[observability.test.ts](test/observability.test.ts) and [canary-script.test.ts](test/canary-script.test.ts). Every
+threshold, period and schedule is in the `monitoring`, `canary` and `faultInjection` sections of the environment's
+configuration.*
+
+**The app's metrics.** The service's task (never the migration task) runs with
+`BRANCHBOOK_METRICS_CLOUDWATCH_ENABLED=true`, `BRANCHBOOK_METRICS_CLOUDWATCH_NAMESPACE=BranchBook/<environment>` and
+`BRANCHBOOK_METRICS_CLOUDWATCH_STEP=PT60S`, and its role may call `cloudwatch:PutMetricData` only with that namespace
+(an IAM condition). Micrometer names a gauge `<meter>.value`: `outbox.pending.value`, `outbox.oldest.pending.age.value`,
+`outbox.failed.value`, `outbox.last.tick.age.value`, and `resilience4j.circuitbreaker.state.value` with the dimensions
+`name` and `state`. Each task exports the same series with no task dimension, so the alarms read the **Maximum**: the
+worst task's view.
+
+**Alarms**, beside the existing 5xx, no-healthy-task and free-storage alarms, all on the environment's alarm topic:
+
+| Alarm | Metric and statistic | Raised when (production and staging) | Missing data |
+|---|---|---|---|
+| `OutboxBacklogAge` | `outbox.oldest.pending.age.value`, Maximum, 1 min | over 300 s, once | not a breach |
+| `OutboxNewFailures` | `DIFF(outbox.failed.value)`, Maximum, 5 min | 1 or more messages newly FAILED (no OK message) | not a breach |
+| `DispatcherStalled` | `outbox.last.tick.age.value`, Maximum, 1 min | over 60 s for 2 minutes | **a breach**: a silent app has no visible dispatcher |
+| `SmsCircuitOpen` | `resilience4j.circuitbreaker.state.value` `name=sms,state=open`, Maximum, 1 min | 1 or more | not a breach |
+| `ResponseTimeP99` | load balancer `TargetResponseTime`, p99, 5 min | over 1.5 s for 3 periods | not a breach |
+| `DatabaseCpu` | RDS `CPUUtilization`, Average, 5 min | over 80% for 3 periods | missing |
+| `DatabaseConnections` | RDS `DatabaseConnections`, Maximum, 5 min | over 80% of `connectionBudget` (60 of 75) for 3 periods | missing |
+| `DatabaseMemory` | RDS `FreeableMemory`, Minimum, 5 min | under 128 MiB for 3 periods | missing |
+| `ServiceCpu` | ECS `CPUUtilization`, Average, 5 min | over 85% for 3 periods | missing |
+| `ServiceMemory` | ECS `MemoryUtilization`, Maximum, 5 min | over 85% for 3 periods | missing |
+| `CanaryFailing` | Synthetics `SuccessPercent`, Average, 5 min | under 90% for 2 runs in a row | **a breach** |
+
+`outbox.failed` is a level that falls only when retention deletes old messages, so an alarm on the level would stay
+raised for days and miss the next failure; the alarm watches its change instead. A booking for the demo number ending
+0000, whose simulated delivery fails on purpose, raises `OutboxNewFailures` too.
+
+**Dashboard** `<resourcePrefix>` (`branchbook`, `branchbook-staging`): the alarms' states; requests, 5xx, p50 and p99
+response time and healthy tasks; pending, FAILED, oldest-pending age and dispatcher tick age; the SMS breaker; database
+CPU, connections, freeable memory and free storage; service CPU and memory, healthy targets and (with Container
+Insights) running tasks; WAF's allowed and blocked requests, blocks per rule and CAPTCHAs asked and solved; the
+canary's success and duration.
+
+**Canary.** A CloudWatch Synthetics canary on `syn-nodejs-puppeteer-18.0` (CDK 2.274.0's newest constant is 13.0, so
+the name is written out) runs [lambda/canary/index.js](lambda/canary/index.js) every 5 minutes: `GET /readyz` must
+answer 200 with `"status":"UP"`, and `GET /api/v1/branches/SAN/availability?service=FICA&date=<tomorrow in
+Africa/Johannesburg>` 200 with that branch, service, date and a list of slots. GET only, so WAF's CAPTCHA never fires
+and nothing is booked. Its reports go to its own bucket: S3-encrypted, all public access blocked, TLS 1.2 or later
+only, expired after 14 days (production) or 7 (staging); staging's is emptied and deleted with the stack, production's
+is kept.
+
+**Fault injection.** AWS FIS experiment templates, when `faultInjection.enabled` (both environments). A template does
+nothing until someone starts an experiment from it, and FIS refuses to start, or stops, an experiment while the 5xx
+(`ServerErrors`) or no-healthy-task (`NoHealthyTask`) alarm is raised.
+
+- `<prefix>-stop-one-task`: `aws:ecs:stop-task` on one task of the service, chosen at random (`COUNT(1)`). Expect the
+  load balancer to keep serving from the other task and ECS to start a replacement within a few minutes. Staging runs
+  one task, so there it shows recovery from zero rather than continuity.
+- `<prefix>-database-failover` (Multi-AZ only, so production alone): `aws:rds:reboot-db-instances` with
+  `forceFailover=true`. Expect a minute or two of failed database calls while the standby takes over, after which the
+  pools reconnect to the same endpoint.
+
+The experiments run as their own role, which FIS may assume only for this account's experiments, and which may stop
+only this cluster's tasks and reboot only this database. FIS keeps each experiment's record for 120 days and CloudTrail
+records its calls; the experiments are not logged to CloudWatch Logs, which would need `logs:PutResourcePolicy` on any
+log group for the role. To run one (an administrator; FIS creates its service-linked role on first use):
+
+```bash
+aws fis list-experiment-templates --region af-south-1 \
+  --query "experimentTemplates[?tags.Name=='branchbook-stop-one-task'].id" --output text
+aws fis start-experiment --region af-south-1 --experiment-template-id <id>
+aws fis get-experiment --region af-south-1 --id <experiment id>   # state, and why it stopped if it did
+```
+
+Or in the console: AWS FIS, Experiment templates, the template, Start experiment.
+
 ## The hosted demo
 
 *Status: Built; first deployed by hand on 2026-10-26, and by the pipeline on every push to `main` since it took over
@@ -684,12 +759,17 @@ bootstrap goes last.
 | `lib/release-stack.ts` | `ReleaseStack`: records the deployed commit and image digest in `/<prefix>/release` and `/<prefix>/release-image` |
 | `lib/data-stack.ts` | `DataStack`: an environment's VPC, database, SMS daily cap key and (staging) synthetic-traffic token |
 | `lib/app-stack.ts` | `AppStack`: an environment's certificate, WAF, load balancer, Fargate service, migration task, SMS protect configuration, alarms and DNS record |
+| `lib/constructs/observability.ts`, `lambda/canary/` | The app's metrics export, the alarms, the dashboard and the canary with its script |
+| `lib/constructs/fault-injection.ts` | The AWS FIS experiment templates and their role |
+| `lib/constructs/nag-arn.ts` | How cdk-nag writes an ARN in a finding's ID, for acknowledgments of ARN-scoped wildcards |
 | `lib/sms-countries.ts` | The countries AWS lists for a protect configuration; the hosted demo blocks every one but South Africa |
 | `test/account-stack.test.ts` | Unit tests that check the connection's security properties |
 | `test/release-stack.test.ts` | Unit tests for the release record the pipeline verifies |
 | `test/config.test.ts` | Unit tests for the configuration's checks |
 | `test/environments.test.ts` | Unit tests for both environments: network, database, migration order, task hardening, autoscaling, WAF and SMS |
 | `test/nag.test.ts` | cdk-nag's AWS Solutions pack over every stack of both environments |
+| `test/observability.test.ts` | Unit tests for the metrics export, every alarm, the dashboard, the canary and the FIS templates, per environment |
+| `test/canary-script.test.ts` | Unit tests for the canary's date, paths and checks |
 | `test/registry-stack.test.ts` | Unit tests for the ECR repository |
 | `test/schema-migration-handler.test.ts` | Unit tests for the migration handlers: a failed migration fails the deployment |
 | `cdk.json` | Non-sensitive account configuration (repository name and public IDs, GitHub environment, budget) and CDK feature flags |
