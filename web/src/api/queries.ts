@@ -76,6 +76,8 @@ export const queryKeys = {
     ['appointment', normaliseReference(reference)] as const,
   /** The simulated inbox. */
   inbox: () => ['messages'] as const,
+  /** The client settings, such as the WAF CAPTCHA's script and key (`clientConfig.ts`). */
+  clientConfig: () => ['client-config'] as const,
 };
 
 // The API ignores case in a reference, so the cache does too.

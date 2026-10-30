@@ -10,6 +10,12 @@ import { defineConfig } from '@playwright/test';
 
 const onCi = process.env.CI !== undefined && process.env.CI !== '';
 
+// On staging the firewall puts a CAPTCHA in front of every booking and cancel, and lets through requests that carry
+// the synthetic-traffic token in `x-branchbook-synthetic`. E2E_SYNTHETIC_TOKEN, when set, is sent on every request
+// the browser and the API fixture make. Production has no such bypass, and a local stack has no CAPTCHA.
+const syntheticToken = process.env.E2E_SYNTHETIC_TOKEN ?? '';
+const withToken = syntheticToken !== '';
+
 export default defineConfig({
   testDir: '.',
   testMatch: '*.spec.ts',
@@ -29,15 +35,18 @@ export default defineConfig({
     // The app shows SAST whatever zone the device is in; a browser in another zone proves that holds (BR-20).
     timezoneId: 'America/New_York',
     colorScheme: 'light',
-    trace: 'retain-on-failure',
+    ...(withToken ? { extraHTTPHeaders: { 'x-branchbook-synthetic': syntheticToken } } : {}),
+    // A trace records every request's headers, so with the token set none is kept: the report is uploaded as a CI
+    // artifact, and the token must not travel with it. The screenshot still shows where a test failed.
+    trace: withToken ? 'off' : 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
   projects: [
     {
       name: 'mobile',
-      // A phone has no Tab key to book with, and a failed SMS looks the same at any width, so these two run on the
-      // desktop only.
-      testIgnore: ['keyboard.spec.ts', 'failed-delivery.spec.ts'],
+      // A phone has no Tab key to book with, and a failed SMS or the inbox looks the same at any width, so these run
+      // on the desktop only.
+      testIgnore: ['keyboard.spec.ts', 'failed-delivery.spec.ts', 'inbox.spec.ts'],
       use: {
         browserName: 'chromium',
         viewport: { width: 390, height: 844 },

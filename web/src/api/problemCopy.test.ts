@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { problem } from '../test/fixtures';
+import { CaptchaError } from './captcha';
 import { ApiProblem, type Problem } from './client';
 import {
   DEMO_NUMBER_COPY,
@@ -110,6 +111,21 @@ describe('problemMessage', () => {
 
   it('copes with something that is not an error at all', () => {
     expect(problemMessage('nope').title).toBe('Something went wrong on our side');
+  });
+
+  it('words a CAPTCHA that was not solved by why, always saying that nothing was sent', () => {
+    expect(problemMessage(new CaptchaError('cancelled'))).toEqual({
+      title: 'The check was closed before it was finished',
+      body: 'Nothing was sent. Try again, and solve the puzzle when it appears.',
+    });
+    expect(problemMessage(new CaptchaError('failed'))).toEqual({
+      title: "We couldn't complete the check",
+      body: 'Nothing was sent. Please try again.',
+    });
+    expect(problemMessage(new CaptchaError('unavailable'))).toEqual({
+      title: "We couldn't load the check",
+      body: 'Nothing was sent. Check your internet connection, then try again.',
+    });
   });
 });
 

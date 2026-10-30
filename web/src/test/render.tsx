@@ -12,6 +12,7 @@ import type { ReactNode } from 'react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 
 import { DEFAULT_STALE_TIME_MS } from '../app/queryClient';
+import { CaptchaProvider } from '../captcha/CaptchaProvider';
 import { routes } from '../routes';
 
 /**
@@ -27,7 +28,8 @@ export function createTestQueryClient(): QueryClient {
 }
 
 /**
- * Renders the app's routes at a path, in a memory router.
+ * Renders the app's routes at a path, in a memory router, with the CAPTCHA controller around them, as `App.tsx`
+ * renders them.
  *
  * @example
  * ```tsx
@@ -43,7 +45,9 @@ export function renderRoute(path: string) {
   const router = createMemoryRouter(routes, { initialEntries: [path] });
   const result = render(
     <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
+      <CaptchaProvider>
+        <RouterProvider router={router} />
+      </CaptchaProvider>
     </QueryClientProvider>,
   );
   return { ...result, router, queryClient };
