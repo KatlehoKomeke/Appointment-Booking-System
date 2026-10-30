@@ -34,6 +34,8 @@ export const CFN_EXEC_SERVICES = [
   'sms-voice',
   'sns',
   'ssm',
+  // The Provider framework behind the schema migration waits for the task in a Step Functions state machine.
+  'states',
   'synthetics',
   'wafv2',
 ] as const;
