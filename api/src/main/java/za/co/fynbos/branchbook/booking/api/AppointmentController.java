@@ -31,6 +31,7 @@ import za.co.fynbos.branchbook.booking.application.BookingResult;
 import za.co.fynbos.branchbook.booking.application.CancelAppointmentHandler;
 import za.co.fynbos.branchbook.booking.application.IdempotencyKeyRequiredException;
 import za.co.fynbos.branchbook.booking.application.LookupAppointmentHandler;
+import za.co.fynbos.branchbook.booking.domain.DemoNumberBlock;
 import za.co.fynbos.branchbook.booking.domain.IdempotencyKey;
 import za.co.fynbos.branchbook.shared.config.BookingProperties;
 import za.co.fynbos.branchbook.shared.web.OpenApiConfig;
@@ -64,15 +65,20 @@ class AppointmentController {
   /** Whether this deployment takes only the published demo numbers (ADR-0006). */
   private final boolean demoNumbersOnly;
 
+  /** The published demo numbers. */
+  private final DemoNumberBlock demoNumbers;
+
   AppointmentController(
       BookAppointmentHandler booking,
       LookupAppointmentHandler lookups,
       CancelAppointmentHandler cancellations,
-      BookingProperties bookingProperties) {
+      BookingProperties bookingProperties,
+      DemoNumberBlock demoNumbers) {
     this.booking = booking;
     this.lookups = lookups;
     this.cancellations = cancellations;
     this.demoNumbersOnly = bookingProperties.demoNumbersOnly();
+    this.demoNumbers = demoNumbers;
   }
 
   /**
@@ -85,8 +91,9 @@ class AppointmentController {
   void reportWhichNumbersBookingsTake() {
     if (demoNumbersOnly) {
       log.info(
-          "Bookings take only the published demo numbers (branchbook.booking.demo-numbers-only is"
-              + " on).");
+          "Bookings take only the published demo numbers, {} (branchbook.booking.demo-numbers-only"
+              + " is on).",
+          demoNumbers);
     } else {
       log.info(
           "Bookings take any South African mobile number (branchbook.booking.demo-numbers-only is"
@@ -180,7 +187,7 @@ class AppointmentController {
       HttpServletRequest http) {
     IdempotencyKey key =
         IdempotencyKey.parse(idempotencyKey).orElseThrow(IdempotencyKeyRequiredException::new);
-    BookingResult result = booking.handle(request.toCommand(key, demoNumbersOnly));
+    BookingResult result = booking.handle(request.toCommand(key, demoNumbersOnly, demoNumbers));
     BookingOutcomeMeter.noteBooked(http, result);
     AppointmentResponse body = AppointmentResponse.from(result.appointment());
     ResponseEntity.BodyBuilder response =

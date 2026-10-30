@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -69,7 +70,16 @@ class AwsSmsGatewayTest {
           BODY);
 
   private static final SmsProperties.Aws NOTHING_OPTIONAL =
-      new SmsProperties.Aws(null, " ", "", null, "0.20", false);
+      new SmsProperties.Aws(
+          null,
+          " ",
+          "",
+          null,
+          "0.20",
+          false,
+          Duration.ofSeconds(2),
+          Duration.ofSeconds(5),
+          Duration.ofSeconds(10));
 
   private final PinpointSmsVoiceV2Client client = mock(PinpointSmsVoiceV2Client.class);
 
@@ -96,7 +106,15 @@ class AwsSmsGatewayTest {
     answerWithId("m-1");
     SmsProperties.Aws everything =
         new SmsProperties.Aws(
-            "af-south-1", " protect-0a1b2c ", "branchbook-sms", "pool-0a1b2c", "0.05", true);
+            "af-south-1",
+            " protect-0a1b2c ",
+            "branchbook-sms",
+            "pool-0a1b2c",
+            "0.05",
+            true,
+            Duration.ofSeconds(2),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(10));
 
     new AwsSmsGateway(client, everything).send(MESSAGE);
 

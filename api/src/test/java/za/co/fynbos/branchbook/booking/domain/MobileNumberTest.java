@@ -18,6 +18,10 @@ import org.junit.jupiter.params.provider.ValueSource;
  */
 class MobileNumberTest {
 
+  /** The published demo block as application.yml configures it by default. */
+  private static final DemoNumberBlock DEMO_NUMBERS =
+      DemoNumberBlock.of("+27825550000", "+27825550199");
+
   private static final PhoneNumberUtil PHONE_NUMBERS = PhoneNumberUtil.getInstance();
 
   @ParameterizedTest(name = "{0}")
@@ -111,7 +115,7 @@ class MobileNumberTest {
   @ParameterizedTest(name = "{0}")
   @ValueSource(strings = {"+27825550000", "+27825550001", "+27825550100", "+27825550199"})
   void theDemoBlockRunsFrom0825550000To0825550199(String e164) {
-    assertThat(MobileNumber.ofE164(e164).isPublishedDemoNumber()).isTrue();
+    assertThat(DEMO_NUMBERS.contains(MobileNumber.ofE164(e164))).isTrue();
   }
 
   /** Every other South African mobile is outside the block, however close to it. */
@@ -126,21 +130,15 @@ class MobileNumberTest {
         "+27845550100"
       })
   void numbersOutsideTheDemoBlockAreNotDemoNumbers(String e164) {
-    assertThat(MobileNumber.ofE164(e164).isPublishedDemoNumber()).isFalse();
+    assertThat(DEMO_NUMBERS.contains(MobileNumber.ofE164(e164))).isFalse();
   }
 
   /** A number as people type it is judged by the number it is, not by how it was typed. */
   @Test
   void aTypedNumberIsJudgedAfterParsing() {
-    assertThat(MobileNumber.parse("+27 82 555 0199"))
-        .map(MobileNumber::isPublishedDemoNumber)
-        .contains(true);
-    assertThat(MobileNumber.parse("0027 82 555 0000"))
-        .map(MobileNumber::isPublishedDemoNumber)
-        .contains(true);
-    assertThat(MobileNumber.parse("072 345 6789"))
-        .map(MobileNumber::isPublishedDemoNumber)
-        .contains(false);
+    assertThat(MobileNumber.parse("+27 82 555 0199")).map(DEMO_NUMBERS::contains).contains(true);
+    assertThat(MobileNumber.parse("0027 82 555 0000")).map(DEMO_NUMBERS::contains).contains(true);
+    assertThat(MobileNumber.parse("072 345 6789")).map(DEMO_NUMBERS::contains).contains(false);
   }
 
   @Test

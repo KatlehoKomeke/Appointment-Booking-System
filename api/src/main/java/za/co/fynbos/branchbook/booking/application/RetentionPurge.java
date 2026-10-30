@@ -19,8 +19,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  * (SECURITY.md, ADR-0006). A booking for a future date is never touched, however long ago it was
  * made; a cancelled appointment goes by the same rule, once its original end time has passed.
  *
- * <p>It works in batches of up to {@value #BATCH} appointments, one READ COMMITTED transaction
- * each, until a batch comes back short. A batch:
+ * <p>It works in batches of up to {@code branchbook.retention.batch-size} appointments, 500 by
+ * default, one READ COMMITTED transaction each, until a batch comes back short. A batch:
  *
  * <ol>
  *   <li>locks the appointments that ended first with {@code FOR UPDATE SKIP LOCKED}, so one that
@@ -46,14 +46,14 @@ public class RetentionPurge {
 
   private static final Logger log = LoggerFactory.getLogger(RetentionPurge.class);
 
-  /** The most appointments one batch deletes, so one transaction never holds many locks. */
-  static final int BATCH = 500;
-
   private final TransactionTemplate transaction;
   private final AppointmentRepository appointments;
   private final IdempotencyKeyStore keys;
   private final NotificationEraser notifications;
   private final Duration afterEnd;
+
+  /** The most appointments one batch deletes, so one transaction never holds many locks. */
+  private final int batchSize;
 
   RetentionPurge(
       PlatformTransactionManager transactionManager,
@@ -69,17 +69,18 @@ public class RetentionPurge {
     this.keys = keys;
     this.notifications = notifications;
     this.afterEnd = properties.afterEnd();
+    this.batchSize = properties.batchSize();
   }
 
   /**
    * Deletes every appointment that ended {@code after-end} before {@code now} or earlier, with its
-   * messages and keys, in batches of {@value #BATCH}.
+   * messages and keys, in batches of {@code batch-size}.
    *
    * @param now the current instant, from the application's clock; the tests pass their own
    * @return what was deleted; if a batch failed, what the batches before it deleted
    */
   public Purged purge(Instant now) {
-    return purge(now, BATCH);
+    return purge(now, batchSize);
   }
 
   /**

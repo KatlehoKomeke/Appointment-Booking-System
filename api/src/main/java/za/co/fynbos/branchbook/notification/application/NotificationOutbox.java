@@ -11,6 +11,7 @@ import za.co.fynbos.branchbook.booking.application.Cancellation;
 import za.co.fynbos.branchbook.booking.application.Confirmation;
 import za.co.fynbos.branchbook.booking.application.ConfirmationOutbox;
 import za.co.fynbos.branchbook.booking.application.NotificationSummary;
+import za.co.fynbos.branchbook.booking.domain.DemoNumberBlock;
 import za.co.fynbos.branchbook.booking.domain.MobileNumber;
 import za.co.fynbos.branchbook.notification.domain.NotificationKind;
 import za.co.fynbos.branchbook.notification.domain.NotificationMessage;
@@ -54,18 +55,21 @@ public class NotificationOutbox implements ConfirmationOutbox {
   private final RecipientFingerprints fingerprints;
   private final NotificationTemplates templates;
   private final int recipientDailyCap;
+  private final DemoNumberBlock demoNumbers;
 
   NotificationOutbox(
       NotificationMessageRepository messages,
       RecipientSendLedger ledger,
       RecipientFingerprints fingerprints,
       NotificationProperties properties,
-      SmsProperties sms) {
+      SmsProperties sms,
+      DemoNumberBlock demoNumbers) {
     this.messages = messages;
     this.ledger = ledger;
     this.fingerprints = fingerprints;
     this.templates = new NotificationTemplates(properties.publicBaseUrl());
     this.recipientDailyCap = sms.recipientDailyCap();
+    this.demoNumbers = demoNumbers;
   }
 
   @Override
@@ -191,6 +195,6 @@ public class NotificationOutbox implements ConfirmationOutbox {
 
   /** Tells whether the cap counts the SMS written to this number: it is on, and the number real. */
   private boolean counted(MobileNumber recipient) {
-    return recipientDailyCap > 0 && !recipient.isPublishedDemoNumber();
+    return recipientDailyCap > 0 && !demoNumbers.contains(recipient);
   }
 }

@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.PositiveOrZero;
+import java.time.Duration;
 import org.jspecify.annotations.Nullable;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
@@ -84,6 +85,11 @@ public record SmsProperties(
    * @param maxPrice the most, in US dollars, one message may cost, such as {@code 0.20}; AWS
    *     refuses a dearer one. {@code 0.20} by default
    * @param dryRun whether AWS only validates each message and sends none; {@code false} by default
+   * @param connectTimeout how long opening a connection to AWS may take; two seconds by default
+   * @param readTimeout how long AWS may take to answer once a request is sent; five seconds by
+   *     default
+   * @param callTimeout how long one {@code SendTextMessage} call may take in all, so the
+   *     dispatcher's thread and its row lock are never held for long; ten seconds by default
    */
   public record Aws(
       @Nullable String region,
@@ -91,9 +97,24 @@ public record SmsProperties(
       @Nullable String configurationSet,
       @Nullable String originationIdentity,
       @NotNull @Pattern(regexp = MAX_PRICE_PATTERN) @DefaultValue("0.20") String maxPrice,
-      boolean dryRun) {
+      boolean dryRun,
+      @NotNull @DefaultValue("PT2S") Duration connectTimeout,
+      @NotNull @DefaultValue("PT5S") Duration readTimeout,
+      @NotNull @DefaultValue("PT10S") Duration callTimeout) {
 
     /** The form AWS accepts for {@code MaxPrice}: up to two digits, a point, one to five digits. */
     public static final String MAX_PRICE_PATTERN = "[0-9]{0,2}\\.[0-9]{1,5}";
+
+    /**
+     * Refuses a timeout that is zero or negative, which would make every call fail or never end.
+     */
+    public Aws {
+      for (Duration timeout : new Duration[] {connectTimeout, readTimeout, callTimeout}) {
+        if (timeout != null && (timeout.isZero() || timeout.isNegative())) {
+          throw new IllegalArgumentException(
+              "branchbook.sms.aws timeouts must be more than zero, ISO-8601 durations");
+        }
+      }
+    }
   }
 }

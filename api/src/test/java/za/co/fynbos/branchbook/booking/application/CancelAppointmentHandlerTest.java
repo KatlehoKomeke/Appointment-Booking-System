@@ -14,7 +14,6 @@ import static org.mockito.Mockito.when;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.Period;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -36,7 +35,7 @@ import za.co.fynbos.branchbook.catalogue.domain.Address;
 import za.co.fynbos.branchbook.catalogue.domain.Branch;
 import za.co.fynbos.branchbook.catalogue.domain.Province;
 import za.co.fynbos.branchbook.catalogue.domain.ServiceType;
-import za.co.fynbos.branchbook.shared.config.BookingProperties;
+import za.co.fynbos.branchbook.support.BookingRules;
 
 /**
  * BR-14, at the handler: the order of the cancel's steps, and what a lost version check answers.
@@ -61,8 +60,7 @@ class CancelAppointmentHandlerTest {
 
   private final LookupAttemptLimiter limiter =
       new LookupAttemptLimiter(
-          new BookingProperties(
-              Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false),
+          BookingRules.defaults(),
           new InMemoryLookupAttemptStore(),
           TransactionOperations.withoutTransaction());
 
