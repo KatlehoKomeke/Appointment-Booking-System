@@ -7,6 +7,8 @@
  *   app.
  * - `BranchbookAccount` (us-east-1): the GitHub-to-AWS connection and the cost budget. Deployed by an administrator
  *   from their own machine, never by the pipeline (see below).
+ * - `BranchbookGuardrails` (af-south-1): the audit trail, the detective controls and the policies that limit every
+ *   deployment. Deployed by an administrator, never by the pipeline (see below).
  * - One environment's three stacks, when `BRANCHBOOK_ENV` is `staging` or `production`: `<prefix>Data` (network and
  *   database), `<prefix>App` (WAF, load balancer, service, migration) and `<prefix>Release` (the deployed commit and
  *   image digest). The prefix is `Branchbook` for production, the IDs its live stacks were deployed under, and
@@ -17,28 +19,13 @@
  * Nothing sensitive is ever written to the repository.
  */
 import { App, Tags } from 'aws-cdk-lib/core';
-import { AccountStack } from '../lib/account-stack';
+import { AccountStack, loadAccountConfig } from '../lib/account-stack';
 import { loadEnvironmentConfig, loadRegistryConfig, requireImageDigest } from '../lib/config';
 import { addEnvironment } from '../lib/environment';
+import { GuardrailsStack } from '../lib/guardrails-stack';
 import { RegistryStack } from '../lib/registry-stack';
 
 const app = new App();
-
-/**
- * Reads a required string or number from cdk.json context, failing with a clear message when it is missing.
- *
- * @param key - the context key, for example `githubRepository`
- */
-function context(key: string): string {
-  const value: unknown = app.node.tryGetContext(key);
-  if (typeof value === 'string' && value.trim() !== '') {
-    return value;
-  }
-  if (typeof value === 'number') {
-    return value.toString();
-  }
-  throw new Error(`Missing or invalid context value "${key}" in infra/cdk.json`);
-}
 
 /**
  * Reads an optional environment variable, treating an empty value as unset: a workflow passes a secret that nobody
@@ -70,18 +57,25 @@ new RegistryStack(app, 'BranchbookRegistry', {
 // It is therefore only part of the app when BRANCHBOOK_ALERT_EMAIL is set: on an administrator's machine, or with a
 // placeholder in the credential-free infra job. The deploy job never sets it, so the pipeline cannot even
 // synthesise this stack, let alone deploy it. The address is personal data and is never committed.
+const accountConfig = loadAccountConfig();
 const alertEmail = optionalEnv('BRANCHBOOK_ALERT_EMAIL');
 if (alertEmail !== undefined) {
   new AccountStack(app, 'BranchbookAccount', {
-    env: { account, region: 'us-east-1' },
-    description: 'BranchBook: GitHub OIDC deploy role and monthly cost budget (no customer data).',
-    githubRepository: context('githubRepository'),
-    githubOwnerId: context('githubOwnerId'),
-    githubRepositoryId: context('githubRepositoryId'),
-    githubEnvironment: context('githubEnvironment'),
+    env: { account, region: accountConfig.accountRegion },
+    description: 'BranchBook: GitHub OIDC deploy roles and monthly cost budget (no customer data).',
+    config: accountConfig,
     alertEmail,
-    monthlyBudgetUsd: Number(context('monthlyBudgetUsd')),
-    releaseRegion: registry.region,
+  });
+}
+
+// BranchbookGuardrails holds the audit trail, the detective controls and the policies that limit every deployment,
+// so, like BranchbookAccount, only an administrator deploys it, with their own credentials. It is part of the app
+// only when BRANCHBOOK_GUARDRAILS=true, which the deploy job never sets.
+if (process.env.BRANCHBOOK_GUARDRAILS === 'true') {
+  new GuardrailsStack(app, 'BranchbookGuardrails', {
+    env: { account, region: accountConfig.workloadRegion },
+    description: 'BranchBook: CloudTrail, GuardDuty, AWS Config, Security Hub, Access Analyzer and the deployment policies (no customer data).',
+    config: accountConfig,
   });
 }
 
