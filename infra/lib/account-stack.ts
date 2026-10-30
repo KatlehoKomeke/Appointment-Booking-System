@@ -4,6 +4,18 @@ import { CfnOutput, Duration, Stack, StackProps } from 'aws-cdk-lib/core';
 import * as budgets from 'aws-cdk-lib/aws-budgets';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import { Construct } from 'constructs';
+import {
+  ENVIRONMENT_NAMES,
+  EnvironmentConfig,
+  EnvironmentName,
+  loadEnvironmentConfig,
+  loadRegistryConfig,
+  RegistryConfig,
+} from './config';
+import { syntheticTrafficSecretName } from './data-stack';
+import { environmentStackIds } from './environment';
+import { REGISTRY_STACK_ID } from './registry-stack';
+import { releaseImageParameterName, releaseParameterName } from './release-stack';
 
 /** The issuer of the OpenID Connect tokens that GitHub Actions presents to AWS. */
 export const GITHUB_OIDC_URL = 'https://token.actions.githubusercontent.com';
@@ -15,11 +27,10 @@ export const GITHUB_OIDC_AUDIENCE = 'sts.amazonaws.com';
 export const ACCOUNT_CONFIG_PATH = path.join(__dirname, '..', 'config', 'account.json');
 
 /**
- * The SSM parameters, under each environment's `/<resourcePrefix>/`, that record what the pipeline deployed: the
- * commit (`release`) and the image digest (`release-image`). The pipeline reads both back after a deployment, and its
- * rollback redeploys the digest in `release-image`.
+ * The IDs of the stacks only an administrator deploys, with their own credentials. No environment's pipeline identity
+ * may touch them.
  */
-export const RELEASE_PARAMETER_NAMES = ['release', 'release-image'] as const;
+export const ADMINISTRATOR_STACK_IDS = { account: 'BranchbookAccount', guardrails: 'BranchbookGuardrails' } as const;
 
 /**
  * The roles `cdk bootstrap` creates that a deployment assumes. The cfn-exec role is left out on purpose: only
@@ -62,32 +73,36 @@ export interface GitHubRepositoryConfig {
   readonly repositoryId: string;
 }
 
-/** One deployment environment as the pipeline sees it: a GitHub environment, and the names its stacks use in AWS. */
+/**
+ * How one environment's pipeline reaches AWS. Everything else about the environment (its Region, names and stacks)
+ * comes from infra/config/<name>.json, so it is never written twice.
+ */
 export interface DeployEnvironmentConfig {
   /**
    * The GitHub environment a workflow job must declare before it may assume this environment's deploy role.
    * Requiring an environment, not just the repository, means a job on an unprotected branch or a fork cannot deploy.
    */
   readonly githubEnvironment: string;
-  /** The prefix of the environment's physical names, for example `branchbook-staging` (SSM `/branchbook-staging/release`). */
-  readonly resourcePrefix: string;
   /**
-   * The Secrets Manager secret holding the token that lets synthetic traffic past the WAF CAPTCHA. Staging only:
-   * production has no bypass, and the configuration is refused if it names one.
+   * The qualifier of the CDK bootstrap this environment deploys through. Each environment has its own, so its deploy
+   * role can assume only its own bootstrap roles, whose execution policy changes only its own stacks' IAM roles.
+   * Production keeps `hnb659fds`, CDK's default, which its live stacks were deployed with.
    */
-  readonly syntheticTrafficSecretName?: string;
+  readonly cdkBootstrapQualifier: string;
 }
 
 /** What the pipeline's deploy roles may do, and for which environments. */
 export interface DeployConfig {
   /** The longest a deploy role's session may last, in minutes (IAM allows 60 to 720). */
   readonly maxSessionMinutes: number;
-  /** The `cdk bootstrap` qualifier whose roles the pipeline assumes (CDK's default is `hnb659fds`). */
-  readonly cdkBootstrapQualifier: string;
-  /** The ECR repository the pipeline pushes each image to, once, and promotes by digest. */
-  readonly imageRepositoryName: string;
-  /** Each environment, by the name `BRANCHBOOK_ENV` selects it with, for example `staging` or `production`. */
-  readonly environments: Readonly<Record<string, DeployEnvironmentConfig>>;
+  /**
+   * The environment whose pipeline identity deploys `BranchbookRegistry`: the registry is created by the first job of
+   * every pipeline run, which runs in that environment before any environment is deployed. The others only pull from
+   * it by digest.
+   */
+  readonly registryEnvironment: EnvironmentName;
+  /** Each environment, by the name `BRANCHBOOK_ENV` selects it with. */
+  readonly environments: Readonly<Record<EnvironmentName, DeployEnvironmentConfig>>;
 }
 
 /** The monthly cost budget. */
@@ -100,11 +115,6 @@ export interface BudgetConfig {
 
 /** The account guardrails' settings (see guardrails-stack.ts). */
 export interface GuardrailsConfig {
-  /**
-   * The CloudFormation stacks the pipeline deploys. Roles and managed policies that CloudFormation names after these
-   * stacks are the only ones the bootstrap execution policy lets a deployment change.
-   */
-  readonly appStackNames: readonly string[];
   /** How many days the audit bucket keeps CloudTrail logs and AWS Config history. */
   readonly auditLogRetentionDays: number;
   /** How many days the audit bucket keeps an overwritten or deleted object's previous version. */
@@ -133,8 +143,6 @@ export interface AccountConfig {
   readonly github: GitHubRepositoryConfig;
   /** Where `BranchbookAccount` lives: IAM is global and AWS Budgets lives in `us-east-1`. */
   readonly accountRegion: string;
-  /** Where the application, its image repository, its release records and the guardrails live. */
-  readonly workloadRegion: string;
   /** The monthly cost budget. */
   readonly budget: BudgetConfig;
   /** The pipeline's deploy roles. */
@@ -160,7 +168,8 @@ export function loadAccountConfig(file: string = ACCOUNT_CONFIG_PATH): AccountCo
 
 /**
  * Validates an already-parsed account configuration, failing synthesis with a message that names the file, the
- * field and what was expected, so a typo never reaches AWS as a role that trusts the wrong subject.
+ * field and what was expected, so a typo never reaches AWS as a role that trusts the wrong subject. A key nobody reads
+ * is refused too, so a misspelt or retired setting cannot be ignored in silence.
  *
  * @param raw - the parsed JSON
  * @param source - where it came from, for error messages
@@ -169,10 +178,16 @@ export function parseAccountConfig(raw: unknown, source = 'infra/config/account.
   const fail = (at: string, problem: string): never => {
     throw new Error(`${source}: "${at}" ${problem}`);
   };
-  const object = (value: unknown, at: string): Record<string, unknown> =>
-    typeof value === 'object' && value !== null && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : fail(at, 'must be an object');
+  const object = (value: unknown, at: string, keys: readonly string[]): Record<string, unknown> => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      return fail(at, 'must be an object');
+    }
+    const unknown = Object.keys(value).find((key) => !keys.includes(key));
+    if (unknown !== undefined) {
+      fail(at === '(root)' ? unknown : `${at}.${unknown}`, 'is not a known setting; check its spelling');
+    }
+    return value as Record<string, unknown>;
+  };
   const text = (value: unknown, at: string, pattern: RegExp, expected: string): string =>
     typeof value === 'string' && pattern.test(value) ? value : fail(at, `must be ${expected}, got ${JSON.stringify(value)}`);
   const whole = (value: unknown, at: string, min: number, max: number): number =>
@@ -184,48 +199,45 @@ export function parseAccountConfig(raw: unknown, source = 'infra/config/account.
   const list = (value: unknown, at: string): unknown[] =>
     Array.isArray(value) && value.length > 0 ? value : fail(at, 'must be a non-empty list');
 
-  const region = /^[a-z]{2}(-[a-z]+)+-\d$/;
-  const root = object(raw, '(root)');
-  const github = object(root.github, 'github');
-  const budget = object(root.budget, 'budget');
-  const deploy = object(root.deploy, 'deploy');
-  const guardrails = object(root.guardrails, 'guardrails');
-  const guardDuty = object(guardrails.guardDuty, 'guardrails.guardDuty');
-  const awsConfig = object(guardrails.config, 'guardrails.config');
+  const root = object(raw, '(root)', ['namePrefix', 'github', 'accountRegion', 'budget', 'deploy', 'guardrails']);
+  const github = object(root.github, 'github', ['repository', 'ownerId', 'repositoryId']);
+  const budget = object(root.budget, 'budget', ['monthlyUsd', 'alertThresholdsPercent']);
+  const deploy = object(root.deploy, 'deploy', ['maxSessionMinutes', 'registryEnvironment', 'environments']);
+  const guardrails = object(root.guardrails, 'guardrails', ['auditLogRetentionDays', 'auditLogNoncurrentVersionDays', 'guardDuty', 'config']);
+  const guardDuty = object(guardrails.guardDuty, 'guardrails.guardDuty', ['findingPublishingFrequency', 'features']);
+  const awsConfig = object(guardrails.config, 'guardrails.config', ['recordingFrequency', 'snapshotDeliveryFrequency']);
 
-  const environments: Record<string, DeployEnvironmentConfig> = {};
-  const rawEnvironments = object(deploy.environments, 'deploy.environments');
-  for (const [name, value] of Object.entries(rawEnvironments)) {
+  // Every environment the CDK app can build needs a deploy role, and nothing else may have one.
+  const rawEnvironments = object(deploy.environments, 'deploy.environments', ENVIRONMENT_NAMES);
+  const environments = {} as Record<EnvironmentName, DeployEnvironmentConfig>;
+  for (const name of ENVIRONMENT_NAMES) {
     const at = `deploy.environments.${name}`;
-    text(name, at, /^[a-z]+$/, 'a lower-case environment name');
-    const environment = object(value, at);
-    const secret = environment.syntheticTrafficSecretName;
+    if (!(name in rawEnvironments)) {
+      fail(at, 'is missing: every environment needs a deploy role');
+    }
+    const environment = object(rawEnvironments[name], at, ['githubEnvironment', 'cdkBootstrapQualifier']);
     environments[name] = {
       githubEnvironment: text(environment.githubEnvironment, `${at}.githubEnvironment`, /^[A-Za-z0-9._-]+$/, 'a plain GitHub environment name'),
-      resourcePrefix: text(environment.resourcePrefix, `${at}.resourcePrefix`, /^[a-z][a-z0-9-]*$/, 'a lower-case name prefix'),
-      ...(secret === undefined
-        ? {}
-        : { syntheticTrafficSecretName: text(secret, `${at}.syntheticTrafficSecretName`, /^[A-Za-z0-9/_+=.@-]+$/, 'a Secrets Manager secret name') }),
+      cdkBootstrapQualifier: text(
+        environment.cdkBootstrapQualifier,
+        `${at}.cdkBootstrapQualifier`,
+        /^[a-z0-9]{1,10}$/,
+        'a CDK bootstrap qualifier (up to 10 lower-case letters and digits)',
+      ),
     };
   }
-  if (Object.keys(environments).length === 0) {
-    fail('deploy.environments', 'must name at least one environment');
-  }
-  if ('production' in environments && environments.production.syntheticTrafficSecretName !== undefined) {
-    fail('deploy.environments.production.syntheticTrafficSecretName', 'must not be set: production has no CAPTCHA bypass');
-  }
-  // Two roles that trusted the same GitHub environment, or read the same release record, would not be separate.
-  for (const key of ['githubEnvironment', 'resourcePrefix'] as const) {
-    const values = Object.values(environments).map((environment) => environment[key]);
+  // Two environments that shared a GitHub environment, or a bootstrap, would not be separate.
+  for (const key of ['githubEnvironment', 'cdkBootstrapQualifier'] as const) {
+    const values = ENVIRONMENT_NAMES.map((name) => environments[name][key]);
     if (new Set(values).size !== values.length) {
       fail(`deploy.environments.*.${key}`, 'must differ between environments');
     }
   }
 
   const features: Partial<Record<GuardDutyFeature, (typeof FEATURE_STATUSES)[number]>> = {};
-  for (const [name, status] of Object.entries(object(guardDuty.features, 'guardrails.guardDuty.features'))) {
-    const at = `guardrails.guardDuty.features.${name}`;
-    features[oneOf(name, at, GUARDDUTY_FEATURES)] = oneOf(status, at, FEATURE_STATUSES);
+  const rawFeatures = object(guardDuty.features, 'guardrails.guardDuty.features', GUARDDUTY_FEATURES);
+  for (const [name, status] of Object.entries(rawFeatures)) {
+    features[name as GuardDutyFeature] = oneOf(status, `guardrails.guardDuty.features.${name}`, FEATURE_STATUSES);
   }
 
   return {
@@ -235,8 +247,7 @@ export function parseAccountConfig(raw: unknown, source = 'infra/config/account.
       ownerId: text(github.ownerId, 'github.ownerId', /^\d+$/, 'the numeric ID GitHub assigns'),
       repositoryId: text(github.repositoryId, 'github.repositoryId', /^\d+$/, 'the numeric ID GitHub assigns'),
     },
-    accountRegion: text(root.accountRegion, 'accountRegion', region, 'an AWS Region name such as us-east-1'),
-    workloadRegion: text(root.workloadRegion, 'workloadRegion', region, 'an AWS Region name such as af-south-1'),
+    accountRegion: text(root.accountRegion, 'accountRegion', /^[a-z]{2}(-[a-z]+)+-\d$/, 'an AWS Region name such as us-east-1'),
     budget: {
       monthlyUsd: whole(budget.monthlyUsd, 'budget.monthlyUsd', 1, 100_000),
       alertThresholdsPercent: list(budget.alertThresholdsPercent, 'budget.alertThresholdsPercent').map((value, index) =>
@@ -245,14 +256,10 @@ export function parseAccountConfig(raw: unknown, source = 'infra/config/account.
     },
     deploy: {
       maxSessionMinutes: whole(deploy.maxSessionMinutes, 'deploy.maxSessionMinutes', 60, 720),
-      cdkBootstrapQualifier: text(deploy.cdkBootstrapQualifier, 'deploy.cdkBootstrapQualifier', /^[a-z0-9]{1,10}$/, 'a CDK bootstrap qualifier'),
-      imageRepositoryName: text(deploy.imageRepositoryName, 'deploy.imageRepositoryName', /^[a-z0-9]+([._/-][a-z0-9]+)*$/, 'an ECR repository name'),
+      registryEnvironment: oneOf(deploy.registryEnvironment, 'deploy.registryEnvironment', ENVIRONMENT_NAMES),
       environments,
     },
     guardrails: {
-      appStackNames: list(guardrails.appStackNames, 'guardrails.appStackNames').map((value, index) =>
-        text(value, `guardrails.appStackNames[${String(index)}]`, /^[A-Z][A-Za-z0-9]*$/, 'a CloudFormation stack name in PascalCase'),
-      ),
       auditLogRetentionDays: whole(guardrails.auditLogRetentionDays, 'guardrails.auditLogRetentionDays', 1, 3650),
       auditLogNoncurrentVersionDays: whole(guardrails.auditLogNoncurrentVersionDays, 'guardrails.auditLogNoncurrentVersionDays', 1, 3650),
       guardDuty: {
@@ -267,6 +274,71 @@ export function parseAccountConfig(raw: unknown, source = 'infra/config/account.
   };
 }
 
+/** The configuration of everything the pipeline deploys, which the account-level stacks derive their names from. */
+export interface WorkloadConfigs {
+  /** Each environment, from infra/config/<name>.json. */
+  readonly environments: Readonly<Record<EnvironmentName, EnvironmentConfig>>;
+  /** The image registry, from infra/config/registry.json. */
+  readonly registry: RegistryConfig;
+}
+
+/**
+ * Reads every environment's configuration and the registry's.
+ *
+ * @param registry - the registry configuration, when the caller has already read it
+ */
+export function loadWorkloadConfigs(registry: RegistryConfig = loadRegistryConfig()): WorkloadConfigs {
+  const environments = {} as Record<EnvironmentName, EnvironmentConfig>;
+  for (const name of ENVIRONMENT_NAMES) {
+    environments[name] = loadEnvironmentConfig(name);
+  }
+  return { environments, registry };
+}
+
+/** One environment as the account-level stacks see it: every value derived from the configuration, none repeated. */
+export interface DeployTarget {
+  /** The environment's name, for example `staging`. */
+  readonly name: EnvironmentName;
+  /** The GitHub environment whose jobs may assume the deploy role. */
+  readonly githubEnvironment: string;
+  /** The qualifier of the CDK bootstrap the environment deploys through. */
+  readonly bootstrapQualifier: string;
+  /** The Region the environment, its bootstrap and the image registry are in. */
+  readonly region: string;
+  /** The prefix of the environment's physical names, from its `resourcePrefix`. */
+  readonly resourcePrefix: string;
+  /** The secret holding the synthetic-traffic token, if the environment lets synthetic traffic skip the CAPTCHA. */
+  readonly syntheticTrafficSecretName?: string;
+  /** Every stack the environment's pipeline identity deploys: its own three, and the registry if it owns that. */
+  readonly stackNames: readonly string[];
+}
+
+/**
+ * Derives each environment's deploy target from the account configuration and the environments' own files.
+ *
+ * @param config - the account configuration
+ * @param workloads - the environments' and the registry's configuration
+ * @throws {Error} when an environment does not run in the registry's Region, the only one its policies cover
+ */
+export function deployTargets(config: AccountConfig, workloads: WorkloadConfigs): DeployTarget[] {
+  return ENVIRONMENT_NAMES.map((name) => {
+    const environment = workloads.environments[name];
+    if (environment.region !== workloads.registry.region) {
+      throw new Error(`${name} runs in ${environment.region}, but the image registry, and every deploy policy, is in ${workloads.registry.region}`);
+    }
+    const stacks = environmentStackIds(environment);
+    return {
+      name,
+      githubEnvironment: config.deploy.environments[name].githubEnvironment,
+      bootstrapQualifier: config.deploy.environments[name].cdkBootstrapQualifier,
+      region: environment.region,
+      resourcePrefix: environment.resourcePrefix,
+      syntheticTrafficSecretName: environment.waf.syntheticTrafficBypass ? syntheticTrafficSecretName(environment.resourcePrefix) : undefined,
+      stackNames: [stacks.data, stacks.app, stacks.release, ...(config.deploy.registryEnvironment === name ? [REGISTRY_STACK_ID] : [])],
+    };
+  });
+}
+
 /**
  * The fixed name of an environment's deploy role, for example `branchbook-github-deploy-staging`. Fixed, so the ARN
  * is predictable and can be stored as the secret `AWS_DEPLOY_ROLE_ARN` of the GitHub environment.
@@ -276,6 +348,18 @@ export function parseAccountConfig(raw: unknown, source = 'infra/config/account.
  */
 export function deployRoleName(config: Pick<AccountConfig, 'namePrefix'>, environment: string): string {
   return `${config.namePrefix}-github-deploy-${environment}`;
+}
+
+/**
+ * The name `cdk bootstrap` gives one of its roles, for example `cdk-bbstg-deploy-role-<account>-af-south-1`.
+ *
+ * @param qualifier - the bootstrap's qualifier
+ * @param kind - which role: `deploy`, `file-publishing`, `image-publishing`, `lookup` or `cfn-exec`
+ * @param account - the account ID, or the token that stands for it
+ * @param region - the Region the bootstrap is in
+ */
+export function bootstrapRoleName(qualifier: string, kind: string, account: string, region: string): string {
+  return `cdk-${qualifier}-${kind}-role-${account}-${region}`;
 }
 
 /**
@@ -298,7 +382,10 @@ export interface AccountStackProps extends StackProps {
   /** The account-level configuration, from {@link loadAccountConfig}. */
   readonly config: AccountConfig;
 
-  /** Where budget alerts are e-mailed. Supplied at deploy time and never committed (see bin/branchbook.ts). */
+  /** The environments' and the registry's configuration, which the roles' names and scopes derive from. */
+  readonly workloads: WorkloadConfigs;
+
+  /** Where budget alerts are e-mailed. Supplied at deploy time and never committed (see lib/app.ts). */
   readonly alertEmail: string;
 }
 
@@ -309,9 +396,11 @@ export interface AccountStackProps extends StackProps {
  * - **GitHub as a trusted identity provider** (OpenID Connect), so workflows obtain short-lived AWS credentials
  *   and no long-lived access key exists anywhere to leak.
  * - **One deploy role per environment** (`branchbook-github-deploy-staging`, `branchbook-github-deploy-production`).
- *   Each trusts only jobs in this repository that declare its own GitHub environment, and may only assume the
- *   workload Region's CDK bootstrap roles, read its own environment's release records, push to and pull from the
- *   image repository, and, for staging, read the synthetic-traffic token.
+ *   Each trusts only jobs in this repository that declare its own GitHub environment, and may only assume its own
+ *   CDK bootstrap's roles, read its own release records, push to and pull from the image repository, and, where the
+ *   environment has one, read its synthetic-traffic token.
+ * - **A deploy scope for each environment's bootstrap deploy role**: CDK's bootstrap lets that role run CloudFormation
+ *   on any stack, so a deny keeps it off every other environment's stacks and the administrator's.
  * - **A monthly cost budget** that e-mails at the configured percentages of the limit.
  *
  * IAM and AWS Budgets are global, so this stack is deployed once to `us-east-1`, where Budgets lives. It holds no
@@ -327,6 +416,7 @@ export class AccountStack extends Stack {
       throw new Error('alertEmail must be an e-mail address (set BRANCHBOOK_ALERT_EMAIL before cdk synth or deploy)');
     }
     const { config } = props;
+    const targets = deployTargets(config, props.workloads);
 
     // The permissions boundary caps the roles the pipeline's stacks create, and forbids them to assume other roles
     // (guardrails-stack.ts). These roles are the pipeline's own identities, created by an administrator, and must
@@ -339,16 +429,17 @@ export class AccountStack extends Stack {
     });
 
     const roles: Record<string, iam.Role> = {};
-    for (const [name, environment] of Object.entries(config.deploy.environments)) {
-      const label = name.charAt(0).toUpperCase() + name.slice(1);
-      const role = this.deployRole(`${label}DeployRole`, github, config, name, environment);
-      roles[name] = role;
+    for (const target of targets) {
+      const label = target.name.charAt(0).toUpperCase() + target.name.slice(1);
+      const role = this.deployRole(`${label}DeployRole`, github, config, props.workloads.registry, target);
+      roles[target.name] = role;
       // Stored as the secret AWS_DEPLOY_ROLE_ARN of the GitHub environment. It is kept out of the repository because
       // it contains the AWS account ID.
       new CfnOutput(this, `${label}DeployRoleArn`, {
         value: role.roleArn,
-        description: `Store as the secret AWS_DEPLOY_ROLE_ARN of the ${environment.githubEnvironment} GitHub environment.`,
+        description: `Store as the secret AWS_DEPLOY_ROLE_ARN of the ${target.githubEnvironment} GitHub environment.`,
       });
+      this.deployScope(`${label}BootstrapDeployScope`, config, target, targets);
     }
     this.deployRoles = roles;
 
@@ -378,43 +469,43 @@ export class AccountStack extends Stack {
    * @param id - the role's construct ID
    * @param github - the GitHub OIDC provider the role trusts
    * @param config - the account configuration
-   * @param name - the environment's name, for example `staging`
-   * @param environment - the environment's settings
+   * @param registry - the image registry
+   * @param target - the environment
    */
   private deployRole(
     id: string,
     github: iam.OidcProviderNative,
     config: AccountConfig,
-    name: string,
-    environment: DeployEnvironmentConfig,
+    registry: RegistryConfig,
+    target: DeployTarget,
   ): iam.Role {
     const { partition, account } = this;
-    const region = config.workloadRegion;
+    const { region } = target;
 
     // The `sub` claim pins the trust to one repository AND one environment: a token minted for any other repository,
     // environment, branch-only workflow or fork does not match. GitHub issues immutable subjects, which carry the
     // numeric owner and repository IDs next to their names (see githubSubject).
     const role = new iam.Role(this, id, {
-      roleName: deployRoleName(config, name),
-      description: `Assumed by GitHub Actions in ${config.github.repository} (environment ${environment.githubEnvironment}) to deploy ${name}.`,
+      roleName: deployRoleName(config, target.name),
+      description: `Assumed by GitHub Actions in ${config.github.repository} (environment ${target.githubEnvironment}) to deploy ${target.name}.`,
       maxSessionDuration: Duration.minutes(config.deploy.maxSessionMinutes),
       assumedBy: new iam.WebIdentityPrincipal(github.oidcProviderArn, {
         StringEquals: {
           'token.actions.githubusercontent.com:aud': GITHUB_OIDC_AUDIENCE,
-          'token.actions.githubusercontent.com:sub': githubSubject(config.github, environment.githubEnvironment),
+          'token.actions.githubusercontent.com:sub': githubSubject(config.github, target.githubEnvironment),
         },
       }),
     });
 
-    // CDK deploys through the roles `cdk bootstrap` created, so the role needs to assume those, and only the workload
-    // Region's: the us-east-1 bootstrap roles, which deploy this stack, stay out of the pipeline's reach.
-    const qualifier = config.deploy.cdkBootstrapQualifier;
+    // CDK deploys through the roles `cdk bootstrap` created, so the role needs to assume those: only its own
+    // bootstrap's, in its own Region. Another environment's bootstrap, and the us-east-1 one that deploys this stack,
+    // stay out of reach.
     role.addToPolicy(
       new iam.PolicyStatement({
-        sid: 'AssumeWorkloadRegionCdkBootstrapRoles',
+        sid: 'AssumeOwnCdkBootstrapRoles',
         actions: ['sts:AssumeRole'],
         resources: CDK_BOOTSTRAP_ROLE_KINDS.map(
-          (kind) => `arn:${partition}:iam::${account}:role/cdk-${qualifier}-${kind}-role-${account}-${region}`,
+          (kind) => `arn:${partition}:iam::${account}:role/${bootstrapRoleName(target.bootstrapQualifier, kind, account, region)}`,
         ),
       }),
     );
@@ -425,8 +516,8 @@ export class AccountStack extends Stack {
       new iam.PolicyStatement({
         sid: 'ReadOwnReleaseRecords',
         actions: ['ssm:GetParameter'],
-        resources: RELEASE_PARAMETER_NAMES.map(
-          (parameter) => `arn:${partition}:ssm:${region}:${account}:parameter/${environment.resourcePrefix}/${parameter}`,
+        resources: [releaseParameterName(target.resourcePrefix), releaseImageParameterName(target.resourcePrefix)].map(
+          (parameter) => `arn:${partition}:ssm:${region}:${account}:parameter${parameter}`,
         ),
       }),
     );
@@ -455,22 +546,54 @@ export class AccountStack extends Stack {
           'ecr:PutImage',
           'ecr:UploadLayerPart',
         ],
-        resources: [`arn:${partition}:ecr:${region}:${account}:repository/${config.deploy.imageRepositoryName}`],
+        resources: [`arn:${partition}:ecr:${registry.region}:${account}:repository/${registry.repositoryName}`],
       }),
     );
 
-    // Staging's smoke test and end-to-end run send this token so the WAF CAPTCHA lets them through. Secrets Manager
-    // appends six random characters to a secret's ARN; `??????` matches exactly those, and no secret that merely
-    // shares the name as a prefix.
-    if (environment.syntheticTrafficSecretName !== undefined) {
+    // The smoke test and end-to-end run send this token so the WAF CAPTCHA lets them through. Secrets Manager appends
+    // six random characters to a secret's ARN; `??????` matches exactly those, and no secret that merely shares the
+    // name as a prefix.
+    if (target.syntheticTrafficSecretName !== undefined) {
       role.addToPolicy(
         new iam.PolicyStatement({
           sid: 'ReadSyntheticTrafficToken',
           actions: ['secretsmanager:GetSecretValue'],
-          resources: [`arn:${partition}:secretsmanager:${region}:${account}:secret:${environment.syntheticTrafficSecretName}-??????`],
+          resources: [`arn:${partition}:secretsmanager:${region}:${account}:secret:${target.syntheticTrafficSecretName}-??????`],
         }),
       );
     }
     return role;
+  }
+
+  /**
+   * Keeps one environment's bootstrap deploy role off every stack it does not own. `cdk bootstrap` gives that role
+   * CloudFormation on every stack in the account, so without this deny, staging's pipeline could hand production's
+   * stacks a change set, run by staging's execution role.
+   *
+   * @param id - the policy's construct ID
+   * @param config - the account configuration
+   * @param target - the environment whose deploy role is scoped
+   * @param targets - every environment
+   */
+  private deployScope(id: string, config: AccountConfig, target: DeployTarget, targets: readonly DeployTarget[]): void {
+    const { partition, account } = this;
+    const others = [
+      ...targets.filter((other) => other !== target).flatMap((other) => other.stackNames),
+      ...Object.values(ADMINISTRATOR_STACK_IDS),
+    ];
+    new iam.ManagedPolicy(this, id, {
+      managedPolicyName: `${config.namePrefix}-cdk-deploy-scope-${target.name}`,
+      description: `Keeps the ${target.name} CDK bootstrap's deploy role off every stack ${target.name} does not own.`,
+      roles: [iam.Role.fromRoleName(this, `${id}Role`, bootstrapRoleName(target.bootstrapQualifier, 'deploy', account, target.region))],
+      statements: [
+        new iam.PolicyStatement({
+          sid: 'OnlyThisEnvironmentsStacks',
+          effect: iam.Effect.DENY,
+          actions: ['cloudformation:*'],
+          // Any Region: the role is global, and so could reach a stack anywhere.
+          resources: others.map((stack) => `arn:${partition}:cloudformation:*:${account}:stack/${stack}/*`),
+        }),
+      ],
+    });
   }
 }

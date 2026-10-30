@@ -1,4 +1,4 @@
-import { App } from 'aws-cdk-lib/core';
+import { App, DefaultStackSynthesizer } from 'aws-cdk-lib/core';
 import { AppStack } from './app-stack';
 import { EnvironmentConfig, RegistryConfig } from './config';
 import { DataStack } from './data-stack';
@@ -10,6 +10,11 @@ import { ReleaseStack } from './release-stack';
 export interface EnvironmentInputs {
   /** The account, from the credentials in use; undefined during a credential-free synth. */
   readonly account?: string;
+  /**
+   * The qualifier of the CDK bootstrap the environment deploys through, from infra/config/account.json. Each
+   * environment has its own bootstrap, so one environment's pipeline cannot deploy through another's roles.
+   */
+  readonly bootstrapQualifier: string;
   /** The image every task runs, from `BRANCHBOOK_IMAGE_DIGEST`. */
   readonly imageDigest: string;
   /** The commit being deployed, from `GITHUB_SHA`, or `local`. */
@@ -66,11 +71,13 @@ export function addEnvironment(
 
   const data = new DataStack(app, ids.data, {
     env,
+    synthesizer: new DefaultStackSynthesizer({ qualifier: inputs.bootstrapQualifier }),
     description: `BranchBook ${config.name}: the network and the PostgreSQL 17 database.`,
     config,
   });
   const appStack = new AppStack(app, ids.app, {
     env,
+    synthesizer: new DefaultStackSynthesizer({ qualifier: inputs.bootstrapQualifier }),
     description: `BranchBook ${config.name}: WAF, the HTTPS load balancer, the Fargate service and the schema migration.`,
     config,
     vpc: data.vpc,
@@ -83,6 +90,7 @@ export function addEnvironment(
   });
   const release = new ReleaseStack(app, ids.release, {
     env,
+    synthesizer: new DefaultStackSynthesizer({ qualifier: inputs.bootstrapQualifier }),
     description: `BranchBook ${config.name}: records the git commit and image digest most recently deployed.`,
     resourcePrefix: config.resourcePrefix,
     version: inputs.version,

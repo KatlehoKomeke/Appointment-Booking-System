@@ -7,11 +7,13 @@
 import { Stack } from 'aws-cdk-lib/core';
 import { Template } from 'aws-cdk-lib/assertions';
 import { buildApp } from '../lib/app';
+import { loadAccountConfig } from '../lib/account-stack';
 import { ENVIRONMENT_NAMES, EnvironmentName } from '../lib/config';
 import { newApp } from './cdk-app';
 
 const DIGEST = `sha256:${'0'.repeat(64)}`;
 const ACCOUNT = '111111111111';
+const accountConfig = loadAccountConfig();
 
 /**
  * The IAM service prefix of each CloudFormation namespace (`AWS::<namespace>::<type>`) the application stacks may
@@ -79,7 +81,7 @@ function build(name: EnvironmentName): { appStacks: Stack[]; adminStacks: Stack[
     string,
     { Properties: { ManagedPolicyName: string; PolicyDocument: { Statement: Statement[] } } }
   >;
-  const exec = Object.values(policies).find((policy) => policy.Properties.ManagedPolicyName === 'branchbook-cdk-cfn-exec');
+  const exec = Object.values(policies).find((policy) => policy.Properties.ManagedPolicyName === `branchbook-cdk-cfn-exec-${name}`);
   const services = exec?.Properties.PolicyDocument.Statement.find((statement) => statement.Sid === 'DeployTheApplicationServices');
   if (services === undefined) {
     throw new Error('no execution policy statement DeployTheApplicationServices');
@@ -110,6 +112,16 @@ describe.each(ENVIRONMENT_NAMES)('the %s deployment', (name) => {
       }
     }
     expect(problems).toEqual([]);
+  });
+
+  test('every stack it deploys, the registry included where it owns it, goes through its own bootstrap', () => {
+    const own = accountConfig.deploy.environments[name].cdkBootstrapQualifier;
+    const registryQualifier = accountConfig.deploy.environments[accountConfig.deploy.registryEnvironment].cdkBootstrapQualifier;
+    for (const stack of appStacks) {
+      const expected = stack.stackName === 'BranchbookRegistry' ? registryQualifier : own;
+      const parameters = Template.fromStack(stack).toJSON().Parameters as Record<string, { Default?: string }>;
+      expect([stack.stackName, parameters.BootstrapVersion.Default]).toEqual([stack.stackName, `/cdk-bootstrap/${expected}/version`]);
+    }
   });
 
   test('every role the stacks it deploys create carries the permissions boundary, custom-resource roles included', () => {

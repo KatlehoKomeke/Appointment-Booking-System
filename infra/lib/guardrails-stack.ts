@@ -8,7 +8,7 @@ import * as kms from 'aws-cdk-lib/aws-kms';
 import * as s3 from 'aws-cdk-lib/aws-s3';
 import * as securityhub from 'aws-cdk-lib/aws-securityhub';
 import { Construct } from 'constructs';
-import { AccountConfig, deployRoleName } from './account-stack';
+import { AccountConfig, DeployTarget, deployRoleName, deployTargets, WorkloadConfigs } from './account-stack';
 
 /**
  * The services whose resources the application stacks create, so the CloudFormation execution role may manage them.
@@ -63,13 +63,14 @@ const CONFIG_KEY_PREFIX = 'config';
 const MINIMUM_TLS_VERSION = 1.2;
 
 /**
- * The name of the customer-managed policy that `cdk bootstrap --cloudformation-execution-policies` attaches to the
- * CloudFormation execution role, for example `branchbook-cdk-cfn-exec`.
+ * The name of the customer-managed policy that `cdk bootstrap --cloudformation-execution-policies` attaches to one
+ * environment's CloudFormation execution role, for example `branchbook-cdk-cfn-exec-staging`.
  *
  * @param config - the account configuration, for its name prefix
+ * @param environment - the environment's name
  */
-export function cfnExecPolicyName(config: Pick<AccountConfig, 'namePrefix'>): string {
-  return `${config.namePrefix}-cdk-cfn-exec`;
+export function cfnExecPolicyName(config: Pick<AccountConfig, 'namePrefix'>, environment: string): string {
+  return `${config.namePrefix}-cdk-cfn-exec-${environment}`;
 }
 
 /**
@@ -88,6 +89,9 @@ export function permissionsBoundaryName(config: Pick<AccountConfig, 'namePrefix'
 export interface GuardrailsStackProps extends StackProps {
   /** The account-level configuration, from `loadAccountConfig`. */
   readonly config: AccountConfig;
+
+  /** The environments' and the registry's configuration, which each execution policy's stack names derive from. */
+  readonly workloads: WorkloadConfigs;
 }
 
 /**
@@ -97,9 +101,10 @@ export interface GuardrailsStackProps extends StackProps {
  *   versioned bucket that blocks public access, refuses plain HTTP and expires objects after the configured days.
  * - **Detection**: a GuardDuty detector, AWS Config recording every supported resource, Security Hub with the AWS
  *   Foundational Security Best Practices standard, and an account IAM Access Analyzer.
- * - **Deployment limits**: the customer-managed policy `branchbook-cdk-cfn-exec`, which replaces CDK's default
- *   `AdministratorAccess` on the bootstrap's CloudFormation execution role, and the permissions boundary
- *   `branchbook-permissions-boundary`, which every role that role creates must carry.
+ * - **Deployment limits**: one customer-managed policy per environment, `branchbook-cdk-cfn-exec-<environment>`,
+ *   which replaces CDK's default `AdministratorAccess` on that environment's bootstrap execution role and lets it
+ *   change only that environment's stacks' IAM roles, and the permissions boundary `branchbook-permissions-boundary`,
+ *   which every role those execution roles create must carry.
  *
  * An administrator deploys it, never the pipeline: it uses the administrator's own credentials instead of the
  * bootstrap roles, because the hardened execution role may not touch these services, and the pipeline's deploy roles
@@ -109,8 +114,8 @@ export class GuardrailsStack extends Stack {
   /** The bucket that holds CloudTrail logs and AWS Config history. */
   public readonly auditBucket: s3.Bucket;
 
-  /** The policy for the bootstrap's CloudFormation execution role. */
-  public readonly cfnExecPolicy: iam.ManagedPolicy;
+  /** Each environment's policy for its bootstrap's CloudFormation execution role, by environment name. */
+  public readonly cfnExecPolicies: Readonly<Record<string, iam.ManagedPolicy>>;
 
   /** The boundary every role the application stacks create must carry. */
   public readonly permissionsBoundary: iam.ManagedPolicy;
@@ -277,13 +282,14 @@ export class GuardrailsStack extends Stack {
       type: 'ACCOUNT',
     });
 
-    // The two policies refer to each other's ARNs, and to their own, so the ARNs are built from the names rather than
+    // The policies refer to each other's ARNs, and to their own, so the ARNs are built from the names rather than
     // referenced, which would be circular.
-    const boundaryArn = `arn:${partition}:iam::${account}:policy/${permissionsBoundaryName(config)}`;
-    const cfnExecArn = `arn:${partition}:iam::${account}:policy/${cfnExecPolicyName(config)}`;
+    const policyArn = (name: string): string => `arn:${partition}:iam::${account}:policy/${name}`;
+    const targets = deployTargets(config, props.workloads);
+    const boundaryArn = policyArn(permissionsBoundaryName(config));
     const protectedStatements = guardrailDenies({
+      policyArns: [boundaryArn, ...targets.map((target) => policyArn(cfnExecPolicyName(config, target.name)))],
       boundaryArn,
-      cfnExecArn,
       auditBucketArn: bucket.bucketArn,
       trailKeyArn: trailKey.keyArn,
     });
@@ -306,11 +312,53 @@ export class GuardrailsStack extends Stack {
       ],
     });
 
-    const appRoleArns = settings.appStackNames.map((name) => `arn:${partition}:iam::${account}:role/${name}-*`);
-    const appPolicyArns = settings.appStackNames.map((name) => `arn:${partition}:iam::${account}:policy/${name}-*`);
-    this.cfnExecPolicy = new iam.ManagedPolicy(this, 'CfnExecPolicy', {
-      managedPolicyName: cfnExecPolicyName(config),
-      description: 'What CloudFormation may do when the pipeline deploys BranchBook: the application services, and IAM only for roles that carry the permissions boundary.',
+    const policies: Record<string, iam.ManagedPolicy> = {};
+    for (const target of targets) {
+      const label = target.name.charAt(0).toUpperCase() + target.name.slice(1);
+      const policy = this.cfnExecPolicy(`${label}CfnExecPolicy`, config, target, boundaryArn, protectedStatements);
+      policies[target.name] = policy;
+      new CfnOutput(this, `${label}CfnExecPolicyArn`, {
+        value: policy.managedPolicyArn,
+        description: `Pass to cdk bootstrap --cloudformation-execution-policies for the ${target.name} bootstrap (qualifier ${target.bootstrapQualifier}).`,
+      });
+    }
+    this.cfnExecPolicies = policies;
+
+    new CfnOutput(this, 'PermissionsBoundaryArn', {
+      value: this.permissionsBoundary.managedPolicyArn,
+      description: 'Attached to every role the application stacks create (@aws-cdk/core:permissionsBoundary).',
+    });
+    new CfnOutput(this, 'AuditBucketName', {
+      value: bucket.bucketName,
+      description: 'Where CloudTrail logs and AWS Config history are kept.',
+    });
+  }
+
+  /**
+   * One environment's execution policy: the application services, and IAM only for the roles and managed policies
+   * CloudFormation names after that environment's own stacks.
+   *
+   * @param id - the policy's construct ID
+   * @param config - the account configuration
+   * @param target - the environment
+   * @param boundaryArn - the permissions boundary every role must carry
+   * @param protectedStatements - the denies every deployment policy carries
+   */
+  private cfnExecPolicy(
+    id: string,
+    config: AccountConfig,
+    target: DeployTarget,
+    boundaryArn: string,
+    protectedStatements: iam.PolicyStatement[],
+  ): iam.ManagedPolicy {
+    const { partition, account } = this;
+    // CloudFormation names a role `<stack>-<logical id>-<suffix>`, and a managed policy likewise, so these patterns
+    // cover this environment's stacks' roles and nothing else: not the other environment's, whose stack IDs differ.
+    const roleArns = target.stackNames.map((name) => `arn:${partition}:iam::${account}:role/${name}-*`);
+    const managedPolicyArns = target.stackNames.map((name) => `arn:${partition}:iam::${account}:policy/${name}-*`);
+    return new iam.ManagedPolicy(this, id, {
+      managedPolicyName: cfnExecPolicyName(config, target.name),
+      description: `What CloudFormation may do when the pipeline deploys ${target.name}: the application services, and IAM only for ${target.name}'s roles, which must carry the permissions boundary.`,
       statements: [
         new iam.PolicyStatement({
           sid: 'DeployTheApplicationServices',
@@ -331,12 +379,11 @@ export class GuardrailsStack extends Stack {
           actions: ['iam:PassRole'],
           resources: [`arn:${partition}:iam::${account}:role/aws-service-role/*`],
         }),
-        // CloudFormation names a role `<stack>-<logical id>-<suffix>`, so these patterns cover the application
-        // stacks' roles and nothing else. Creating one, or giving one permissions, requires the boundary.
+        // Creating a role, or giving one permissions, requires the boundary.
         new iam.PolicyStatement({
           sid: 'CreateAndGrantAppRolesOnlyWithTheBoundary',
           actions: ['iam:AttachRolePolicy', 'iam:CreateRole', 'iam:PutRolePermissionsBoundary', 'iam:PutRolePolicy'],
-          resources: appRoleArns,
+          resources: roleArns,
           conditions: { StringEquals: { 'iam:PermissionsBoundary': boundaryArn } },
         }),
         new iam.PolicyStatement({
@@ -352,7 +399,7 @@ export class GuardrailsStack extends Stack {
             'iam:UpdateRole',
             'iam:UpdateRoleDescription',
           ],
-          resources: appRoleArns,
+          resources: roleArns,
         }),
         new iam.PolicyStatement({
           sid: 'ManageAppManagedPolicies',
@@ -364,7 +411,7 @@ export class GuardrailsStack extends Stack {
             'iam:TagPolicy',
             'iam:UntagPolicy',
           ],
-          resources: appPolicyArns,
+          resources: managedPolicyArns,
         }),
         // The roles that deploy (the bootstrap roles and the pipeline's own) are never a deployment's to change.
         deny('DenyBootstrapAndDeployRoles', ['iam:*'], [
@@ -374,26 +421,14 @@ export class GuardrailsStack extends Stack {
         ...protectedStatements,
       ],
     });
-
-    new CfnOutput(this, 'CfnExecPolicyArn', {
-      value: this.cfnExecPolicy.managedPolicyArn,
-      description: 'Pass to cdk bootstrap --cloudformation-execution-policies for the workload Region.',
-    });
-    new CfnOutput(this, 'PermissionsBoundaryArn', {
-      value: this.permissionsBoundary.managedPolicyArn,
-      description: 'Attached to every role the application stacks create (@aws-cdk/core:permissionsBoundary).',
-    });
-    new CfnOutput(this, 'AuditBucketName', {
-      value: bucket.bucketName,
-      description: 'Where CloudTrail logs and AWS Config history are kept.',
-    });
   }
 }
 
 /** The ARNs the shared deny statements protect. */
 interface ProtectedArns {
+  /** The boundary and every execution policy: none may be changed or deleted. */
+  readonly policyArns: readonly string[];
   readonly boundaryArn: string;
-  readonly cfnExecArn: string;
   readonly auditBucketArn: string;
   readonly trailKeyArn: string;
 }
@@ -409,7 +444,7 @@ function guardrailDenies(arns: ProtectedArns): iam.PolicyStatement[] {
     deny(
       'DenyChangingTheGuardrailPolicies',
       ['iam:CreatePolicyVersion', 'iam:DeletePolicy', 'iam:DeletePolicyVersion', 'iam:SetDefaultPolicyVersion'],
-      [arns.boundaryArn, arns.cfnExecArn],
+      [...arns.policyArns],
     ),
     deny('DenyRemovingTheBoundary', ['iam:DeleteRolePermissionsBoundary'], ['*']),
     // A role may only be created, or given permissions, while it carries this boundary.

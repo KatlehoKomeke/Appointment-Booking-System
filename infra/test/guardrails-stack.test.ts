@@ -4,10 +4,11 @@
  */
 import { App, CliCredentialsStackSynthesizer } from 'aws-cdk-lib/core';
 import { Match, Template } from 'aws-cdk-lib/assertions';
-import { loadAccountConfig } from '../lib/account-stack';
+import { deployTargets, loadAccountConfig, loadWorkloadConfigs } from '../lib/account-stack';
 import { CFN_EXEC_SERVICES, GuardrailsStack } from '../lib/guardrails-stack';
 
 const config = loadAccountConfig();
+const workloads = loadWorkloadConfigs();
 // A placeholder account; the real one comes from the credentials in use and is never committed.
 const ACCOUNT = '111111111111';
 
@@ -27,7 +28,7 @@ interface ManagedPolicyResource {
 
 // The app sets this flag in cdk.json; with it, ARNs in a stack with a known Region are plain strings.
 const app = new App({ context: { '@aws-cdk/core:enablePartitionLiterals': true } });
-const stack = new GuardrailsStack(app, 'Guardrails', { env: { account: ACCOUNT, region: 'af-south-1' }, config });
+const stack = new GuardrailsStack(app, 'Guardrails', { env: { account: ACCOUNT, region: 'af-south-1' }, config, workloads });
 const template = Template.fromStack(stack);
 
 function policy(name: string): Statement[] {
@@ -168,8 +169,11 @@ describe('GuardrailsStack', () => {
     template.resourceCountIs('AWS::IAM::Role', 0);
   });
 
-  describe('the CloudFormation execution policy', () => {
-    const statements = policy('branchbook-cdk-cfn-exec');
+  describe.each(deployTargets(config, workloads).map((target) => [target.name, target] as const))('the %s CloudFormation execution policy', (name, target) => {
+    const statements = policy(`branchbook-cdk-cfn-exec-${name}`);
+    const otherStacks = deployTargets(config, workloads)
+      .filter((other) => other.name !== name)
+      .flatMap((other) => other.stackNames);
 
     test('allows each application service, and nothing else outright', () => {
       const allowed = statement(statements, 'DeployTheApplicationServices');
@@ -196,14 +200,16 @@ describe('GuardrailsStack', () => {
       }
     });
 
-    test('changes and passes only roles CloudFormation names after an application stack', () => {
+    test('changes and passes only roles CloudFormation names after one of this environment\'s own stacks', () => {
       for (const sid of ['CreateAndGrantAppRolesOnlyWithTheBoundary', 'ManageAppRoles']) {
-        const arns = JSON.stringify(statement(statements, sid).Resource);
-        for (const name of config.guardrails.appStackNames) {
-          expect(arns).toContain(`:iam::${ACCOUNT}:role/${name}-*"`);
+        const arns = (([] as unknown[]).concat(statement(statements, sid).Resource) as string[]).sort();
+        expect(arns).toEqual(target.stackNames.map((stack) => `arn:aws:iam::${ACCOUNT}:role/${stack}-*`).sort());
+        for (const other of otherStacks) {
+          expect(arns).not.toContain(`arn:aws:iam::${ACCOUNT}:role/${other}-*`);
         }
-        expect(arns).not.toContain('role/*');
       }
+      const managed = (([] as unknown[]).concat(statement(statements, 'ManageAppManagedPolicies').Resource) as string[]).sort();
+      expect(managed).toEqual(target.stackNames.map((stack) => `arn:aws:iam::${ACCOUNT}:policy/${stack}-*`).sort());
       expect(actions(statement(statements, 'ManageAppRoles'))).toContain('iam:PassRole');
       // Besides those, only service-linked roles, which nothing but their own service can assume, may be passed.
       const passing = statements.filter((candidate) => candidate.Effect === 'Allow' && actions(candidate).includes('iam:PassRole'));
@@ -218,7 +224,9 @@ describe('GuardrailsStack', () => {
       expect(JSON.stringify(roles.Resource)).toContain(':role/branchbook-github-deploy-*"');
       const policies = statement(statements, 'DenyChangingTheGuardrailPolicies');
       expect(policies.Effect).toBe('Deny');
-      expect(JSON.stringify(policies.Resource)).toContain(':policy/branchbook-cdk-cfn-exec"');
+      // Every execution policy, not only this one: no environment may loosen another's.
+      expect(JSON.stringify(policies.Resource)).toContain(':policy/branchbook-cdk-cfn-exec-staging"');
+      expect(JSON.stringify(policies.Resource)).toContain(':policy/branchbook-cdk-cfn-exec-production"');
       expect(JSON.stringify(policies.Resource)).toContain(`${BOUNDARY_ARN}"`);
     });
 
@@ -275,8 +283,9 @@ describe('GuardrailsStack', () => {
     });
   });
 
-  test('outputs the execution policy for cdk bootstrap, the boundary and the audit bucket', () => {
-    template.hasOutput('CfnExecPolicyArn', {});
+  test('outputs each environment\'s execution policy for its cdk bootstrap, the boundary and the audit bucket', () => {
+    template.hasOutput('StagingCfnExecPolicyArn', { Description: Match.stringLikeRegexp('qualifier bbstg') });
+    template.hasOutput('ProductionCfnExecPolicyArn', { Description: Match.stringLikeRegexp('qualifier hnb659fds') });
     template.hasOutput('PermissionsBoundaryArn', {});
     template.hasOutput('AuditBucketName', {});
   });

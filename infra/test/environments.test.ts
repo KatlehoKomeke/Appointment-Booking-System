@@ -5,11 +5,13 @@
  */
 import { Match, Template } from 'aws-cdk-lib/assertions';
 import { EnvironmentConfig, EnvironmentName, loadEnvironmentConfig, loadRegistryConfig } from '../lib/config';
+import { loadAccountConfig } from '../lib/account-stack';
 import { addEnvironment } from '../lib/environment';
 import { MMS_COUNTRIES, SMS_COUNTRIES } from '../lib/sms-countries';
 import { newApp } from './cdk-app';
 
 const DIGEST = `sha256:${'5e'.repeat(32)}`;
+const QUALIFIERS = loadAccountConfig().deploy.environments;
 
 interface Built {
   readonly config: EnvironmentConfig;
@@ -22,6 +24,7 @@ function build(name: EnvironmentName): Built {
   const config = loadEnvironmentConfig(name);
   const stacks = addEnvironment(app, config, loadRegistryConfig(), {
     account: '111111111111',
+    bootstrapQualifier: QUALIFIERS[name].cdkBootstrapQualifier,
     imageDigest: DIGEST,
     version: 'local',
   });
@@ -420,6 +423,7 @@ describe('production', () => {
   test('can deploy a task that only asks AWS to check each send', () => {
     const cdkApp = newApp();
     const stacks = addEnvironment(cdkApp, production.config, loadRegistryConfig(), {
+      bootstrapQualifier: QUALIFIERS.production.cdkBootstrapQualifier,
       imageDigest: DIGEST,
       version: 'local',
       smsDryRun: true,

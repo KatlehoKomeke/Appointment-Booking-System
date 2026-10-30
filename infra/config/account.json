@@ -6,37 +6,25 @@
     "repositoryId": "1423867330"
   },
   "accountRegion": "us-east-1",
-  "workloadRegion": "af-south-1",
   "budget": {
     "monthlyUsd": 350,
     "alertThresholdsPercent": [50, 80, 100]
   },
   "deploy": {
     "maxSessionMinutes": 60,
-    "cdkBootstrapQualifier": "hnb659fds",
-    "imageRepositoryName": "branchbook",
+    "registryEnvironment": "staging",
     "environments": {
       "staging": {
         "githubEnvironment": "staging",
-        "resourcePrefix": "branchbook-staging",
-        "syntheticTrafficSecretName": "branchbook-staging/synthetic-traffic-token"
+        "cdkBootstrapQualifier": "bbstg"
       },
       "production": {
         "githubEnvironment": "production",
-        "resourcePrefix": "branchbook"
+        "cdkBootstrapQualifier": "hnb659fds"
       }
     }
   },
   "guardrails": {
-    "appStackNames": [
-      "BranchbookRegistry",
-      "BranchbookData",
-      "BranchbookApp",
-      "BranchbookRelease",
-      "BranchbookStagingData",
-      "BranchbookStagingApp",
-      "BranchbookStagingRelease"
-    ],
     "auditLogRetentionDays": 365,
     "auditLogNoncurrentVersionDays": 30,
     "guardDuty": {
