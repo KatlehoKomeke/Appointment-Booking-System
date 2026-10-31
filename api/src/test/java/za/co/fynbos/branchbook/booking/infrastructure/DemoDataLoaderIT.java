@@ -146,13 +146,7 @@ class DemoDataLoaderIT {
    */
   @Test
   void booksNothingWhereOnlyTheDemoNumbersBook(CapturedOutput output) {
-    BookingProperties demoNumbersOnly =
-        new BookingProperties(
-            rules.leadTime(),
-            rules.horizon(),
-            rules.lookupMaxFailures(),
-            rules.lookupWindow(),
-            true);
+    BookingProperties demoNumbersOnly = rules.withDemoNumbersOnly(true);
     DemoDataLoader hosted =
         new DemoDataLoader(
             booking,

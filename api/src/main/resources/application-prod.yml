@@ -1,0 +1,47 @@
+# application-prod.yml
+#
+# The prod profile, which staging and production run with (SPRING_PROFILES_ACTIVE=prod). It changes only what must
+# differ from a developer's machine, and fails closed: everything here is the safe value, an environment variable can
+# still set another, and ProductionProfileGuard refuses to start under this profile with a combination that would be
+# unsafe in public, such as the inbox without redaction or demo data. Staging mirrors production; only the
+# environment's values (its address, its database, its keys) differ. docs/configuration.md lists every value per
+# environment.
+
+spring:
+  flyway:
+    # Staging and production migrate as a deployment step, in a one-off task with the database owner's credentials
+    # (BRANCHBOOK_MIGRATE_ONLY=true), so the running application connects as the runtime role and needs no DDL rights.
+    enabled: ${BRANCHBOOK_MIGRATE_ON_START:false}
+
+branchbook:
+  inbox:
+    # The simulated inbox is an operator view with no sign-in, so it stays off in public.
+    enabled: ${BRANCHBOOK_INBOX_ENABLED:false}
+    # Should the inbox ever be switched on, it shows no reference; the guard refuses the inbox without this.
+    redact-references: ${BRANCHBOOK_INBOX_REDACT_REFERENCES:true}
+  demo-data:
+    # A public deployment never books fixtures into a real database; the guard refuses it on.
+    enabled: ${BRANCHBOOK_DEMO_DATA_ENABLED:false}
+
+springdoc:
+  api-docs:
+    # The contract is published in the repository (docs/openapi.yaml), so a deployment does not serve it: one fewer
+    # surface to probe. EXPECT_PROD_PROFILE=1 scripts/smoke.sh checks /v3/api-docs is a 404.
+    enabled: ${SPRINGDOC_API_DOCS_ENABLED:false}
+  swagger-ui:
+    # Off with the document it renders.
+    enabled: ${SPRINGDOC_SWAGGER_UI_ENABLED:false}
+
+management:
+  server:
+    # The actuator (health details, info, prometheus) listens on a port of its own, which the load balancer never
+    # routes and the task's security group admits only from inside the network. /livez and /readyz stay on the main
+    # port for the load balancer's health check. The guard refuses the main port here.
+    port: ${MANAGEMENT_SERVER_PORT:8081}
+
+logging:
+  structured:
+    format:
+      # One JSON object per line in Elastic Common Schema, which CloudWatch Logs Insights can query by field; the
+      # correlation id travels in the MDC as before. Plain text stays the default on a developer's machine.
+      console: ${LOGGING_STRUCTURED_FORMAT_CONSOLE:ecs}

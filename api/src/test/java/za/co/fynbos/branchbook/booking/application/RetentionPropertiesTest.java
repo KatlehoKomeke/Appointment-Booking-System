@@ -26,8 +26,9 @@ class RetentionPropertiesTest {
 
   @Test
   void acceptsZeroAndADelay() {
-    assertThat(new RetentionProperties(true, Duration.ZERO).afterEnd()).isEqualTo(Duration.ZERO);
-    assertThat(new RetentionProperties(true, Duration.ofHours(24)).afterEnd())
+    assertThat(new RetentionProperties(true, Duration.ZERO, 500).afterEnd())
+        .isEqualTo(Duration.ZERO);
+    assertThat(new RetentionProperties(true, Duration.ofHours(24), 500).afterEnd())
         .isEqualTo(Duration.ofHours(24));
   }
 
@@ -35,13 +36,14 @@ class RetentionPropertiesTest {
   @ValueSource(strings = {"-PT1S", "-PT48H"})
   void refusesANegativeAfterEnd(String afterEnd) {
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new RetentionProperties(false, Duration.parse(afterEnd)))
+        .isThrownBy(() -> new RetentionProperties(false, Duration.parse(afterEnd), 500))
         .withMessageContaining("zero or more");
   }
 
   @Test
   void refusesAMissingAfterEnd() {
-    assertThatIllegalArgumentException().isThrownBy(() -> new RetentionProperties(false, null));
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> new RetentionProperties(false, null, 500));
   }
 
   /** Unset, the purge is off and deletes a booking as soon as its appointment has ended. */

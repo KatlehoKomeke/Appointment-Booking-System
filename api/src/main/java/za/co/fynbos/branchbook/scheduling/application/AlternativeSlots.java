@@ -15,17 +15,15 @@ import za.co.fynbos.branchbook.shared.config.BookingProperties;
 import za.co.fynbos.branchbook.shared.time.TimeFormat;
 
 /**
- * Finds what to offer a customer whose slot filled up while they were booking: up to {@value
- * #MAX_ALTERNATIVES} later slots on the same day that still have a free seat (BR-7).
+ * Finds what to offer a customer whose slot filled up while they were booking: up to {@code
+ * branchbook.booking.max-alternatives}, three by default, later slots on the same day that still
+ * have a free seat (BR-7).
  *
  * <p>The booking transaction calls it after its own transaction has rolled back, so the search
  * holds no lock and sees every booking that has committed since.
  */
 @Service
 public class AlternativeSlots {
-
-  /** The most alternatives offered. */
-  public static final int MAX_ALTERNATIVES = 3;
 
   private final BranchCalendarProvider calendars;
   private final BookedIntervalsPort bookedIntervals;
@@ -49,7 +47,7 @@ public class AlternativeSlots {
    * @param branchCode the branch code, in upper case
    * @param serviceCode the service code, in upper case
    * @param startsAt the start that was full
-   * @return up to {@value #MAX_ALTERNATIVES} slots, earliest first, each with the branch's offset;
+   * @return up to {@code max-alternatives} slots, earliest first, each with the branch's offset;
    *     empty when none is left that day
    */
   @Transactional(readOnly = true)
@@ -67,7 +65,7 @@ public class AlternativeSlots {
                 service.serviceId(),
                 LocalDate.ofInstant(startsAt, zone),
                 zone),
-            MAX_ALTERNATIVES)
+            booking.maxAlternatives())
         .stream()
         .map(
             slot ->

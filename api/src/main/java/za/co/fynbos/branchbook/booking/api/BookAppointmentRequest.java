@@ -13,6 +13,7 @@ import za.co.fynbos.branchbook.booking.application.BookAppointmentCommand;
 import za.co.fynbos.branchbook.booking.application.DemoNumberRequiredException;
 import za.co.fynbos.branchbook.booking.application.MobileNumberRequiredException;
 import za.co.fynbos.branchbook.booking.domain.CustomerName;
+import za.co.fynbos.branchbook.booking.domain.DemoNumberBlock;
 import za.co.fynbos.branchbook.booking.domain.IdempotencyKey;
 import za.co.fynbos.branchbook.booking.domain.MobileNumber;
 
@@ -49,16 +50,18 @@ public record BookAppointmentRequest(
    *
    * @param key the parsed {@code Idempotency-Key}
    * @param demoNumbersOnly whether this deployment takes only the published demo numbers
+   * @param demoNumbers the published demo numbers
    * @return the command, every value in its normalised form
    * @throws MobileNumberRequiredException if the mobile number is missing or is not a South African
    *     mobile
    * @throws DemoNumberRequiredException if only demo numbers are taken and this South African
    *     mobile is not one
    */
-  BookAppointmentCommand toCommand(IdempotencyKey key, boolean demoNumbersOnly) {
+  BookAppointmentCommand toCommand(
+      IdempotencyKey key, boolean demoNumbersOnly, DemoNumberBlock demoNumbers) {
     MobileNumber mobile =
         MobileNumber.parse(customer.mobile()).orElseThrow(MobileNumberRequiredException::new);
-    if (demoNumbersOnly && !mobile.isPublishedDemoNumber()) {
+    if (demoNumbersOnly && !demoNumbers.contains(mobile)) {
       throw new DemoNumberRequiredException();
     }
     return new BookAppointmentCommand(

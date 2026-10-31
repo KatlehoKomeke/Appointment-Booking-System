@@ -12,27 +12,37 @@ GITLEAKS_IMAGE := ghcr.io/gitleaks/gitleaks:$(GITLEAKS_VERSION)
 GIT_SAFE_DIR := -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'
 
 .DEFAULT_GOAL := help
-.PHONY: help up down logs psql smoke e2e demo-409 dev-api dev-web test test-api test-web test-docs contract fmt hooks secrets-scan secrets-scan-history
+.PHONY: help db-password up down logs psql smoke e2e demo-409 dev-api dev-web test test-api test-web test-docs contract fmt hooks secrets-scan secrets-scan-history
 
 help: ## List the available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-22s %s\n", $$1, $$2}'
 
 # --- Run -------------------------------------------------------------------------------------------------------------
 
-up: ## Build and start the app and its database, wait until both are healthy, and print the URL
+# compose.yaml commits no database password, so every target that runs docker compose first makes sure there is one: an
+# exported DB_PASSWORD wins (CI exports its own); otherwise the git-ignored .env gets a random one, once, readable only
+# by you. A copy started before the password was required needs `make down` once, as the old database keeps the old one.
+db-password: ## Write a random DB_PASSWORD to the git-ignored .env, unless one is exported or already there
+	@if [ -z "$${DB_PASSWORD:-}" ] && ! grep -qsE '^DB_PASSWORD=.+' .env; then \
+	  touch .env; grep -v '^DB_PASSWORD=' .env > .env.tmp || true; mv .env.tmp .env; \
+	  printf 'DB_PASSWORD=%s\n' "$$(openssl rand -hex 24)" >> .env; chmod 600 .env; \
+	  echo "Wrote a random DB_PASSWORD to .env (git-ignored)."; \
+	fi
+
+up: db-password ## Build and start the app and its database, wait until both are healthy, and print the URL
 	docker compose up --build --detach --wait --wait-timeout 300
 	@echo "BranchBook is running at http://$$(docker compose port app 8080)"
 
-down: ## Stop the app and the database, and delete the local database
+down: db-password ## Stop the app and the database, and delete the local database
 	docker compose down --volumes --remove-orphans
 
-logs: ## Follow the application's log
+logs: db-password ## Follow the application's log
 	docker compose logs --follow app
 
-psql: ## Open a SQL shell on the local database
+psql: db-password ## Open a SQL shell on the local database
 	docker compose exec db sh -c 'psql -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"'
 
-smoke: ## Check the running app over HTTP (after `make up`)
+smoke: db-password ## Check the running app over HTTP (after `make up`)
 	scripts/smoke.sh "http://$$(docker compose port app 8080)"
 
 # Books real appointments in the running app's database, so it is for a local or demo stack, never a shared one.
@@ -41,7 +51,7 @@ E2E_BASE_URL ?= http://localhost:8080
 e2e: ## Run the Playwright end-to-end tests in Chromium against the running app (after `make up`; Node 24)
 	cd e2e && npm ci && npx playwright install chromium && E2E_BASE_URL="$(E2E_BASE_URL)" npx playwright test
 
-demo-409: ## Race 20 bookings for Polokwane's last FICA seat on the running app (after `make up`); books one each run
+demo-409: db-password ## Race 20 bookings for Polokwane's last FICA seat on the running app (after `make up`); books one each run
 	scripts/demo-409.sh "http://$$(docker compose port app 8080)"
 
 # --- Develop ---------------------------------------------------------------------------------------------------------

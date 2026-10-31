@@ -6,7 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatNoException;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.time.Period;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -15,7 +14,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.dao.QueryTimeoutException;
 import org.springframework.transaction.support.TransactionOperations;
 import za.co.fynbos.branchbook.booking.domain.AppointmentReference;
-import za.co.fynbos.branchbook.shared.config.BookingProperties;
+import za.co.fynbos.branchbook.support.BookingRules;
 
 /**
  * BR-13: settling a count runs after the lookup's read and after the cancel's commit, so it must
@@ -45,10 +44,7 @@ class LookupAttemptLimiterTest {
 
   private final LookupAttemptLimiter limiter =
       new LookupAttemptLimiter(
-          new BookingProperties(
-              Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false),
-          store,
-          TransactionOperations.withoutTransaction());
+          BookingRules.defaults(), store, TransactionOperations.withoutTransaction());
 
   /**
    * A settle that fails is logged without the reference or the database's message, and does not
@@ -84,7 +80,8 @@ class LookupAttemptLimiterTest {
     assertThatExceptionOfType(LookupRateLimitedException.class)
         .isThrownBy(() -> limiter.begin(REFERENCE, FIRST.plusSeconds(1)))
         .satisfies(limited -> assertThat(limited.retryAfter()).contains(Duration.ofSeconds(1)));
-    Instant afterTheLease = FIRST.plus(LookupAttemptLimiter.IN_FLIGHT_LEASE).plusSeconds(1);
+    Instant afterTheLease =
+        FIRST.plus(BookingRules.defaults().lookupInFlightLease()).plusSeconds(1);
     assertThatNoException().isThrownBy(() -> limiter.begin(REFERENCE, afterTheLease));
   }
 }

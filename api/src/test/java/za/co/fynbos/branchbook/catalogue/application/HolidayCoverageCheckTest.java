@@ -9,10 +9,8 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.time.Period;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -27,6 +25,7 @@ import za.co.fynbos.branchbook.catalogue.domain.Province;
 import za.co.fynbos.branchbook.catalogue.domain.PublicHoliday;
 import za.co.fynbos.branchbook.catalogue.domain.PublicHoliday.Source;
 import za.co.fynbos.branchbook.shared.config.BookingProperties;
+import za.co.fynbos.branchbook.support.BookingRules;
 
 /**
  * BR-3: the warning that the booking window is about to reach, or has reached, dates the
@@ -35,8 +34,7 @@ import za.co.fynbos.branchbook.shared.config.BookingProperties;
  */
 class HolidayCoverageCheckTest {
 
-  private static final BookingProperties BOOKING =
-      new BookingProperties(Duration.ofHours(2), Period.ofDays(30), 5, Duration.ofHours(1), false);
+  private static final BookingProperties BOOKING = BookingRules.defaults();
 
   private final CatalogueReadPort catalogue = mock(CatalogueReadPort.class);
 

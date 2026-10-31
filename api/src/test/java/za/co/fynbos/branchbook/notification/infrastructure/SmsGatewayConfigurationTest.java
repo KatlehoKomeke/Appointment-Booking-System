@@ -10,16 +10,19 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.StandardEnvironment;
 import org.springframework.core.env.SystemEnvironmentPropertySource;
 import software.amazon.awssdk.regions.Region;
+import za.co.fynbos.branchbook.booking.domain.DemoNumberBlock;
 import za.co.fynbos.branchbook.notification.application.DispatcherProperties;
 import za.co.fynbos.branchbook.notification.application.MessageGateway;
 import za.co.fynbos.branchbook.notification.application.MessageGateway.Accepted;
 import za.co.fynbos.branchbook.notification.application.OutgoingMessage;
 import za.co.fynbos.branchbook.notification.application.SmsProperties;
 import za.co.fynbos.branchbook.notification.domain.NotificationChannel;
+import za.co.fynbos.branchbook.support.BookingRules;
 
 /**
  * FR-15: exactly one {@link MessageGateway} reaches the dispatcher. By default it is the simulated
@@ -100,7 +103,7 @@ class SmsGatewayConfigurationTest {
     assertThat(output)
         .contains(
             "SMS gateway: AWS End User Messaging SMS in af-south-1 for every number outside the"
-                + " demo block 082 555 0000 to 0199, which stays simulated"
+                + " demo block 082 555 0000 to 082 555 0199, which stays simulated"
                 + " (branchbook.sms.gateway is aws); a protect configuration is set;"
                 + " a recipient daily cap of 5 SMS.")
         .doesNotContain("protect-0a1b2c");
@@ -129,5 +132,11 @@ class SmsGatewayConfigurationTest {
   /** Binds the SMS and dispatcher settings alone. */
   @Configuration(proxyBeanMethods = false)
   @EnableConfigurationProperties({SmsProperties.class, DispatcherProperties.class})
-  static class Settings {}
+  static class Settings {
+
+    @Bean
+    DemoNumberBlock demoNumberBlock() {
+      return BookingRules.DEMO_NUMBERS;
+    }
+  }
 }

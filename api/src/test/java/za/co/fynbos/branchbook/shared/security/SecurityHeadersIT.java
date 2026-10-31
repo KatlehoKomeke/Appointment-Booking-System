@@ -40,6 +40,20 @@ class SecurityHeadersIT {
   }
 
   /**
+   * Without a CAPTCHA the policy is exactly the one {@code scripts/smoke.sh} checks, character for
+   * character; {@code CaptchaConfiguredIT} proves the policy with one.
+   */
+  @Test
+  void withoutACaptchaThePolicyIsTheStrictOne() {
+    assertThat(mvc.get().uri("/"))
+        .headers()
+        .hasValue(
+            "Content-Security-Policy",
+            "default-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'self'; "
+                + "form-action 'self'; frame-ancestors 'none'");
+  }
+
+  /**
    * Swagger UI's pages are the one place inline styles are allowed, which its rendering needs; the
    * rest of their headers, and the refusal of inline scripts, stay as everywhere else.
    */

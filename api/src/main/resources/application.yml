@@ -2,7 +2,14 @@
 #
 # Settings shared by every environment. Each property carries the reason for its value (CONTRIBUTING.md).
 # Credentials never appear here: the database connection comes from environment variables at runtime, which
-# docker compose sets locally and AWS Secrets Manager supplies in the hosted demo.
+# docker compose sets locally and AWS supplies in staging and production. application-prod.yml overrides a few values
+# for staging and production (SPRING_PROFILES_ACTIVE=prod).
+#
+# Every value an operator may tune reads a named environment variable with a safe default, as ${NAME:default}, and
+# docs/configuration.md lists each one with its value in every environment; ConfigurationReferenceTest fails the build
+# if a property here has no documented variable. Values that are design decisions rather than settings (for example
+# ddl-auto: validate) stay literal; Spring Boot's relaxed binding still lets the variable that docs/configuration.md
+# names override one, which is never needed.
 
 spring:
   application:
@@ -16,30 +23,46 @@ spring:
       enabled: true
 
   datasource:
-    # The database to connect to, for example jdbc:postgresql://db:5432/branchbook. There are deliberately no
-    # defaults: if a variable is missing, startup fails instead of connecting to a database nobody configured.
+    # The database to connect to, for example jdbc:postgresql://db:5432/branchbook. The URL and the user deliberately
+    # have no defaults: if one is missing, startup fails instead of connecting to a database nobody configured.
+    # In AWS it is the AWS Advanced JDBC Wrapper's form, jdbc:aws-wrapper:postgresql://...?wrapperPlugins=iam, which
+    # signs in with IAM database authentication instead of a password (docs/configuration.md).
     url: ${DB_URL}
-    # The database user and password. Never logged, never committed.
+    # The database user and password. Never logged, never committed. The password defaults to empty, because with IAM
+    # authentication there is none; a database that wants one refuses the connection, so start-up still fails.
     username: ${DB_USER}
-    password: ${DB_PASSWORD}
+    password: ${DB_PASSWORD:}
+    # The JDBC driver. Empty lets Spring Boot choose it from the URL, PostgreSQL's for jdbc:postgresql:; a jdbc:aws-wrapper:
+    # URL needs software.amazon.jdbc.Driver, which Spring Boot cannot guess.
+    driver-class-name: ${SPRING_DATASOURCE_DRIVER_CLASS_NAME:}
     hikari:
       # Milliseconds a request waits for a free connection. After 3 seconds the API answers 503 TRY_AGAIN with
       # Retry-After (docs/errors.md) rather than hanging while the database is unreachable.
-      connection-timeout: 3000
+      connection-timeout: ${SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT:3000}
+      # The most connections one instance holds, Hikari's own default. Instances times this must stay below the
+      # database's max_connections, less a few for migrations and operators.
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:10}
       data-source-properties:
         # Leaves the server's DETAIL line out of exception messages. A constraint violation's DETAIL quotes the
         # conflicting values, such as a mobile number, which must never reach a log (BR-19). The constraint name,
         # which the application relies on, is still reported.
         logServerErrorDetail: false
-        # Every session gives up waiting for a lock after 2 seconds and on any statement after 5. A booking stuck
-        # behind a busy seat then answers 503 TRY_AGAIN with Retry-After: 2 instead of holding a connection
-        # (docs/errors.md). Flyway uses the same pool, so a future migration that needs longer must say so itself.
-        options: "-c lock_timeout=2000 -c statement_timeout=5000"
+        # Every session gives up waiting for a lock after 2 seconds and on any statement after 5, in milliseconds
+        # (BRANCHBOOK_DB_LOCK_TIMEOUT, BRANCHBOOK_DB_STATEMENT_TIMEOUT). A booking stuck behind a busy seat then
+        # answers 503 TRY_AGAIN with Retry-After: 2 instead of holding a connection (docs/errors.md). Flyway uses the
+        # same pool, so a future migration that needs longer must say so itself.
+        options: "-c lock_timeout=${BRANCHBOOK_DB_LOCK_TIMEOUT:2000} -c statement_timeout=${BRANCHBOOK_DB_STATEMENT_TIMEOUT:5000}"
 
   flyway:
-    # Migrations in src/main/resources/db/migration create and change the schema at startup. A missing folder is
-    # a packaging mistake, so it fails startup instead of starting with an empty schema.
+    # Whether migrations in src/main/resources/db/migration run when the application starts. On locally and in CI;
+    # application-prod.yml turns it off, because staging and production migrate as a deployment step instead, with the
+    # database owner's credentials, in a task that runs BRANCHBOOK_MIGRATE_ONLY=true and exits.
+    enabled: ${BRANCHBOOK_MIGRATE_ON_START:true}
+    # A missing migrations folder is a packaging mistake, so it fails startup instead of starting with an empty schema.
     fail-on-missing-locations: true
+    placeholders:
+      # The runtime role V9 creates and grants row access to. Must be a plain lower-case identifier.
+      appRole: ${BRANCHBOOK_DB_APP_ROLE:branchbook_app}
 
   jpa:
     # Database connections are held only inside a transaction, never while a response is written.
@@ -62,25 +85,47 @@ spring:
   lifecycle:
     # On shutdown, in-flight requests get up to 20 seconds to finish. Shorter than the 30 seconds docker
     # compose and Amazon ECS wait before they force-stop the container.
-    timeout-per-shutdown-phase: 20s
+    timeout-per-shutdown-phase: ${SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE:20s}
 
 branchbook:
+  # Runs the migrations, validates the schema against the entities, and exits 0 without starting the web server, the
+  # scheduler, the dispatcher or the demo data; any failure exits non-zero. Staging and production run it as a one-off
+  # task before each deployment. Off by default.
+  migrate-only: ${BRANCHBOOK_MIGRATE_ONLY:false}
   booking:
     # The earliest bookable slot starts at least this long after now, so the branch can prepare (BR-4).
-    lead-time: PT2H
+    lead-time: ${BRANCHBOOK_BOOKING_LEAD_TIME:PT2H}
     # Thirty bookable dates: today and the next 29 days, in the branch's time zone (BR-5).
-    horizon: P30D
+    horizon: ${BRANCHBOOK_BOOKING_HORIZON:P30D}
     # Opening an appointment needs its reference and the last four digits of the mobile number. Five wrong tries
     # block that reference for an hour from the first, so the 10,000 combinations cannot be tried (BR-13).
-    lookup-max-failures: 5
-    lookup-window: PT1H
+    lookup-max-failures: ${BRANCHBOOK_BOOKING_LOOKUP_MAX_FAILURES:5}
+    lookup-window: ${BRANCHBOOK_BOOKING_LOOKUP_WINDOW:PT1H}
+    # How long an admitted lookup counts as in flight if it is never settled, for example because its instance
+    # crashed. Far above any lookup, which the lock, statement and connection timeouts bound to a few seconds (BR-13).
+    lookup-in-flight-lease: ${BRANCHBOOK_BOOKING_LOOKUP_IN_FLIGHT_LEASE:PT30S}
+    # The Retry-After of a lookup refused only because others of the same reference are still in flight.
+    lookup-in-flight-retry-after: ${BRANCHBOOK_BOOKING_LOOKUP_IN_FLIGHT_RETRY_AFTER:PT1S}
+    # The Retry-After of a booking that met a deadlock or serialization failure twice: 503 TRY_AGAIN (docs/errors.md).
+    conflict-retry-after: ${BRANCHBOOK_BOOKING_CONFLICT_RETRY_AFTER:PT2S}
+    # How long an Idempotency-Key is honoured after its booking; a retry within it replays the booking (BR-12).
+    idempotency-key-ttl: ${BRANCHBOOK_BOOKING_IDEMPOTENCY_KEY_TTL:PT24H}
+    # The most later slots a 409 SLOT_FULL offers instead (BR-7).
+    max-alternatives: ${BRANCHBOOK_BOOKING_MAX_ALTERNATIVES:3}
     # A public demo must never be given a real person's number (ADR-0006). Switched on, a booking whose number is a
     # South African mobile outside the published demo block, 082 555 0000 to 0199, is refused with
     # 422 DEMO_NUMBER_REQUIRED before anything is written. Off by default; docker compose and make dev-api leave it off,
     # and the shared test configuration sets it off (DemoNumbersOnlyIT alone switches it on). The hosted demo's task
     # definition is to switch it on with BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true; the start-up log says which numbers
     # bookings take, and EXPECT_DEMO_NUMBERS_ONLY=1 scripts/smoke.sh fails while it is off.
-    demo-numbers-only: false
+    demo-numbers-only: ${BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY:false}
+    # The published demo numbers, both ends included, in E.164 form: 082 555 0000 to 0199, printed in the README for
+    # anyone to try. They are what demo-numbers-only takes, they are always simulated whichever SMS gateway is chosen,
+    # and the SMS cap never counts them. A value that is not a South African mobile, or a first after the last, stops
+    # start-up. Quoted, so YAML keeps the plus sign.
+    demo-number-block:
+      first: "${BRANCHBOOK_BOOKING_DEMO_NUMBER_BLOCK_FIRST:+27825550000}"
+      last: "${BRANCHBOOK_BOOKING_DEMO_NUMBER_BLOCK_LAST:+27825550199}"
   notification:
     # The address customers reach the app at, which ends the confirmation SMS's link to /manage. At most 28
     # characters with no trailing slash, so the longest confirmation fits one SMS; a longer value stops start-up
@@ -89,57 +134,98 @@ branchbook:
   dispatcher:
     # The dispatcher delivers PENDING messages through the SMS gateway that branchbook.sms below chooses (BR-17):
     # every 2 seconds, on its own thread, up to 20 messages a tick. The tests switch it off and drive it themselves.
-    enabled: true
-    interval: PT2S
+    enabled: ${BRANCHBOOK_DISPATCHER_ENABLED:true}
+    interval: ${BRANCHBOOK_DISPATCHER_INTERVAL:PT2S}
     # How long the simulated gateway takes to accept a message, so the confirmation page shows "Sending" first.
-    simulated-latency: PT0.15S
+    simulated-latency: ${BRANCHBOOK_DISPATCHER_SIMULATED_LATENCY:PT0.15S}
+    # The most messages one tick handles, so one tick never holds the dispatcher's thread for long
+    # (BRANCHBOOK_DISPATCHER_BATCH_SIZE, 1 to 1000).
+    batch-size: ${BRANCHBOOK_DISPATCHER_BATCH_SIZE:20}
+    # The attempt whose refusal, even a retryable one, marks a message FAILED with DELIVERY_FAILED
+    # (BRANCHBOOK_DISPATCHER_MAX_ATTEMPTS). At most 5, the most notification_messages.attempts allows; anything else
+    # stops start-up.
+    max-attempts: ${BRANCHBOOK_DISPATCHER_MAX_ATTEMPTS:5}
+    backoff:
+      # The wait after a retryable refusal is base after the first attempt, times multiplier after each next one, at
+      # most cap: 2, 4, 8 and 16 seconds by default, so a message reaches FAILED within 30 seconds. A random share
+      # of each wait, up to jitter of it, is then taken off, so messages refused together during an outage are not
+      # all due again at once; jitter never lengthens a wait, so cap stays a true ceiling. Base must be positive,
+      # multiplier at least 1, cap at least base and jitter from 0 up to, but not including, 1.
+      base: ${BRANCHBOOK_DISPATCHER_BACKOFF_BASE:PT2S}
+      multiplier: ${BRANCHBOOK_DISPATCHER_BACKOFF_MULTIPLIER:2}
+      cap: ${BRANCHBOOK_DISPATCHER_BACKOFF_CAP:PT16S}
+      jitter: ${BRANCHBOOK_DISPATCHER_BACKOFF_JITTER:0.2}
+    circuit-breaker:
+      # Stops the dispatcher calling an SMS provider that keeps failing (Resilience4j's breaker). Open, it claims no
+      # message, so every message stays PENDING with no attempt spent until the provider recovers. A retryable
+      # refusal or a gateway that throws is a failure; a permanent refusal, the answer of a working provider, is
+      # not, and neither is the simulated gateway's refusal of numbers ending 0000. Off, every call goes through
+      # (BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_ENABLED).
+      enabled: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_ENABLED:true}
+      # It judges the last sliding-window-size calls once at least minimum-number-of-calls are made, and opens when
+      # failure-rate-threshold percent of them failed, or slow-call-rate-threshold percent took longer than
+      # slow-call-duration. The AWS gateway gives up on a call after 10 seconds, which comes back as a failure.
+      sliding-window-size: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_SLIDING_WINDOW_SIZE:10}
+      minimum-number-of-calls: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_MINIMUM_NUMBER_OF_CALLS:5}
+      failure-rate-threshold: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_FAILURE_RATE_THRESHOLD:50}
+      slow-call-rate-threshold: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_SLOW_CALL_RATE_THRESHOLD:100}
+      slow-call-duration: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_SLOW_CALL_DURATION:PT8S}
+      # How long it stays open before the dispatcher sends permitted-calls-in-half-open-state messages as probes;
+      # they close it if they pass and open it again if they fail.
+      wait-in-open-state: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_WAIT_IN_OPEN_STATE:PT30S}
+      permitted-calls-in-half-open-state: ${BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_PERMITTED_CALLS_IN_HALF_OPEN_STATE:2}
   sms:
     # Which gateway sends each SMS. simulated, the default, sends nothing, as in docker compose, make dev-api and the
     # tests. aws sends a real SMS through AWS End User Messaging SMS to every number outside the published demo block,
     # 082 555 0000 to 0199, which stays simulated because anyone may type it and it may belong to a real stranger.
     # The hosted demo's task definition is to set BRANCHBOOK_SMS_GATEWAY=aws; the start-up log names the gateway.
-    gateway: simulated
+    gateway: ${BRANCHBOOK_SMS_GATEWAY:simulated}
     # The most SMS one number outside the demo block may be written in any 24 hours, confirmations and cancellations
     # together; one more is written FAILED with RECIPIENT_DAILY_CAP and never sent, while the booking or the cancel
     # still succeeds (BR-17). 0 switches the cap off, as locally and in the tests; the hosted demo is to set it with
     # BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP, so nobody can make the app text one number without end.
-    recipient-daily-cap: 0
+    recipient-daily-cap: ${BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP:0}
     # The secret that keys each number's fingerprint in the cap's ledger, sms_recipient_sends, which holds a keyed
     # HMAC-SHA256 of the number for 24 hours instead of the number (BRANCHBOOK_SMS_RECIPIENT_CAP_KEY). At least 32
     # characters, or start-up stops; never logged or printed, so never set it here. Empty, as locally and in the tests,
     # makes a random key at start-up, so every count starts again at each restart; with the cap on, one WARN says so.
-    recipient-cap-key:
+    recipient-cap-key: ${BRANCHBOOK_SMS_RECIPIENT_CAP_KEY:}
     aws:
       # Read only when the gateway is aws. Credentials never appear here: the SDK's default chain finds them, which in
       # the hosted demo is the ECS task role. The region to send from, such as af-south-1 (BRANCHBOOK_SMS_AWS_REGION);
       # empty leaves it to the SDK's default region chain, and start-up fails if that finds none.
-      region:
+      region: ${BRANCHBOOK_SMS_AWS_REGION:}
       # The protect configuration that limits the countries a message may go to; the hosted demo's allows South
       # Africa only (BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID). Empty sends none.
-      protect-configuration-id:
+      protect-configuration-id: ${BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID:}
       # The configuration set whose event destinations record each message (BRANCHBOOK_SMS_AWS_CONFIGURATION_SET).
       # Empty sends none.
-      configuration-set:
+      configuration-set: ${BRANCHBOOK_SMS_AWS_CONFIGURATION_SET:}
       # The phone number, pool or sender ID to send from (BRANCHBOOK_SMS_AWS_ORIGINATION_IDENTITY). Empty lets AWS
       # choose: South Africa does not support sender IDs, so AWS sends over a shared route.
-      origination-identity:
+      origination-identity: ${BRANCHBOOK_SMS_AWS_ORIGINATION_IDENTITY:}
       # The most one message may cost, in US dollars (BRANCHBOOK_SMS_AWS_MAX_PRICE); AWS refuses a dearer one. Up to
       # two digits, a point and one to five digits; anything else stops start-up. Quoted, so YAML keeps it as text.
-      max-price: "0.20"
+      max-price: "${BRANCHBOOK_SMS_AWS_MAX_PRICE:0.20}"
       # Whether AWS only checks each message and sends none (BRANCHBOOK_SMS_AWS_DRY_RUN), to try the set-up without
       # spending; the messages are still marked SENT.
-      dry-run: false
+      dry-run: ${BRANCHBOOK_SMS_AWS_DRY_RUN:false}
+      # How long opening a connection to AWS, waiting for its answer, and the whole SendTextMessage call may take. The
+      # client never retries, so a hung call releases the dispatcher's thread and its row lock within call-timeout.
+      connect-timeout: ${BRANCHBOOK_SMS_AWS_CONNECT_TIMEOUT:PT2S}
+      read-timeout: ${BRANCHBOOK_SMS_AWS_READ_TIMEOUT:PT5S}
+      call-timeout: ${BRANCHBOOK_SMS_AWS_CALL_TIMEOUT:PT10S}
   inbox:
     # The simulated inbox, GET /api/v1/messages, lists every booking's messages with the reference and the
     # recipient redacted (FR-17). It is an operator view for the demo, so it is off unless a deployment asks for it:
     # docker compose, make dev-api and the tests switch it on; off, the path is a plain 404.
-    enabled: false
+    enabled: ${BRANCHBOOK_INBOX_ENABLED:false}
     # Shows every appointment reference in the inbox, and in its retry's answer, as APT-****-****: in the reference
     # field and in each message's text. The hosted demo has no sign-in, and a public inbox listing references beside
     # demo numbers, whose last four digits are easily guessed, would let anyone open or cancel another visitor's
     # booking (BR-19). Off by default, as in docker compose, make dev-api and the tests (InboxReferencesHiddenIT alone
     # switches it on); the hosted demo's task definition is to switch it on with BRANCHBOOK_INBOX_REDACT_REFERENCES=true.
-    redact-references: false
+    redact-references: ${BRANCHBOOK_INBOX_REDACT_REFERENCES:false}
   retention:
     # Deletes every booking whose appointment is over, with its messages and idempotency keys, every hour from a minute
     # after start-up, which keeps the hosted demo's promise to keep a booking, with the name and number, until its
@@ -147,15 +233,66 @@ branchbook:
     # date is never touched. Off by default, and so off in docker compose, make dev-api and the tests: a copy run
     # locally keeps its bookings until you delete them. Only the hosted demo's task definition switches it on
     # (BRANCHBOOK_RETENTION_ENABLED=true).
-    enabled: false
+    enabled: ${BRANCHBOOK_RETENTION_ENABLED:false}
     # How long after its appointment ends a booking is kept before it is deleted (BRANCHBOOK_RETENTION_AFTER_END), as
     # an ISO-8601 duration. Zero by default; a negative value stops start-up.
-    after-end: PT0S
+    after-end: ${BRANCHBOOK_RETENTION_AFTER_END:PT0S}
+    # The most appointments one of the purge's transactions deletes, so none holds many locks for long.
+    batch-size: ${BRANCHBOOK_RETENTION_BATCH_SIZE:500}
   demo-data:
     # Books three demo appointments at Bellville and Umhlanga, through the real booking path, when the application
     # starts on an empty database, so the first screen and the simulated inbox have something to show (FR-28). Only
     # docker compose switches it on: a database that a developer or a test fills itself must stay as they left it.
-    enabled: false
+    enabled: ${BRANCHBOOK_DEMO_DATA_ENABLED:false}
+  captcha:
+    # The AWS WAF CAPTCHA JavaScript API the web app loads when a booking or cancel answers 405 with
+    # x-amzn-waf-action: captcha: the account's integration URL followed by jsapi.js, an https address under
+    # awswaf.com. Set, GET /api/v1/client-config publishes it, and the Content-Security-Policy allows AWS WAF's
+    # domain for scripts and connections, as AWS's documentation asks. Empty, as locally and in the tests, there is no
+    # CAPTCHA and the policy is unchanged.
+    script-url: ${BRANCHBOOK_CAPTCHA_SCRIPT_URL:}
+    # The CAPTCHA API key the web app passes to renderCaptcha. Public by design: AWS binds it to the domains its tokens
+    # are valid for, so it is published, not kept secret. Needed whenever script-url is set.
+    api-key: ${BRANCHBOOK_CAPTCHA_API_KEY:}
+  jobs:
+    # The housekeeping jobs' timing, as ISO-8601 durations. Each purge deletes rows that already count for nothing, so
+    # its timing only bounds how large a table grows. The idempotency-key and lookup purges first run an hour after
+    # start-up; the cap ledger and retention purges a minute after, so a task that restarts often still purges.
+    idempotency-key-purge:
+      interval: ${BRANCHBOOK_JOBS_IDEMPOTENCY_KEY_PURGE_INTERVAL:PT1H}
+      initial-delay: ${BRANCHBOOK_JOBS_IDEMPOTENCY_KEY_PURGE_INITIAL_DELAY:PT1H}
+    lookup-attempt-purge:
+      interval: ${BRANCHBOOK_JOBS_LOOKUP_ATTEMPT_PURGE_INTERVAL:PT1H}
+      initial-delay: ${BRANCHBOOK_JOBS_LOOKUP_ATTEMPT_PURGE_INITIAL_DELAY:PT1H}
+    cap-ledger-purge:
+      interval: ${BRANCHBOOK_JOBS_CAP_LEDGER_PURGE_INTERVAL:PT1H}
+      initial-delay: ${BRANCHBOOK_JOBS_CAP_LEDGER_PURGE_INITIAL_DELAY:PT1M}
+    # Runs only while branchbook.retention.enabled is on; the hourly interval keeps the promise to delete a booking
+    # within the hour after its appointment ends.
+    retention-purge:
+      interval: ${BRANCHBOOK_JOBS_RETENTION_PURGE_INTERVAL:PT1H}
+      initial-delay: ${BRANCHBOOK_JOBS_RETENTION_PURGE_INITIAL_DELAY:PT1M}
+    holiday-check:
+      # The public-holiday coverage warning also runs at start-up, then at 06:00 every day in Johannesburg, before
+      # the branches open (BR-3). A six-field Spring cron expression and the zone it is read in.
+      cron: "${BRANCHBOOK_JOBS_HOLIDAY_CHECK_CRON:0 0 6 * * *}"
+      zone: ${BRANCHBOOK_JOBS_HOLIDAY_CHECK_ZONE:Africa/Johannesburg}
+  metrics:
+    cloudwatch:
+      # Exports the meters named in include to Amazon CloudWatch, where the alarms on the outbox and the circuit
+      # breaker read them. Off, as locally and in the tests, nothing builds an AWS client or looks for credentials;
+      # each deployed environment switches it on in its task definition.
+      enabled: ${BRANCHBOOK_METRICS_CLOUDWATCH_ENABLED:false}
+      # The namespace the metrics are put in; each environment sets its own (BranchBook/staging, BranchBook/production)
+      # so its alarms read only its own meters, and the task role may write to that namespace alone.
+      namespace: ${BRANCHBOOK_METRICS_CLOUDWATCH_NAMESPACE:BranchBook}
+      # How often the meters are sent: CloudWatch's standard one-minute resolution.
+      step: ${BRANCHBOOK_METRICS_CLOUDWATCH_STEP:PT1M}
+      # The region to send to. Empty leaves it to the AWS SDK's default chain, which on Amazon ECS is the task's own.
+      region: ${BRANCHBOOK_METRICS_CLOUDWATCH_REGION:}
+      # The meter-name prefixes that are exported, comma-separated. Every other meter stays out, so the JVM's and the
+      # web server's many series cost nothing in CloudWatch.
+      include: ${BRANCHBOOK_METRICS_CLOUDWATCH_INCLUDE:outbox.,resilience4j.circuitbreaker.,appointments.booked}
 
 logging:
   pattern:
@@ -182,13 +319,14 @@ server:
 springdoc:
   api-docs:
     # The OpenAPI document at /v3/api-docs, committed as docs/openapi.yaml (ADR-0005), in OpenAPI 3.1. On in every
-    # environment on purpose: the API is public and describes nothing that is not already in this repository.
-    enabled: true
+    # environment but staging and production on purpose: the API describes nothing that is not already in this
+    # repository. application-prod.yml switches it off, so a deployment shows no more surface than it serves.
+    enabled: ${SPRINGDOC_API_DOCS_ENABLED:true}
     version: openapi_3_1
   swagger-ui:
-    # Swagger UI at /swagger-ui.html, also on purpose, so the API can be read and tried. SecurityConfig gives its pages
-    # alone a policy that allows inline styles.
-    enabled: true
+    # Swagger UI at /swagger-ui.html, on wherever the document is, so the API can be read and tried. SecurityConfig
+    # gives its pages alone a policy that allows inline styles.
+    enabled: ${SPRINGDOC_SWAGGER_UI_ENABLED:true}
   # Only the API is the contract; the app's pages, the probes and /error are not.
   paths-to-match: /api/**
   # Keys in a fixed order, so the generated document is the same on every run and diffs cleanly.
@@ -198,6 +336,8 @@ springdoc:
   override-with-generic-response: false
 
 management:
+  # management.server.port (MANAGEMENT_SERVER_PORT) is unset here, so locally the actuator shares the main port and
+  # make smoke can read /actuator/prometheus; application-prod.yml moves it to a port of its own.
   endpoints:
     web:
       exposure:
@@ -209,8 +349,8 @@ management:
   endpoint:
     health:
       probes:
-        # Serves the liveness probe at /livez and the readiness probe at /readyz on the main port. The Docker
-        # health check and the AWS load balancer use /readyz.
+        # Serves the liveness probe at /livez and the readiness probe at /readyz on the main port, even when the
+        # actuator has a port of its own. The Docker health check and the AWS load balancer use /readyz.
         enabled: true
         add-additional-paths: true
       group:

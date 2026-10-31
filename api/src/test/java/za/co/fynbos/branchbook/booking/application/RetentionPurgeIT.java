@@ -142,7 +142,7 @@ class RetentionPurgeIT {
             appointments,
             keys,
             notifications,
-            new RetentionProperties(true, Duration.ofHours(2)));
+            new RetentionProperties(true, Duration.ofHours(2), 500));
 
     assertThat(twoHoursLater.purge(FIRST_ENDS)).isEqualTo(Purged.NONE);
     assertThat(twoHoursLater.purge(FIRST_ENDS.plus(Duration.ofHours(2)).minusSeconds(1)))

@@ -5,9 +5,9 @@
 #   make up     builds, starts and waits until both services are healthy, then prints the URL
 #   make down   stops both and deletes the database
 #
-# Both services listen on 127.0.0.1 only, so nothing is reachable from the local network. The database password is
-# a local-only placeholder for a database that exists only on this machine. Any value can be overridden in a
-# git-ignored .env file (see .env.example).
+# Both services listen on 127.0.0.1 only, so nothing is reachable from the local network. No password is committed:
+# DB_PASSWORD must come from the environment or the git-ignored .env file, which `make up` creates with a random one
+# the first time (see .env.example). CI exports its own. Any other value can be overridden in .env too.
 
 name: branchbook
 
@@ -17,7 +17,7 @@ services:
     environment:
       POSTGRES_DB: branchbook
       POSTGRES_USER: ${DB_USER:-branchbook}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-local-dev-only-change-me}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is not set. Run make up, which writes a random one to .env, or export DB_PASSWORD}
     # Keeps personal data out of the database log. A constraint violation's DETAIL line quotes the conflicting
     # values (a mobile number, for example), so errors are logged tersely, and failed statements are not echoed.
     command: ['postgres', '-c', 'log_error_verbosity=terse', '-c', 'log_min_error_statement=panic']
@@ -38,7 +38,7 @@ services:
     environment:
       DB_URL: jdbc:postgresql://db:5432/branchbook
       DB_USER: ${DB_USER:-branchbook}
-      DB_PASSWORD: ${DB_PASSWORD:-local-dev-only-change-me}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is not set. Run make up, which writes a random one to .env, or export DB_PASSWORD}
       # The address in the confirmation SMS's /manage link: the port the app is published on.
       PUBLIC_BASE_URL: http://localhost:${APP_PORT:-8080}
       # The simulated inbox at /messages, an operator view of every booking's messages, recipients redacted.

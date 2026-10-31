@@ -18,11 +18,11 @@ import org.springframework.context.annotation.Import;
  * <p>Integration tests that use only this configuration share one context, so Spring builds it once
  * and one database container serves them all. A class that switches a setting with
  * {@code @TestPropertySource}, as {@code InboxSwitchedOffIT}, {@code InboxReferencesHiddenIT},
- * {@code DispatcherLoopIT}, {@code DemoNumbersOnlyIT}, {@code RecipientDailyCapIT} and {@code
- * RecipientCapLedgerIT} do, builds a context of its own, and with it a container of its own,
- * because the container is a bean of the context; each one adds several seconds to the run. Before
- * every test the clock is back at {@link TestClockConfiguration#DEFAULT_INSTANT}, so no test
- * depends on the order tests run in.
+ * {@code DispatcherLoopIT}, {@code DemoNumbersOnlyIT}, {@code RecipientDailyCapIT}, {@code
+ * RecipientCapLedgerIT} and {@code CaptchaConfiguredIT} do, builds a context of its own, and with
+ * it a container of its own, because the container is a bean of the context; each one adds several
+ * seconds to the run. Before every test the clock is back at {@link
+ * TestClockConfiguration#DEFAULT_INSTANT}, so no test depends on the order tests run in.
  *
  * <p>The simulated inbox is switched on, as it is in docker compose, and the dispatcher's own loop
  * is off with no gateway latency: tests that deliver call {@code NotificationDispatcher.runOnce}

@@ -4,7 +4,8 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.boot.security.autoconfigure.UserDetailsServiceAutoConfiguration;
-import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.context.ConfigurableApplicationContext;
+import za.co.fynbos.branchbook.shared.config.MigrateOnlyMode;
 
 /**
  * Starts BranchBook: the booking API, the confirmation dispatcher and the React app, in one
@@ -18,24 +19,29 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * <p>Typed settings (records annotated {@code @ConfigurationProperties}, in {@code shared.config})
  * are found by scanning, so adding one needs no registration here.
  *
- * <p>Scheduled tasks are switched on for the daily checks the application runs on itself, such as
- * the holiday-coverage warning (BR-3). They read time from the injected clock like everything else;
- * the schedule only decides when they run.
+ * <p>Scheduled tasks are switched on in {@code shared.config.SchedulingConfiguration}, except in a
+ * migrate-only run ({@link MigrateOnlyMode}), which migrates the database, validates the schema and
+ * exits: 0 once both succeed, non-zero when start-up fails.
  */
 @SpringBootApplication(exclude = UserDetailsServiceAutoConfiguration.class)
 @ConfigurationPropertiesScan
-@EnableScheduling
 public class BranchBookApplication {
 
   /** Called by Spring when it builds the application context; never by application code. */
   BranchBookApplication() {}
 
   /**
-   * Starts the application and blocks until it shuts down.
+   * Starts the application and blocks until it shuts down, or, in a migrate-only run, migrates and
+   * exits. A failed start-up throws, which ends the process with a non-zero exit code.
    *
    * @param args command-line arguments; Spring Boot reads {@code --name=value} pairs as properties
    */
   public static void main(String[] args) {
-    SpringApplication.run(BranchBookApplication.class, args);
+    ConfigurableApplicationContext context =
+        SpringApplication.run(BranchBookApplication.class, args);
+    if (MigrateOnlyMode.isOn(context.getEnvironment())) {
+      // Started means migrated and validated; closing the context ends the run with exit code 0.
+      System.exit(SpringApplication.exit(context));
+    }
   }
 }

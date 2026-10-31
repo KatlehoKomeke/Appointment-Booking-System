@@ -90,37 +90,41 @@ totals are listed in [docs/architecture.md, section 7](../docs/architecture.md#7
 
 ## Configuration
 
-Every property is in [application.yml](src/main/resources/application.yml), with the reason for its value. The
-environment supplies the rest:
+[docs/configuration.md](../docs/configuration.md) is the reference: every property, the environment variable that
+sets it, its default, whether it is secret, and its value locally, in staging and in production.
+`ConfigurationReferenceTest` fails the build if a property in `application*.yml` is missing from it.
 
-| Variable | Purpose | Set by |
-|---|---|---|
-| `DB_URL` | JDBC URL of the PostgreSQL database | `compose.yaml` locally; in the hosted demo, the ECS task definition, with `sslmode=require` |
-| `DB_USER`, `DB_PASSWORD` | Database credentials | `compose.yaml` locally; in the hosted demo, AWS Secrets Manager (`branchbook/database`), injected when the task starts |
-| `PORT` | HTTP port, 8080 by default | Optional |
-| `BRANCHBOOK_DISPATCHER_ENABLED` | Runs the dispatcher that delivers PENDING messages every 2 seconds on its own thread. `true` by default; its interval and the simulated gateway's latency are in application.yml. | Optional; the tests switch it off and drive it themselves |
-| `BRANCHBOOK_INBOX_ENABLED` | Switches on the simulated inbox, `GET /api/v1/messages`, an operator view of every booking's messages, and its retry, `POST /api/v1/messages/{id}/retry`. `false` by default. | `compose.yaml` and `make dev-api` set it to `true`, and so do the tests |
-| `BRANCHBOOK_INBOX_REDACT_REFERENCES` | `branchbook.inbox.redact-references`. Shows every reference as `APT-****-****` in the inbox list and the retry's response: in the `reference` field, the body, the subject and the last error. Message ids are unchanged, so a retry still works, and the SMS itself still carries the real reference. With it, a public deployment could switch the inbox on without listing other visitors' references. `false` by default. | The hosted demo's task definition sets it to `true`, should the inbox ever be switched on there; it keeps the inbox off (`BRANCHBOOK_INBOX_ENABLED=false`). `compose.yaml`, `make dev-api` and every test but `InboxReferencesHiddenIT` leave it off |
-| `BRANCHBOOK_DEMO_DATA_ENABLED` | Books three demo appointments once the application is ready, if the database has none ([Demo data](#demo-data)). `false` by default; skipped with one INFO line while `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` is on. | `compose.yaml` only; `make dev-api` and the tests leave it off |
-| `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` | Takes bookings only from the published demo numbers, 082 555 0000 to 0199, so a public demo is never given a real person's number ([ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md)). Any other South African mobile is `422 DEMO_NUMBER_REQUIRED`. `false` by default. | The hosted demo set it to `true` until it began sending real SMS; its task definition no longer sets it, so it is off and any South African mobile books there. `EXPECT_DEMO_NUMBERS_ONLY=1 scripts/smoke.sh <url>` fails if a deployment that expects it has it off. The start-up log says which numbers bookings take. `compose.yaml` and `make dev-api` leave it off, and the shared test configuration sets it to `false`; `DemoNumbersOnlyIT` switches it on |
-| `BRANCHBOOK_RETENTION_ENABLED` | `branchbook.retention.enabled`. Switches on the hourly retention job, which deletes every booking once its appointment is over, plus the delay below, with its messages and idempotency keys, keeping the hosted demo's promise; a booking for a future date is never touched ([SECURITY.md](../SECURITY.md#personal-information-popia)). `false` by default. | The hosted demo's ECS task definition sets it to `true`, and nothing else does. `compose.yaml`, `make dev-api` and the tests leave it off; the tests call `RetentionPurge` themselves |
-| `BRANCHBOOK_RETENTION_AFTER_END` | `branchbook.retention.after-end`. How long after its appointment ends a booking is deleted, as an ISO-8601 duration. `PT0S` by default; a negative value stops start-up. | Optional; the hosted demo leaves it at zero |
-| `BRANCHBOOK_SMS_GATEWAY` | `branchbook.sms.gateway`. `simulated`, the default, sends nothing. `aws` sends every number outside the published demo block, 082 555 0000 to 0199, a real transactional SMS through AWS End User Messaging SMS; the block stays simulated, because anyone may type it. The start-up log names the gateway, the region and whether a protect configuration and a cap are set. Credentials come from the SDK's default chain, in the hosted demo the ECS task role. | The hosted demo's task definition sets `aws`; `compose.yaml`, `make dev-api` and the tests leave it `simulated` |
-| `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` | `branchbook.sms.recipient-daily-cap`. The most SMS one number outside the demo block is written in any 24 hours, confirmations and cancellations together; the next is FAILED with `RECIPIENT_DAILY_CAP`, never sent, and the booking or cancel still succeeds ([BR-17](../docs/domain-rules.md#br-17)). Each SMS is counted in the cap's ledger, `sms_recipient_sends`, which keeps a keyed fingerprint of the number for 24 hours, so a cancelled booking's confirmations and a cancellation once final still count after they are deleted. Cancels for one number at the same moment can pass it by a message or two. `0`, the default, is off, and the ledger then stays empty; a negative value stops start-up. | The hosted demo's task definition; off elsewhere |
-| `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY` | `branchbook.sms.recipient-cap-key`. The secret the cap's ledger keys each fingerprint with: HMAC-SHA256 of the number's E.164 form, so the ledger never holds the number and the fingerprint cannot be matched to one without the key. At least 32 characters, such as the output of `openssl rand -base64 48`, or start-up stops with a message that does not quote it; never logged or printed. Empty, the default, makes a random key at each start, so every number's count starts again when the application restarts, and logs one WARN at start-up while the cap is on. | A secret store, in a deployment that keeps counts across restarts: in the hosted demo, AWS Secrets Manager (`branchbook/sms-cap-key`), injected when the task starts. `compose.yaml`, `make dev-api` and the shared test configuration leave it empty |
-| `BRANCHBOOK_SMS_AWS_REGION` | `branchbook.sms.aws.region`. The region to send from, such as `af-south-1`. Empty by default, which leaves it to the SDK's default region chain; start-up fails if that finds none. | The hosted demo's task definition |
-| `BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID` | `branchbook.sms.aws.protect-configuration-id`. The protect configuration sent with every message, which in the hosted demo allows South Africa only. Empty sends none. | The hosted demo's task definition |
-| `BRANCHBOOK_SMS_AWS_CONFIGURATION_SET`, `BRANCHBOOK_SMS_AWS_ORIGINATION_IDENTITY` | `branchbook.sms.aws.configuration-set` and `.origination-identity`. Sent only where set. With no origination identity, AWS picks the route, a shared one for South Africa, which supports no sender IDs. | Optional |
-| `BRANCHBOOK_SMS_AWS_MAX_PRICE` | `branchbook.sms.aws.max-price`. The most one message may cost, in US dollars; AWS refuses a dearer one (`AWS_VALIDATION_PRICE_OVER_THRESHOLD`). `0.20` by default; anything but up to two digits, a point and one to five digits stops start-up. | Optional |
-| `BRANCHBOOK_SMS_AWS_DRY_RUN` | `branchbook.sms.aws.dry-run`. AWS checks each message and sends none; the message is still marked SENT. `false` by default. | Optional, to try a set-up without spending |
-| `PUBLIC_BASE_URL` | The address customers reach the app at, which ends the confirmation SMS's `/manage` link and the cancellation SMS's `/book` link. At most 28 characters with no trailing slash, so the longest SMS fits one segment; a longer value stops start-up. `http://localhost:8080` by default. | `compose.yaml` locally (it follows `APP_PORT`); in the hosted demo, the ECS task definition (`https://branchbook.click`) |
-
-The booking rules that are settings rather than code are under `branchbook.booking` in application.yml: the
-two-hour lead time, the thirty-day horizon, the lookup limit of five wrong tries per reference in an hour, and
-`demo-numbers-only`, the switch above.
-
-There are no defaults for the database variables. If one is missing, startup fails (Hikari reports that the `url`
-must start with `jdbc`) instead of connecting to a database nobody configured.
+- **Every tunable value reads a named environment variable with a safe default**, as `${NAME:default}` in
+  [application.yml](src/main/resources/application.yml): the booking rules, the limits and `Retry-After` values, the
+  idempotency key's lifetime, the SMS client's timeouts, the published demo-number block, the housekeeping jobs'
+  schedules (`branchbook.jobs`), the database pool and session timeouts. Each is checked at start-up by its
+  `@ConfigurationProperties` record. Values that a database constraint, the API contract or a message format mirrors
+  stay constants; the reference lists them under "Deliberately not configuration".
+- **The database URL and user have no defaults.** If `DB_URL` or `DB_USER` is missing, startup fails (Hikari reports
+  that the `url` must start with `jdbc`) instead of connecting to a database nobody configured. `DB_PASSWORD` defaults
+  to empty, as IAM authentication needs; a database that wants a password then refuses the connection. `make up`
+  writes a random `DB_PASSWORD` to the git-ignored `.env`; none is committed.
+- **The `prod` profile** ([application-prod.yml](src/main/resources/application-prod.yml),
+  `SPRING_PROFILES_ACTIVE=prod`) is what staging and production run: no OpenAPI document or Swagger UI, no demo data,
+  the inbox off with references redacted, the actuator on its own port 8081 (`MANAGEMENT_SERVER_PORT`) while `/livez`
+  and `/readyz` stay on 8080, JSON logs in Elastic Common Schema, and no migrations at start-up.
+  `ProductionProfileGuard` refuses to start under it with the inbox on without redaction, demo data on, a non-`https`
+  `PUBLIC_BASE_URL`, the SMS cap on without its key, or the actuator on the main port (`ProductionProfileGuardTest`,
+  `ProdProfileIT`); a migrate-only run is held to the first two only.
+- **Migrations are a deployment step.** `BRANCHBOOK_MIGRATE_ON_START` (`true` by default, `false` under `prod`) decides
+  whether the app migrates when it starts. `BRANCHBOOK_MIGRATE_ONLY=true` runs Flyway, lets Hibernate validate the
+  schema, starts no web server, scheduler, dispatcher or demo data, and exits 0, or non-zero on any failure
+  (`MigrateOnlyIT`). Migration V9 creates the runtime role `branchbook_app` (`BRANCHBOOK_DB_APP_ROLE`), which may read
+  and write rows but not change the schema or touch Flyway's history (`RuntimeRoleIT`).
+- **IAM database authentication.** In AWS the app connects as `branchbook_app` through the AWS Advanced JDBC Wrapper:
+  `DB_URL=jdbc:aws-wrapper:postgresql://...?wrapperPlugins=iam&sslmode=verify-full&sslrootcert=/app/certs/rds-global-bundle.pem`,
+  `SPRING_DATASOURCE_DRIVER_CLASS_NAME=software.amazon.jdbc.Driver` and an empty password. The image carries RDS's CA
+  bundle at that path, pinned by checksum. `AwsJdbcWrapperIT` proves the wrapper with Hikari and Flyway on PostgreSQL;
+  the `iam` plugin itself needs AWS. A plain `jdbc:postgresql:` URL with a password works unchanged.
+- **CAPTCHA.** `BRANCHBOOK_CAPTCHA_SCRIPT_URL` and `BRANCHBOOK_CAPTCHA_API_KEY` publish AWS WAF's CAPTCHA settings at
+  `GET /api/v1/client-config` and add `https://*.awswaf.com` to the Content-Security-Policy's `script-src` and
+  `connect-src`. Unset, the endpoint answers `{"captcha":null}` and the policy is unchanged (`ClientConfigApiIT`,
+  `CaptchaConfiguredIT`, `SecurityHeadersIT`).
 
 ## Endpoints today
 
@@ -133,6 +137,7 @@ must start with `jdbc`) instead of connecting to a database nobody configured.
 | `GET /api/v1/appointments/{reference}` | Open an appointment again, with `X-Mobile-Last4` |
 | `POST /api/v1/appointments/{reference}/cancel` | Cancel an appointment before it starts, with `X-Mobile-Last4`, and delete it at once. `200` with the appointment as the cancel left it: `CANCELLED`, with only its cancellation SMS, PENDING, or FAILED where the daily cap stopped it. From then on the reference is a `404`, counted |
 | `GET /api/v1/messages?limit=` | The simulated inbox: the newest messages of every booking, recipients redacted to `082 *** ****`, and references to `APT-****-****` while `branchbook.inbox.redact-references` is true. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
+| `GET /api/v1/client-config` | The deployment's client settings: AWS WAF's CAPTCHA script and API key where a CAPTCHA protects bookings and cancels, otherwise `{"captcha":null}` |
 | `POST /api/v1/messages/{id}/retry` | Make a FAILED message due again (the web inbox's Retry button calls it); any other message is returned unchanged. The answer is the message as the inbox shows it, its reference redacted the same way. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
 | `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml) |
 | `/swagger-ui.html` | Swagger UI, to read and try the API |
