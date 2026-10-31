@@ -34,7 +34,7 @@ The rows run in reading order: the system, the application, the local stack, del
 | [local-runtime](local-runtime.svg) | SVG | What `make up` builds and starts, how it knows the stack is ready, and where else the same image runs | [architecture.md, section 10.1](../../architecture.md#101-locally-the-image-and-the-stack) |
 | [delivery-pipeline](delivery-pipeline.svg) | SVG | What happens between `git commit` and AWS: which checks run where, which of them block, what deploys, and where the gaps are | [README.md](../../../README.md#how-it-is-tested-and-delivered); [delivery.md](../../delivery.md#at-a-glance); [architecture.md, section 10.2](../../architecture.md#102-from-a-commit-to-aws) |
 | [push-timeline](push-timeline.svg) | SVG | What one push to `main` runs, how long each job takes, and whether the deploy waits for the tests | [delivery.md](../../delivery.md#one-push-measured) |
-| [aws-footprint](aws-footprint.svg) | SVG | What exists in AWS, in which Region, who deployed it, what it costs, how a reviewer's request reaches the hosted demo, and how the demo's SMS leave it | [infra/README.md](../../../infra/README.md#what-exists-today); [architecture.md, section 10.3](../../architecture.md#103-in-aws) |
+| [aws-footprint](aws-footprint.svg) | SVG | What exists in AWS, in which Region, what staging and production share, who deploys each part, how a customer's request reaches the app, and how production's SMS leave it | [infra/README.md](../../../infra/README.md#what-exists-today); [architecture.md, section 10.3](../../architecture.md#103-in-aws) |
 | keyless-deploy | Mermaid | How the deploy job gets short-lived credentials, what is checked, and how it proves the deploy landed | [infra/README.md](../../../infra/README.md#how-github-reaches-aws-without-keys) |
 | [access-boundary](access-boundary.svg) | SVG | Whether the pipeline can widen its own access, which guard stops it, and which guards IAM itself enforces | [infra/README.md](../../../infra/README.md#who-can-change-what-in-aws) |
 | [secret-layers](secret-layers.svg) | SVG | Which layer stops a secret at each stage, which layers can be skipped, and which act only after the code is public | [SECURITY.md](../../../SECURITY.md#secrets) |
@@ -59,7 +59,7 @@ files live in `.github/workflows/`.
 | local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; the `Makefile` up and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box) | when a route, a management endpoint or the compose stack changes | `44b8d1c` |
 | delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/bin/branchbook.ts`; the `main` ruleset and the `aws-demo` environment | when a workflow, a job, a hook or a GitHub setting changes | `21798b6` |
 | push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured after the first run of the pipeline with `deploy` inside `ci` | `85cd726` (measured at `c5feafe`, before the `deploy` job joined `ci`) |
-| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/cdk.json` | when a stack, or who deploys it, changes | `44b8d1c` |
+| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/config/`; `infra/cdk.json` | when a stack, an environment, or who deploys it, changes | `90bf68b` |
 | keyless-deploy | `ci.yml` (job `deploy`); `infra/lib/account-stack.ts` | on hardening; when the `deploy` job's steps change | `21798b6` |
 | access-boundary | `infra/lib/account-stack.ts`; `infra/bin/branchbook.ts`; `ci.yml` (job `deploy`); `aws-connection-check.yml`; the `aws-demo` environment; the `main` ruleset; the bootstrap commands in infra/README.md | on hardening; when a guard changes | `21798b6` |
 | secret-layers | `.gitignore`; `.githooks/pre-commit`; `.gitleaks.toml`; `secret-scan.yml`; `ci.yml` (job `stack`); `infra/lib/data-stack.ts` and `infra/lib/app-stack.ts` (the generated secrets and the task's secrets); the repository's security settings | when a layer is added or changes | `21798b6` |
@@ -147,11 +147,11 @@ fill:
 
 | Class | Colour | Category | Services in this repository |
 | --- | --- | --- | --- |
-| `aws-compute` | `#ED7100` | compute and containers | ECR repository (bootstrap); ECS Fargate |
+| `aws-compute` | `#ED7100` | compute and containers | ECR repository; ECS Fargate (the service and the migration task) |
 | `aws-db` | `#C925D1` | database | Amazon RDS for PostgreSQL |
 | `aws-net` | `#8C4FFF` | networking | Route 53, VPC, Application Load Balancer |
-| `aws-sec` | `#DD344C` | security | IAM OIDC provider, IAM role, AWS STS; AWS WAF, ACM, Secrets Manager |
-| `aws-mgmt` | `#E7157B` | management and integration | AWS CloudFormation, SSM Parameter Store; CloudWatch, SNS; AWS End User Messaging SMS |
+| `aws-sec` | `#DD344C` | security | IAM OIDC provider, IAM role, AWS STS; AWS WAF, ACM, Secrets Manager; the CDK bootstraps |
+| `aws-mgmt` | `#E7157B` | management and integration | AWS CloudFormation, SSM Parameter Store; CloudWatch, SNS; AWS End User Messaging SMS; AWS FIS |
 | `aws-store` | `#7AA116` | storage and cost | S3 assets bucket (bootstrap), AWS Budgets |
 
 No other colours. Mermaid blocks carry no colour at all.
