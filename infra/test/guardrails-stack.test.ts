@@ -285,7 +285,7 @@ describe('GuardrailsStack', () => {
 
   test('outputs each environment\'s execution policy for its cdk bootstrap, the boundary and the audit bucket', () => {
     template.hasOutput('StagingCfnExecPolicyArn', { Description: Match.stringLikeRegexp('qualifier bbstg') });
-    template.hasOutput('ProductionCfnExecPolicyArn', { Description: Match.stringLikeRegexp('qualifier hnb659fds') });
+    template.hasOutput('ProductionCfnExecPolicyArn', { Description: Match.stringLikeRegexp('qualifier bbprod') });
     template.hasOutput('PermissionsBoundaryArn', {});
     template.hasOutput('AuditBucketName', {});
   });

@@ -698,13 +698,15 @@ These steps need you personally, and only happen once.
    ```
 
 8. **Bootstrap `af-south-1` twice**, once per environment, each with its own qualifier, toolkit stack and execution
-   policy, so one environment's pipeline can never deploy through the other's roles. Production keeps CDK's default
-   qualifier, `hnb659fds`, and toolkit stack, `CDKToolkit`, which its live stacks were deployed with; staging uses
-   `bbstg` and `CDKToolkitStaging`. The qualifiers are `deploy.environments.<env>.cdkBootstrapQualifier` in
-   [config/account.json](config/account.json).
+   policy, so one environment's pipeline can never deploy through the other's roles. Neither uses CDK's default
+   qualifier, `hnb659fds`, or its toolkit stack, `CDKToolkit`: any other CDK app in the account deploys through those,
+   so narrowing them would break it, and the configuration refuses them. Production uses `bbprod` and
+   `CDKToolkitProduction`, staging `bbstg` and `CDKToolkitStaging`; the qualifiers are
+   `deploy.environments.<env>.cdkBootstrapQualifier` in [config/account.json](config/account.json).
 
    ```bash
    npx cdk bootstrap "aws://$ACCOUNT/af-south-1" --profile branchbook-admin --tags project=branchbook \
+     --qualifier bbprod --toolkit-stack-name CDKToolkitProduction \
      --cloudformation-execution-policies "arn:aws:iam::$ACCOUNT:policy/branchbook-cdk-cfn-exec-production"
    npx cdk bootstrap "aws://$ACCOUNT/af-south-1" --profile branchbook-admin --tags project=branchbook \
      --qualifier bbstg --toolkit-stack-name CDKToolkitStaging \
@@ -718,8 +720,8 @@ These steps need you personally, and only happen once.
    every role the application stacks create (`@aws-cdk/core:permissionsBoundary`).
    `BranchbookRegistry` belongs to staging because the pipeline creates it in its first job, in the `staging`
    environment, before any environment is deployed; production only pulls the image by digest and never changes it.
-   Pass the staging qualifier and toolkit stack name on every later `cdk bootstrap` for staging, or the command
-   updates production's bootstrap instead.
+   Pass the qualifier and toolkit stack name on every later `cdk bootstrap` of either environment; without them the
+   command updates the account's default bootstrap instead.
 
 9. **Deploy `BranchbookAccount`**, after both bootstraps: besides the deploy roles, it attaches a deploy scope to each
    bootstrap's deploy role, which must therefore exist. The bootstrap lets that role run CloudFormation on any stack;
@@ -756,25 +758,35 @@ These steps need you personally, and only happen once.
 
 ### Hardening the account that already runs production
 
-The account deployed on 2026-10-26 has both `CDKToolkit` stacks with CDK's default `AdministratorAccess` execution
-role, the single role `branchbook-github-deploy` and production's roles without the boundary. Steps 6 and 7 above
-apply unchanged. Then, in this order:
+The account deployed on 2026-10-26 runs production's stacks through the default bootstrap, `CDKToolkit` (`hnb659fds`),
+which other CDK apps in the account share, with CDK's default `AdministratorAccess` execution role; it has the single
+deploy role `branchbook-github-deploy`, and production's roles carry no boundary. The default bootstrap is never
+changed. Steps 6 and 7 above apply unchanged. Then, in this order:
 
-1. **Bootstrap staging** with the second command of step 8 (`--qualifier bbstg`). It creates new roles only.
-2. **Deploy `BranchbookAccount`** (step 9) and store both role ARNs in the new GitHub environments (step 10). This
+1. **Bootstrap production's own toolkit, at first with the default execution policy**, so its first deployment can
+   add the boundary to roles that do not yet carry it:
+
+   ```bash
+   npx cdk bootstrap "aws://$ACCOUNT/af-south-1" --profile branchbook-admin --tags project=branchbook \
+     --qualifier bbprod --toolkit-stack-name CDKToolkitProduction
+   ```
+
+2. **Bootstrap staging** with the second command of step 8. Staging's stacks are new, so its policy applies at once.
+3. **Deploy `BranchbookAccount`** (step 9) and store both role ARNs in the new GitHub environments (step 10). This
    deletes `branchbook-github-deploy`, so the old pipeline stops at sign-in until the new one is merged: do it with
    that merge.
-3. **Let the pipeline deploy production once** under the old execution role. That deploy adds the boundary to each of
-   production's thirteen roles, an in-place update (`PermissionsBoundary` needs no replacement). Check one:
+4. **Let the pipeline deploy production once** through `bbprod`. Its stacks move to the new bootstrap without being
+   replaced, and the deploy adds the boundary to each of production's roles, an in-place update
+   (`PermissionsBoundary` needs no replacement). Check one:
    `aws iam get-role --role-name <a BranchbookApp-... role> --query Role.PermissionsBoundary --profile branchbook-admin`.
-4. **Harden production's bootstrap** with the first command of step 8, then re-run the pipeline: it must deploy
-   production with no change.
+5. **Narrow production's bootstrap** with the first command of step 8; the next deployment must change nothing.
 
 **Rollback.** `cdk bootstrap` keeps a parameter's previous value unless it is passed, so restore the default execution
 policy by passing it explicitly; the roles keep their names, and the stacks continue as before:
 
 ```bash
 npx cdk bootstrap "aws://$ACCOUNT/af-south-1" --profile branchbook-admin \
+  --qualifier bbprod --toolkit-stack-name CDKToolkitProduction \
   --cloudformation-execution-policies arn:aws:iam::aws:policy/AdministratorAccess
 npx cdk bootstrap "aws://$ACCOUNT/af-south-1" --profile branchbook-admin \
   --qualifier bbstg --toolkit-stack-name CDKToolkitStaging \
@@ -808,13 +820,15 @@ bootstrap goes last.
    BRANCHBOOK_GUARDRAILS=true npx cdk destroy BranchbookGuardrails --profile branchbook-admin
    ```
 
-5. Delete the three bootstrap stacks:
+5. Delete BranchBook's two bootstrap stacks in `af-south-1`:
 
    ```bash
    aws cloudformation delete-stack --stack-name CDKToolkitStaging --region af-south-1 --profile branchbook-admin
-   aws cloudformation delete-stack --stack-name CDKToolkit --region af-south-1 --profile branchbook-admin
-   aws cloudformation delete-stack --stack-name CDKToolkit --region us-east-1 --profile branchbook-admin
+   aws cloudformation delete-stack --stack-name CDKToolkitProduction --region af-south-1 --profile branchbook-admin
    ```
+
+   Leave each Region's default `CDKToolkit` unless no other CDK app in the account deploys through it: list the
+   stacks first (`aws cloudformation list-stacks`), since the default bootstrap is shared.
 
    The ECR repository must be empty for the delete to succeed; in `af-south-1` it holds the hosted demo's images,
    so delete them first in the ECR console. CloudFormation keeps each assets bucket

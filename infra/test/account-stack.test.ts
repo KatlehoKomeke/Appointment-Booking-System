@@ -90,14 +90,14 @@ function statement(statements: Statement[], sid: string): Statement {
 // Environment, deploy role, resourcePrefix (from config/<env>.json), the other environment, bootstrap qualifier.
 const ENVIRONMENTS = [
   ['staging', 'branchbook-github-deploy-staging', 'branchbook-staging', 'production', 'bbstg'],
-  ['production', 'branchbook-github-deploy-production', 'branchbook', 'staging', 'hnb659fds'],
+  ['production', 'branchbook-github-deploy-production', 'branchbook', 'staging', 'bbprod'],
 ] as const;
 
 describe('the account configuration', () => {
   test('the committed file is valid, sets a 450 USD budget and gives staging and production their own bootstraps', () => {
     expect(config.budget.monthlyUsd).toBe(450);
     expect(config.budget.alertThresholdsPercent).toEqual([50, 80, 100]);
-    expect(config.deploy.environments.production.cdkBootstrapQualifier).toBe('hnb659fds');
+    expect(config.deploy.environments.production.cdkBootstrapQualifier).toBe('bbprod');
     expect(config.deploy.environments.staging.cdkBootstrapQualifier).toBe('bbstg');
     expect(config.deploy.registryEnvironment).toBe('staging');
   });
@@ -113,7 +113,8 @@ describe('the account configuration', () => {
     ['a non-numeric repository ID', mutate((c) => (c.github.repositoryId = 'Appointment-Booking-System')), /github.repositoryId.*numeric ID/],
     ['a GitHub environment name with spaces', mutate((c) => (c.deploy.environments.staging.githubEnvironment = 'aws demo')), /githubEnvironment.*environment name/],
     ['two environments trusting the same GitHub environment', mutate((c) => (c.deploy.environments.staging.githubEnvironment = 'production')), /githubEnvironment" must differ/],
-    ['two environments sharing a bootstrap', mutate((c) => (c.deploy.environments.staging.cdkBootstrapQualifier = 'hnb659fds')), /cdkBootstrapQualifier" must differ/],
+    ['two environments sharing a bootstrap', mutate((c) => (c.deploy.environments.staging.cdkBootstrapQualifier = 'bbprod')), /cdkBootstrapQualifier" must differ/],
+    ['an environment on CDK\'s default bootstrap, which other apps share', mutate((c) => (c.deploy.environments.production.cdkBootstrapQualifier = 'hnb659fds')), /production.cdkBootstrapQualifier" must not be hnb659fds/],
     ['a qualifier CDK would refuse', mutate((c) => (c.deploy.environments.staging.cdkBootstrapQualifier = 'Branchbook-Staging')), /cdkBootstrapQualifier.*CDK bootstrap qualifier/],
     ['an environment without a deploy role', mutate((c) => delete (c.deploy.environments as Partial<typeof c.deploy.environments>).staging), /environments.staging" is missing/],
     ['an environment the app cannot build', mutate((c) => ((c.deploy.environments as Record<string, unknown>).qa = { githubEnvironment: 'qa', cdkBootstrapQualifier: 'bbqa' })), /environments.qa" is not a known setting/],
