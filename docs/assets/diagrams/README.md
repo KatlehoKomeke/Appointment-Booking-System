@@ -36,7 +36,7 @@ The rows run in reading order: the system, the application, the local stack, del
 | [push-timeline](push-timeline.svg) | SVG | What one push to `main` runs, how long each job takes, and whether the deploy waits for the tests | [delivery.md](../../delivery.md#one-push-measured) |
 | [aws-footprint](aws-footprint.svg) | SVG | What exists in AWS, in which Region, what staging and production share, who deploys each part, how a customer's request reaches the app, and how production's SMS leave it | [infra/README.md](../../../infra/README.md#what-exists-today); [architecture.md, section 10.3](../../architecture.md#103-in-aws) |
 | keyless-deploy | Mermaid | How the deploy job gets short-lived credentials, what is checked, and how it proves the deploy landed | [infra/README.md](../../../infra/README.md#how-github-reaches-aws-without-keys) |
-| [access-boundary](access-boundary.svg) | SVG | Whether the pipeline can widen its own access, which guard stops it, and which guards IAM itself enforces | [infra/README.md](../../../infra/README.md#who-can-change-what-in-aws) |
+| [access-boundary](access-boundary.svg) | SVG | Who can reach the app, whether either environment's pipeline can reach the other's stacks or widen its own access, and what enforces each guard | [infra/README.md](../../../infra/README.md#who-can-change-what-in-aws) |
 | [secret-layers](secret-layers.svg) | SVG | Which layer stops a secret at each stage, which layers can be skipped, and which act only after the code is public | [SECURITY.md](../../../SECURITY.md#secrets) |
 | [diagram key](_template.svg) | SVG | What each colour, stroke, shape and pill means | [this page](#key) |
 
@@ -61,7 +61,7 @@ files live in `.github/workflows/`.
 | push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured after the first run of the pipeline with `deploy` inside `ci` | `85cd726` (measured at `c5feafe`, before the `deploy` job joined `ci`) |
 | aws-footprint | `infra/bin/`; `infra/lib/`; `infra/config/`; `infra/cdk.json` | when a stack, an environment, or who deploys it, changes | `90bf68b` |
 | keyless-deploy | `ci.yml` (job `deploy`); `infra/lib/account-stack.ts` | on hardening; when the `deploy` job's steps change | `21798b6` |
-| access-boundary | `infra/lib/account-stack.ts`; `infra/bin/branchbook.ts`; `ci.yml` (job `deploy`); `aws-connection-check.yml`; the `aws-demo` environment; the `main` ruleset; the bootstrap commands in infra/README.md | on hardening; when a guard changes | `21798b6` |
+| access-boundary | `infra/lib/account-stack.ts`; `infra/lib/guardrails-stack.ts`; `infra/lib/app.ts`; `infra/lib/app-stack.ts` (ports, WAF, the task's database user); `infra/cdk.json` (the permissions boundary); `V9__runtime_role.sql`; `ci.yml` (the delivery jobs); `aws-connection-check.yml`; the `staging` and `production` environments; the `main` ruleset; the bootstrap commands in infra/README.md | when a guard changes | `90bf68b` |
 | secret-layers | `.gitignore`; `.githooks/pre-commit`; `.gitleaks.toml`; `secret-scan.yml`; `ci.yml` (job `stack`); `infra/lib/data-stack.ts` and `infra/lib/app-stack.ts` (the generated secrets and the task's secrets); the repository's security settings | when a layer is added or changes | `21798b6` |
 | diagram key | the rules on this page | only with the visual language | `85cd726` |
 
@@ -253,8 +253,8 @@ order and with this wording:
 8. `Gap or caveat`
 9. On AWS diagrams, `AWS category:` followed by the stripes used, each named.
 
-[access-boundary.svg](access-boundary.svg) adds the enforcement badges `IAM` (accent-strong on accent-soft),
-`GitHub setting` (ink-2 on surface-2) and `Code and workflow` (warn on warn-soft). Space the entries so that each
+[access-boundary.svg](access-boundary.svg) adds the enforcement badges `IAM`, `Network` and `PostgreSQL` (accent-strong
+on accent-soft), `GitHub setting` (ink-2 on surface-2) and `Code and workflow` (warn on warn-soft). Space the entries so that each
 label still clears the next swatch when the file is rendered in Verdana. In the key the legend wraps onto three
 lines; a diagram's legend is usually one.
 

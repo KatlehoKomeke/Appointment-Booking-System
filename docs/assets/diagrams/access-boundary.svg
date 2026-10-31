@@ -1,28 +1,34 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 792" width="960" height="792" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
-  <title id="title">Who can change what in AWS</title>
-  <desc id="desc">Who can change what in AWS. Everything shown is built. Left, the administrator, by hand. Step A: the IAM user branchbook-admin signs in with aws login and runs the CDK app with BRANCHBOOK_ALERT_EMAIL set, so the app includes BranchbookAccount; that switch is enforced by code and workflow. cdk deploy goes through the us-east-1 CDK bootstrap roles, cdk-hnb659fds-*-us-east-1, to the stack BranchbookAccount in us-east-1, which holds the OIDC provider, the budget and the deploy role branchbook-github-deploy. Right, the pipeline, on every push to main: ci.yml, job deploy, passes four guards in order; aws-connection-check.yml, run by hand, also declares aws-demo. Step 1, environment aws-demo: only branch main and v* tags may use it; enforced by a GitHub setting. Step 2, the trust policy, an exact match (StringEquals): aud must equal sts.amazonaws.com, and sub must name this repository by its ID and the environment aws-demo; enforced by IAM. Step 3, the deploy role: its sessions last at most 1 hour, and its policy has two statements, AssumeCdkBootstrapRolesOnly, which allows sts:AssumeRole on cdk-hnb659fds-*, and ReadReleaseRecordOnly, which allows ssm:GetParameter on /branchbook/release; enforced by IAM. Step 4, the CDK app without BRANCHBOOK_ALERT_EMAIL: ci.yml never sets it, so the app never holds BranchbookAccount; enforced by code and workflow. Step 5: via the af-south-1 bootstrap roles and CloudFormation, the pipeline deploys BranchbookData, BranchbookApp and BranchbookRelease in af-south-1: the hosted demo, then /branchbook/release, the SSM parameter holding the deployed commit. A red arrow with a cross runs from step 4 to BranchbookAccount: not allowed, because BranchbookAccount is not in the pipeline’s CDK app. Gap, not prevented by IAM today: AssumeCdkBootstrapRolesOnly allows cdk-hnb659fds-*, which also matches the us-east-1 bootstrap roles; the cfn-exec bootstrap role keeps CDK’s default AdministratorAccess, because the documented bootstrap omits --cloudformation-execution-policies; main requires no review, so a workflow pushed to main that set BRANCHBOOK_ALERT_EMAIL could deploy BranchbookAccount; what limits this today is one collaborator, who is an admin, and the aws-demo branch policy. Legend: built, main path, refused or not allowed, gap or caveat; the pill on each guard names what enforces it: IAM, a GitHub setting, or code and workflow.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
+  <title id="title">Who can reach and change what in AWS</title>
+  <desc id="desc">Who can reach and change what in AWS. Everything shown is built. Top left, the administrator, by hand: the IAM user branchbook-admin signs in with aws login. Step A: the administrator runs the CDK app with BRANCHBOOK_ALERT_EMAIL or BRANCHBOOK_GUARDRAILS=true set, so the app includes the administrator's stacks; that switch is enforced by code and workflow. cdk deploy then updates the administrator's stacks: BranchbookAccount in us-east-1, which holds the GitHub OIDC provider, a deploy role per environment and the cost budget, and BranchbookGuardrails in af-south-1, which holds CloudTrail, GuardDuty, AWS Config, Security Hub, IAM Access Analyzer, each environment's CloudFormation execution policy and the permissions boundary. Top right, the pipeline, on a push to main, in two lanes, staging on the left and production on the right; the production lane is the main path. Step 1: the delivery jobs of ci.yml never set BRANCHBOOK_ALERT_EMAIL or BRANCHBOOK_GUARDRAILS, so their CDK app never holds the administrator's stacks; enforced by code and workflow. aws-connection-check.yml, run by hand, also declares either environment. Step 2, the GitHub environments: staging admits main only and needs no approval; production admits main only and needs an approval, which administrators cannot bypass; enforced by GitHub settings. Step 3, each environment's deploy role, branchbook-github-deploy-staging or branchbook-github-deploy-production: its trust policy is an exact match (StringEquals), aud sts.amazonaws.com and sub naming this repository by ID and that environment alone; its sessions are short; it may assume only its own CDK bootstrap's roles, cdk-bbstg-* for staging and cdk-hnb659fds-* for production, and otherwise only read its own release records, push to and pull from the image repository and, on staging, read the synthetic-traffic token; enforced by IAM. Step 4, each environment's CDK bootstrap, qualifier bbstg for staging and hnb659fds for production: its deploy role carries the deploy scope branchbook-cdk-deploy-scope-staging or -production, which denies CloudFormation on the other environment's stacks and on the administrator's; its execution role carries branchbook-cdk-cfn-exec-staging or -production instead of AdministratorAccess, which allows IAM only on that environment's own stacks' roles, and creates a role only with the permissions boundary; enforced by IAM. A red arrow with a cross runs from the staging bootstrap to the administrator's stacks: not allowed, guards 1, 3 and 4 keep the pipeline off these stacks. Gap, not prevented by IAM: both environments share one account, so a stack could reach the other's resources through services the execution policies allow, such as the shared hosted zone; and a merge to main needs no second person's approval. At run time, in each environment, left to right: a browser reaches step 5, AWS WAF, which asks for a CAPTCHA on bookings and cancellations, applies per-address limits and blocks /actuator; then step 6, the load balancer, over HTTPS, whose one target is port 8080, while port 8081, the actuator, is in no target group; both enforced by the network. The Fargate task runs in a private subnet with no public IP and admits port 8080 from the load balancer only; a refused box beside it reads: not allowed, port 8081, the actuator. Below, step 7: the permissions boundary branchbook-permissions-boundary, on every role the app stacks create, denies IAM users and keys, shedding the boundary, assuming other roles, account changes, and tampering with CloudTrail, GuardDuty, AWS Config and Security Hub; enforced by IAM. Step 8: the task signs in to the database as branchbook_app with an IAM token and no password; that role has row privileges only, SELECT, INSERT, UPDATE and DELETE, no DDL and no access to Flyway's history, and the master secret goes to the migration task alone; enforced by IAM and PostgreSQL. Legend: built, main path, refused or not allowed, gap or caveat; the pill on each guard names what enforces it: IAM, the network, PostgreSQL, a GitHub setting, or code and workflow.</desc>
   <!--
     Diagram id: access-boundary
     Shown in: infra/README.md (Who can change what in AWS)
-    Sources: infra/bin/branchbook.ts (BRANCHBOOK_ALERT_EMAIL switch, stacks and Regions);
-      infra/lib/account-stack.ts (OIDC provider, trust policy, AssumeCdkBootstrapRolesOnly, ReadReleaseRecordOnly,
-      1 h sessions, budget); infra/lib/release-stack.ts (/branchbook/release); infra/test/account-stack.test.ts;
-      .github/workflows/ci.yml (job deploy, environment aws-demo, never sets BRANCHBOOK_ALERT_EMAIL, deploys
-      BranchbookData, BranchbookApp and BranchbookRelease);
-      .github/workflows/aws-connection-check.yml (also declares aws-demo); infra/README.md (BranchbookAccount
-      deployed by an administrator by hand, branchbook-admin, aws login, the documented cdk bootstrap, which omits
-      cloudformation-execution-policies);
-      GitHub settings, read with fields selected (-q is the short form of the jq flag) so no account ID prints:
-        gh api repos/KatlehoKomeke/Appointment-Booking-System/environments/aws-demo
-          -q '[.protection_rules[].type], .deployment_branch_policy'
-        gh api repos/KatlehoKomeke/Appointment-Booking-System/environments/aws-demo/deployment-branch-policies
-          -q '.branch_policies[] | [.name, .type]'
-        gh api repos/KatlehoKomeke/Appointment-Booking-System/branches/main/protection -q '.url'   (404: no classic rule; the ruleset applies)
-        gh api repos/KatlehoKomeke/Appointment-Booking-System/rulesets -q 'length'      (1: Protect main)
-        gh api repos/KatlehoKomeke/Appointment-Booking-System/collaborators -q '[.[] | .permissions.admin]'
-    Verified at 21798b6 (2026-10-27)
+    Sources: infra/lib/app.ts (BranchbookAccount only with BRANCHBOOK_ALERT_EMAIL, BranchbookGuardrails only with
+      BRANCHBOOK_GUARDRAILS=true, one environment's stacks with BRANCHBOOK_ENV); infra/config/account.json (the
+      GitHub environments and bootstrap qualifiers: production hnb659fds, staging bbstg);
+      infra/lib/account-stack.ts (GitHubOidcProvider; one deploy role per environment, trust StringEquals on aud and
+      on sub = repo:OWNER@OWNER_ID/REPO@REPO_ID:environment:NAME; statements AssumeOwnCdkBootstrapRoles,
+      ReadOwnReleaseRecords, LogInToEcr, PushAndPullTheImageRepository and, staging only, ReadSyntheticTrafficToken;
+      the deploy scope branchbook-cdk-deploy-scope-<env> on each bootstrap's deploy role, OnlyThisEnvironmentsStacks);
+      infra/lib/guardrails-stack.ts (branchbook-cdk-cfn-exec-<env>; branchbook-permissions-boundary and its denies:
+      DenyRemovingTheBoundary, DenyRolesWithoutTheBoundary, DenyIamUsersAndAccessKeys,
+      DenyOrganizationsAndAccountChanges, DenyTamperingWithDetectiveControls, DenyRoleChaining and the rest);
+      infra/cdk.json (@aws-cdk/core:permissionsBoundary); infra/lib/app-stack.ts (APP_PORT 8080, MANAGEMENT_PORT 8081
+      in no target group or rule, the task security group, assignPublicIp false, the web ACL, grantConnect as
+      branchbook_app, the migration task's master secret); infra/lib/data-stack.ts (iamAuthentication, the private
+      app subnets); api/src/main/resources/db/migration/V9__runtime_role.sql; .github/workflows/ci.yml (publish,
+      deploy-staging, deploy-production, rollback-production; never set BRANCHBOOK_ALERT_EMAIL or
+      BRANCHBOOK_GUARDRAILS); .github/workflows/aws-connection-check.yml; infra/README.md (the bootstrap commands);
+      GitHub environments staging (main only, no required approval) and production (main only, one required
+      approval, administrators cannot bypass), read with
+        gh api repos/KatlehoKomeke/Appointment-Booking-System/environments/<env>
+          -q '{rules: [.protection_rules[].type], can_admins_bypass}'
+      and the ruleset Protect main (required checks, no required approval).
+    Verified at 90bf68b (2026-10-30)
     Conventions: docs/assets/diagrams/README.md
     Planned elements carry class="planned" data-milestone. This diagram has none: everything shown is built.
+    Steps A and 1 to 8 match the numbered list beside the image in infra/README.md.
   -->
   <style>
 :root{--bg:#F2F5F2;--surface:#FFFFFF;--surface-2:#E8EEE9;--ink:#15201A;--ink-2:#46534C;--ink-3:#69766E;--line:#D3DCD5;--line-strong:#AEBDB3;--accent:#1E6B52;--accent-strong:#164F3D;--accent-soft:#DCEDE4;--bad:#A63650;--bad-soft:#F6E0E6;--warn:#775C10;--warn-soft:#F5ECCD}
@@ -64,144 +70,247 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <marker id="ah-dash" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-dash" d="M0,0 L8,4 L0,8 z"/></marker>
     <marker id="ah-bad" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-bad" d="M0,0 L8,4 L0,8 z"/></marker>
   </defs>
-  <rect class="card" x="0.5" y="0.5" width="959" height="791" rx="16"/>
+  <rect class="card" x="0.5" y="0.5" width="959" height="799" rx="16"/>
   <g id="track-administrator">
     <text class="g" x="24" y="36">Administrator · by hand</text>
     <g id="actor-branchbook-admin">
-      <rect class="box" x="80.5" y="48.5" width="207" height="47" rx="23.5"/>
-      <text class="t mono" x="184" y="67" text-anchor="middle">branchbook-admin</text>
-      <text class="s" x="184" y="85" text-anchor="middle">IAM user · <tspan class="s mono">aws login</tspan></text>
+      <rect class="box" x="24.5" y="48.5" width="247" height="31" rx="15.5"/>
+      <text class="s" x="148" y="69" text-anchor="middle"><tspan class="t mono">branchbook-admin</tspan> · <tspan class="s mono">aws login</tspan></text>
     </g>
-    <g id="node-cdk-app-with-alert-email">
-      <rect class="box" x="24.5" y="112.5" width="319" height="82" rx="8"/>
-      <circle class="badge" cx="48" cy="134" r="10"/>
-      <text class="badge-t" x="48" y="138" text-anchor="middle">A</text>
-      <text class="t" x="68" y="138">CDK app with</text>
-      <text class="t" x="68" y="160"><tspan class="t mono">BRANCHBOOK_ALERT_EMAIL</tspan> set</text>
-      <text class="s" x="68" y="178">includes <tspan class="s mono">BranchbookAccount</tspan></text>
-      <rect class="pill-warn" x="188" y="124" width="144" height="20" rx="10"/>
-      <text class="pill-warn-t" x="260" y="138" text-anchor="middle">code and workflow</text>
+    <g id="node-cdk-app-with-a-switch">
+      <rect class="box" x="24.5" y="96.5" width="247" height="99" rx="8"/>
+      <circle class="badge" cx="44" cy="116" r="10"/>
+      <text class="badge-t" x="44" y="120" text-anchor="middle">A</text>
+      <text class="t" x="62" y="121">CDK app with a switch</text>
+      <text class="s" x="36" y="141"><tspan class="s mono">BRANCHBOOK_ALERT_EMAIL</tspan> or</text>
+      <text class="s mono" x="36" y="159">BRANCHBOOK_GUARDRAILS=true</text>
+      <rect class="pill-warn" x="36" y="167" width="144" height="20" rx="10"/>
+      <text class="pill-warn-t" x="108" y="181" text-anchor="middle">code and workflow</text>
     </g>
-    <g id="node-bootstrap-roles-us-east-1">
-      <rect class="box" x="24.5" y="211.5" width="319" height="63" rx="8"/>
-      <text class="t" x="36" y="237">us-east-1 CDK bootstrap roles</text>
-      <text class="s mono" x="36" y="255">cdk-hnb659fds-*-us-east-1</text>
-    </g>
-    <g id="stack-branchbook-account">
-      <rect class="box" x="24.5" y="297.5" width="319" height="79" rx="8"/>
-      <path class="pill-built" d="M25,325.5 V305.5 A7.5,7.5 0 0 1 32.5,298 H335.5 A7.5,7.5 0 0 1 343,305.5 V325.5 Z"/>
-      <text class="s" x="36" y="316"><tspan class="t mono">BranchbookAccount</tspan> · us-east-1</text>
-      <text class="s" x="36" y="345">OIDC provider · budget · deploy role</text>
-      <text class="s mono" x="36" y="363">branchbook-github-deploy</text>
+    <g id="group-administrators-stacks">
+      <rect class="box-soft" x="24.5" y="212.5" width="247" height="234" rx="12"/>
+      <text class="g" x="40" y="234">Administrator's stacks</text>
+      <g id="stack-branchbook-account">
+        <rect class="box" x="32.5" y="244.5" width="231" height="76" rx="8"/>
+        <path class="pill-built" d="M33.1,272.5 V252.5 A7.4,7.4 0 0 1 40.5,245.1 H255.5 A7.4,7.4 0 0 1 262.9,252.5 V272.5 Z"/>
+        <text class="t mono" x="44" y="263">BranchbookAccount</text>
+        <text class="s" x="44" y="292">us-east-1 · OIDC provider</text>
+        <text class="s" x="44" y="310">deploy roles · budget</text>
+      </g>
+      <g id="stack-branchbook-guardrails">
+        <rect class="box" x="32.5" y="328.5" width="231" height="110" rx="8"/>
+        <path class="pill-built" d="M33.1,356.5 V336.5 A7.4,7.4 0 0 1 40.5,329.1 H255.5 A7.4,7.4 0 0 1 262.9,336.5 V356.5 Z"/>
+        <text class="t mono" x="44" y="347">BranchbookGuardrails</text>
+        <text class="s" x="44" y="376">CloudTrail · GuardDuty</text>
+        <text class="s" x="44" y="394">Config · Security Hub</text>
+        <text class="s" x="44" y="412">Access Analyzer</text>
+        <text class="s" x="44" y="430">exec policies · boundary</text>
+      </g>
     </g>
     <g id="edges-administrator">
-      <path class="edge" d="M184,96 V112" marker-end="url(#ah)"/>
-      <path class="edge" d="M184,195 V211" marker-end="url(#ah)"/>
-      <path class="edge" d="M184,275 V297" marker-end="url(#ah)"/>
-      <text class="l mono halo" x="196" y="290">cdk deploy</text>
+      <path class="edge" d="M148,80 V96" marker-end="url(#ah)"/>
+      <path class="edge" d="M148,196 V212" marker-end="url(#ah)"/>
+      <text class="l mono halo" x="160" y="208">cdk deploy</text>
     </g>
   </g>
   <g id="track-pipeline">
-    <text class="g" x="376" y="36">Pipeline · every push to main</text>
+    <text class="g" x="304" y="36">Pipeline · a push to main</text>
     <g id="file-ci-yml">
-      <path class="box" d="M384.5,48.5 H925.5 L935.5,58.5 V100.5 A8,8 0 0 1 927.5,108.5 H384.5 A8,8 0 0 1 376.5,100.5 V56.5 A8,8 0 0 1 384.5,48.5 Z"/>
+      <path class="box" d="M312.5,48.5 H925.5 L935.5,58.5 V120.5 A8,8 0 0 1 927.5,128.5 H312.5 A8,8 0 0 1 304.5,120.5 V56.5 A8,8 0 0 1 312.5,48.5 Z"/>
       <path class="box" d="M925.5,48.5 V58.5 H935.5 Z"/>
-      <text class="s" x="388" y="74"><tspan class="t mono">ci.yml</tspan> · job <tspan class="t mono">deploy</tspan>, after api, web, stack and infra pass</text>
-      <text class="s" x="388" y="92"><tspan class="s mono">aws-connection-check.yml</tspan> (manual) also declares <tspan class="s mono">aws-demo</tspan></text>
+      <text class="s" x="316" y="73"><tspan class="t mono">ci.yml</tspan> delivery jobs · <tspan class="s mono">aws-connection-check.yml</tspan> (manual)</text>
+      <rect class="pill-warn" x="776" y="59" width="144" height="20" rx="10"/>
+      <text class="pill-warn-t" x="848" y="73" text-anchor="middle">code and workflow</text>
+      <circle class="badge" cx="328" cy="93" r="10"/>
+      <text class="badge-t" x="328" y="97" text-anchor="middle">1</text>
+      <text class="s" x="346" y="98">never set <tspan class="s mono">BRANCHBOOK_ALERT_EMAIL</tspan> or <tspan class="s mono">BRANCHBOOK_GUARDRAILS</tspan></text>
+      <text class="s" x="346" y="117">so their CDK app never holds the administrator's stacks</text>
     </g>
-    <g id="gate-environment-aws-demo">
-      <rect class="box" x="376.5" y="129.5" width="559" height="47" rx="8"/>
-      <path class="badge" d="M378.5,132.5 A8,8 0 0 1 384.5,129.5 H927.5 A8,8 0 0 1 933.5,132.5 Z"/>
-      <circle class="badge" cx="400" cy="154" r="10"/>
-      <text class="badge-t" x="400" y="158" text-anchor="middle">1</text>
-      <text class="s" x="420" y="158"><tspan class="t">environment </tspan><tspan class="t mono">aws-demo</tspan> · <tspan class="s mono">main</tspan> and <tspan class="s mono">v*</tspan> tags only</text>
-      <rect class="box-soft" x="812.5" y="144.5" width="111" height="19" rx="9.5"/>
-      <text class="pill-plan-t" x="868" y="158" text-anchor="middle">GitHub setting</text>
+    <g id="lane-staging">
+      <g id="gate-environment-staging">
+        <rect class="box" x="304.5" y="144.5" width="307" height="64" rx="8"/>
+        <path class="badge" d="M306.5,147.5 A8,8 0 0 1 312.5,144.5 H603.5 A8,8 0 0 1 609.5,147.5 Z"/>
+        <circle class="badge" cx="328" cy="166" r="10"/>
+        <text class="badge-t" x="328" y="170" text-anchor="middle">2</text>
+        <text class="t" x="346" y="171">environment <tspan class="t mono">staging</tspan></text>
+        <text class="s" x="316" y="195">main only · no approval</text>
+        <rect class="box-soft" x="492.5" y="182.5" width="111" height="19" rx="9.5"/>
+        <text class="pill-plan-t" x="548" y="196" text-anchor="middle">GitHub setting</text>
+      </g>
+      <g id="gate-deploy-role-staging">
+        <rect class="box" x="304.5" y="224.5" width="307" height="76" rx="8"/>
+        <path class="badge" d="M306.5,227.5 A8,8 0 0 1 312.5,224.5 H603.5 A8,8 0 0 1 609.5,227.5 Z"/>
+        <circle class="badge" cx="328" cy="246" r="10"/>
+        <text class="badge-t" x="328" y="250" text-anchor="middle">3</text>
+        <text class="t" x="346" y="251">deploy role</text>
+        <rect class="pill-built" x="556" y="237" width="48" height="20" rx="10"/>
+        <text class="pill-built-t" x="580" y="251" text-anchor="middle">IAM</text>
+        <text class="s" x="316" y="273">trusts only jobs in <tspan class="s mono">staging</tspan></text>
+        <text class="s" x="316" y="291">assumes only <tspan class="s mono">cdk-bbstg-*</tspan> roles</text>
+      </g>
+      <g id="gate-bootstrap-bbstg">
+        <rect class="box" x="304.5" y="316.5" width="307" height="92" rx="8"/>
+        <path class="badge" d="M306.5,319.5 A8,8 0 0 1 312.5,316.5 H603.5 A8,8 0 0 1 609.5,319.5 Z"/>
+        <circle class="badge" cx="328" cy="338" r="10"/>
+        <text class="badge-t" x="328" y="342" text-anchor="middle">4</text>
+        <text class="t" x="346" y="343">CDK bootstrap <tspan class="t mono">bbstg</tspan></text>
+        <rect class="pill-built" x="556" y="329" width="48" height="20" rx="10"/>
+        <text class="pill-built-t" x="580" y="343" text-anchor="middle">IAM</text>
+        <text class="s" x="316" y="365">deploy role: no CloudFormation on</text>
+        <text class="s" x="316" y="383">production's or the admin's stacks</text>
+        <text class="s" x="316" y="401">exec policy: own stacks' roles only</text>
+      </g>
+      <g id="edges-staging">
+        <path class="edge" d="M458,129 V144" marker-end="url(#ah)"/>
+        <path class="edge" d="M458,209 V224" marker-end="url(#ah)"/>
+        <path class="edge" d="M458,301 V316" marker-end="url(#ah)"/>
+      </g>
     </g>
-    <g id="gate-trust-policy">
-      <rect class="box" x="376.5" y="197.5" width="559" height="79" rx="8"/>
-      <path class="badge" d="M378.5,200.5 A8,8 0 0 1 384.5,197.5 H927.5 A8,8 0 0 1 933.5,200.5 Z"/>
-      <circle class="badge" cx="400" cy="221" r="10"/>
-      <text class="badge-t" x="400" y="225" text-anchor="middle">2</text>
-      <text class="s" x="420" y="225"><tspan class="t">trust policy</tspan> · exact match (<tspan class="s mono">StringEquals</tspan>)</text>
-      <text class="s" x="420" y="243">aud = <tspan class="s mono">sts.amazonaws.com</tspan></text>
-      <text class="s" x="420" y="261">sub = this repository (by ID) and environment <tspan class="s mono">aws-demo</tspan></text>
-      <rect class="pill-built" x="876" y="211" width="48" height="20" rx="10"/>
-      <text class="pill-built-t" x="900" y="225" text-anchor="middle">IAM</text>
-    </g>
-    <g id="gate-deploy-role">
-      <rect class="box" x="376.5" y="297.5" width="559" height="79" rx="8"/>
-      <path class="badge" d="M378.5,300.5 A8,8 0 0 1 384.5,297.5 H927.5 A8,8 0 0 1 933.5,300.5 Z"/>
-      <circle class="badge" cx="400" cy="321" r="10"/>
-      <text class="badge-t" x="400" y="325" text-anchor="middle">3</text>
-      <text class="s" x="420" y="325"><tspan class="t">deploy role</tspan> · sessions at most 1 h · its policy:</text>
-      <text class="s" x="420" y="343"><tspan class="s mono">AssumeCdkBootstrapRolesOnly</tspan> · <tspan class="s mono">sts:AssumeRole</tspan> on <tspan class="s mono">cdk-hnb659fds-*</tspan></text>
-      <text class="s" x="420" y="361"><tspan class="s mono">ReadReleaseRecordOnly</tspan> · <tspan class="s mono">ssm:GetParameter</tspan> on <tspan class="s mono">/branchbook/release</tspan></text>
-      <rect class="pill-built" x="876" y="311" width="48" height="20" rx="10"/>
-      <text class="pill-built-t" x="900" y="325" text-anchor="middle">IAM</text>
-    </g>
-    <g id="gate-cdk-app-without-alert-email">
-      <rect class="box" x="376.5" y="397.5" width="559" height="79" rx="8"/>
-      <path class="badge" d="M378.5,400.5 A8,8 0 0 1 384.5,397.5 H927.5 A8,8 0 0 1 933.5,400.5 Z"/>
-      <circle class="badge" cx="400" cy="421" r="10"/>
-      <text class="badge-t" x="400" y="425" text-anchor="middle">4</text>
-      <text class="t" x="420" y="425">CDK app without</text>
-      <text class="t mono" x="420" y="444">BRANCHBOOK_ALERT_EMAIL</text>
-      <text class="s" x="420" y="462"><tspan class="s mono">ci.yml</tspan> never sets it, so the app never holds <tspan class="s mono">BranchbookAccount</tspan></text>
-      <rect class="pill-warn" x="780" y="411" width="144" height="20" rx="10"/>
-      <text class="pill-warn-t" x="852" y="425" text-anchor="middle">code and workflow</text>
-    </g>
-    <g id="stack-branchbook-release">
-      <rect class="box-ok" x="376.5" y="517.5" width="559" height="63" rx="8"/>
-      <path class="box-ok" d="M377,545.5 H935"/>
-      <circle class="badge" cx="400" cy="531" r="10"/>
-      <text class="badge-t" x="400" y="535" text-anchor="middle">5</text>
-      <text class="s" x="420" y="536"><tspan class="t mono">BranchbookData</tspan>, <tspan class="t mono">BranchbookApp</tspan> and <tspan class="t mono">BranchbookRelease</tspan> · af-south-1</text>
-      <text class="s" x="420" y="567">the hosted demo, then <tspan class="s mono">/branchbook/release</tspan>, the deployed commit</text>
-    </g>
-    <g id="edges-pipeline">
-      <path class="edge-acc" d="M656,109 V129" marker-end="url(#ah-acc)"/>
-      <path class="edge-acc" d="M656,177 V197" marker-end="url(#ah-acc)"/>
-      <path class="edge-acc" d="M656,277 V297" marker-end="url(#ah-acc)"/>
-      <path class="edge-acc" d="M656,377 V397" marker-end="url(#ah-acc)"/>
-      <path class="edge-acc" d="M656,477 V517" marker-end="url(#ah-acc)"/>
-      <text class="l halo" x="668" y="493">via af-south-1 bootstrap roles</text>
-      <text class="l halo" x="668" y="509">and CloudFormation</text>
+    <g id="lane-production">
+      <g id="gate-environment-production">
+        <rect class="box" x="628.5" y="144.5" width="307" height="64" rx="8"/>
+        <path class="badge" d="M630.5,147.5 A8,8 0 0 1 636.5,144.5 H927.5 A8,8 0 0 1 933.5,147.5 Z"/>
+        <circle class="badge" cx="652" cy="166" r="10"/>
+        <text class="badge-t" x="652" y="170" text-anchor="middle">2</text>
+        <text class="t" x="670" y="171">environment <tspan class="t mono">production</tspan></text>
+        <text class="s" x="640" y="195">main only · approval</text>
+        <rect class="box-soft" x="816.5" y="182.5" width="111" height="19" rx="9.5"/>
+        <text class="pill-plan-t" x="872" y="196" text-anchor="middle">GitHub setting</text>
+      </g>
+      <g id="gate-deploy-role-production">
+        <rect class="box" x="628.5" y="224.5" width="307" height="76" rx="8"/>
+        <path class="badge" d="M630.5,227.5 A8,8 0 0 1 636.5,224.5 H927.5 A8,8 0 0 1 933.5,227.5 Z"/>
+        <circle class="badge" cx="652" cy="246" r="10"/>
+        <text class="badge-t" x="652" y="250" text-anchor="middle">3</text>
+        <text class="t" x="670" y="251">deploy role</text>
+        <rect class="pill-built" x="880" y="237" width="48" height="20" rx="10"/>
+        <text class="pill-built-t" x="904" y="251" text-anchor="middle">IAM</text>
+        <text class="s" x="640" y="273">trusts only jobs in <tspan class="s mono">production</tspan></text>
+        <text class="s" x="640" y="291">assumes only <tspan class="s mono">cdk-hnb659fds-*</tspan> roles</text>
+      </g>
+      <g id="gate-bootstrap-hnb659fds">
+        <rect class="box" x="628.5" y="316.5" width="307" height="92" rx="8"/>
+        <path class="badge" d="M630.5,319.5 A8,8 0 0 1 636.5,316.5 H927.5 A8,8 0 0 1 933.5,319.5 Z"/>
+        <circle class="badge" cx="652" cy="338" r="10"/>
+        <text class="badge-t" x="652" y="342" text-anchor="middle">4</text>
+        <text class="t" x="670" y="343">CDK bootstrap <tspan class="t mono">hnb659fds</tspan></text>
+        <rect class="pill-built" x="880" y="329" width="48" height="20" rx="10"/>
+        <text class="pill-built-t" x="904" y="343" text-anchor="middle">IAM</text>
+        <text class="s" x="640" y="365">deploy role: no CloudFormation on</text>
+        <text class="s" x="640" y="383">staging's or the admin's stacks</text>
+        <text class="s" x="640" y="401">exec policy: own stacks' roles only</text>
+      </g>
+      <g id="edges-production">
+        <path class="edge-acc" d="M782,129 V144" marker-end="url(#ah-acc)"/>
+        <path class="edge-acc" d="M782,209 V224" marker-end="url(#ah-acc)"/>
+        <path class="edge-acc" d="M782,301 V316" marker-end="url(#ah-acc)"/>
+      </g>
     </g>
   </g>
-  <g id="edge-refused-branchbook-account">
-    <path class="edge-bad" d="M376,437 H190 Q184,437 184,431 V377" marker-end="url(#ah-bad)"/>
-    <path class="ah-bad" d="M246.3,432.7 L256.3,442.7 L257.7,441.3 L247.7,431.3 Z"/>
-    <path class="ah-bad" d="M246.3,441.3 L247.7,442.7 L257.7,432.7 L256.3,431.3 Z"/>
-    <text class="l halo" x="252" y="461" text-anchor="middle">not allowed: <tspan class="l mono">BranchbookAccount</tspan> is</text>
-    <text class="l halo" x="252" y="477" text-anchor="middle">not in the pipeline’s CDK app</text>
+  <g id="edge-refused-administrators-stacks">
+    <path class="edge-bad" d="M304,362.5 H294 Q288,362.5 288,368.5 V456 Q288,462 282,462 H154 Q148,462 148,456 V447" marker-end="url(#ah-bad)"/>
+    <path class="ah-bad" d="M212.3,457.7 L222.3,467.7 L223.7,466.3 L213.7,456.3 Z"/>
+    <path class="ah-bad" d="M212.3,466.3 L213.7,467.7 L223.7,457.7 L222.3,456.3 Z"/>
+    <text class="l halo" x="148" y="482" text-anchor="middle">not allowed: guards 1, 3 and 4</text>
   </g>
   <g id="note-not-prevented-by-iam">
-    <path class="box-warn" d="M32.5,604.5 H925.5 L935.5,614.5 V711.5 A8,8 0 0 1 927.5,719.5 H32.5 A8,8 0 0 1 24.5,711.5 V612.5 A8,8 0 0 1 32.5,604.5 Z"/>
-    <path class="box-warn" d="M925.5,604.5 V614.5 H935.5 Z"/>
-    <text class="t" x="40" y="630">Gap: not prevented by IAM today</text>
-    <text class="s" x="40" y="650"><tspan class="s mono">AssumeCdkBootstrapRolesOnly</tspan> allows <tspan class="s mono">cdk-hnb659fds-*</tspan>, which also matches the us-east-1 bootstrap roles.</text>
-    <text class="s" x="40" y="668">The cfn-exec role keeps CDK’s default <tspan class="s mono">AdministratorAccess</tspan>: the documented bootstrap omits <tspan class="s mono">--cloudformation-execution-policies</tspan>.</text>
-    <text class="s" x="40" y="686"><tspan class="s mono">main</tspan> requires no review: a workflow pushed to <tspan class="s mono">main</tspan> that set <tspan class="s mono">BRANCHBOOK_ALERT_EMAIL</tspan> could deploy <tspan class="s mono">BranchbookAccount</tspan>.</text>
-    <text class="s" x="40" y="704">What limits this today: one collaborator, who is an admin, and the <tspan class="s mono">aws-demo</tspan> branch policy.</text>
+    <path class="box-warn" d="M312.5,424.5 H925.5 L935.5,434.5 V484.5 A8,8 0 0 1 927.5,492.5 H312.5 A8,8 0 0 1 304.5,484.5 V432.5 A8,8 0 0 1 312.5,424.5 Z"/>
+    <path class="box-warn" d="M925.5,424.5 V434.5 H935.5 Z"/>
+    <text class="s" x="320" y="446"><tspan font-weight="600">Gap:</tspan> not prevented by IAM. Both environments share one account, so a stack could</text>
+    <text class="s" x="320" y="464">reach the other's resources through services the execution policies allow, such</text>
+    <text class="s" x="320" y="482">as the shared hosted zone. A merge to <tspan class="s mono">main</tspan> needs no second person's approval.</text>
+  </g>
+  <g id="track-run-time" transform="translate(0,-8)">
+    <text class="g" x="24" y="520">At run time · in each environment</text>
+    <g id="actor-browser">
+      <rect class="box" x="24.5" y="556.5" width="71" height="31" rx="15.5"/>
+      <text class="t" x="60" y="577" text-anchor="middle">Browser</text>
+    </g>
+    <g id="tile-aws-waf">
+      <rect class="box" x="112.5" y="532.5" width="239" height="79" rx="6"/>
+      <rect class="aws-sec" x="116" y="536" width="4" height="72"/>
+      <circle class="badge" cx="140" cy="552" r="10"/>
+      <text class="badge-t" x="140" y="556" text-anchor="middle">5</text>
+      <text class="t" x="158" y="557">AWS WAF</text>
+      <rect class="pill-built" x="276" y="543" width="68" height="20" rx="10"/>
+      <text class="pill-built-t" x="310" y="557" text-anchor="middle">Network</text>
+      <text class="s" x="128" y="577">CAPTCHA · per-address limits</text>
+      <text class="s" x="128" y="597">blocks <tspan class="s mono">/actuator</tspan></text>
+    </g>
+    <g id="tile-load-balancer">
+      <rect class="box" x="368.5" y="532.5" width="247" height="79" rx="6"/>
+      <rect class="aws-net" x="372" y="536" width="4" height="72"/>
+      <circle class="badge" cx="396" cy="552" r="10"/>
+      <text class="badge-t" x="396" y="556" text-anchor="middle">6</text>
+      <text class="t" x="414" y="557">Load balancer</text>
+      <rect class="pill-built" x="540" y="543" width="68" height="20" rx="10"/>
+      <text class="pill-built-t" x="574" y="557" text-anchor="middle">Network</text>
+      <text class="s" x="384" y="577">HTTPS · targets <tspan class="s mono">:8080</tspan> only</text>
+      <text class="s" x="384" y="597"><tspan class="s mono">:8081</tspan> is in no target group</text>
+    </g>
+    <g id="tile-fargate-task">
+      <rect class="box" x="632.5" y="532.5" width="303" height="79" rx="6"/>
+      <rect class="aws-compute" x="636" y="536" width="4" height="72"/>
+      <text class="s" x="648" y="557"><tspan class="t">Fargate task</tspan> · private, no public IP</text>
+      <text class="s" x="648" y="577"><tspan class="s mono">:8080</tspan> from the load balancer only</text>
+      <rect class="box-bad" x="648.5" y="584.5" width="255" height="19" rx="4"/>
+      <text class="s" x="656" y="598">not allowed: <tspan class="s mono">:8081</tspan>, the actuator</text>
+    </g>
+    <g id="edges-request">
+      <path class="edge" d="M96,572 H112" marker-end="url(#ah)"/>
+      <path class="edge" d="M352,572 H368" marker-end="url(#ah)"/>
+      <path class="edge" d="M616,572 H632" marker-end="url(#ah)"/>
+      <path class="edge" d="M784,612 V627" marker-end="url(#ah)"/>
+    </g>
+    <g id="guard-permissions-boundary">
+      <rect class="box" x="24.5" y="627.5" width="591" height="112" rx="8"/>
+      <path class="badge" d="M26.5,630.5 A8,8 0 0 1 32.5,627.5 H607.5 A8,8 0 0 1 613.5,630.5 Z"/>
+      <circle class="badge" cx="44" cy="649" r="10"/>
+      <text class="badge-t" x="44" y="653" text-anchor="middle">7</text>
+      <text class="t" x="62" y="654">permissions boundary</text>
+      <rect class="pill-built" x="560" y="640" width="48" height="20" rx="10"/>
+      <text class="pill-built-t" x="584" y="654" text-anchor="middle">IAM</text>
+      <text class="s" x="36" y="676">on every role the app stacks create: <tspan class="s mono">branchbook-permissions-boundary</tspan></text>
+      <text class="s" x="36" y="694">no IAM users or keys · no shedding the boundary · no role chaining</text>
+      <text class="s" x="36" y="712">no account changes · CloudTrail, GuardDuty, Config and Security Hub stay on</text>
+    </g>
+    <g id="guard-database-role">
+      <rect class="box" x="632.5" y="627.5" width="303" height="112" rx="8"/>
+      <path class="badge" d="M634.5,630.5 A8,8 0 0 1 640.5,627.5 H927.5 A8,8 0 0 1 933.5,630.5 Z"/>
+      <circle class="badge" cx="652" cy="649" r="10"/>
+      <text class="badge-t" x="652" y="653" text-anchor="middle">8</text>
+      <text class="t mono" x="668" y="654">branchbook_app</text>
+      <rect class="pill-built" x="792" y="640" width="48" height="20" rx="10"/>
+      <text class="pill-built-t" x="816" y="654" text-anchor="middle">IAM</text>
+      <rect class="pill-built" x="846" y="640" width="82" height="20" rx="10"/>
+      <text class="pill-built-t" x="887" y="654" text-anchor="middle">PostgreSQL</text>
+      <text class="s" x="644" y="674">IAM token, no password · rows only:</text>
+      <text class="s mono" x="644" y="692">SELECT, INSERT, UPDATE, DELETE</text>
+      <text class="s" x="644" y="710">no DDL · no access to Flyway's history</text>
+      <text class="s" x="644" y="728">master secret: the migration task only</text>
+    </g>
   </g>
   <g id="legend">
-    <rect class="box" x="24.5" y="733.5" width="23" height="13" rx="3"/>
-    <text class="tp" x="56" y="744" font-size="12">Built</text>
-    <path class="edge-acc" d="M104,739.5 H128"/>
-    <text class="tp" x="136" y="744" font-size="12">Main path</text>
-    <path class="edge-bad" d="M214,739.5 H238"/>
-    <path class="ah-bad" d="M220.3,735.2 L230.3,745.2 L231.7,743.8 L221.7,733.8 Z"/>
-    <path class="ah-bad" d="M220.3,743.8 L221.7,745.2 L231.7,735.2 L230.3,733.8 Z"/>
-    <text class="tp" x="246" y="744" font-size="12">Refused or not allowed</text>
-    <rect class="box-warn" x="398.5" y="733.5" width="23" height="13" rx="3"/>
-    <text class="tp" x="430" y="744" font-size="12">Gap or caveat</text>
-    <text class="tp" x="24" y="768" font-size="12">Guard enforced by:</text>
-    <rect class="pill-built" x="156" y="754" width="48" height="20" rx="10"/>
-    <text class="pill-built-t" x="180" y="768" text-anchor="middle">IAM</text>
-    <rect class="box-soft" x="216.5" y="754.5" width="111" height="19" rx="9.5"/>
-    <text class="pill-plan-t" x="272" y="768" text-anchor="middle">GitHub setting</text>
-    <rect class="pill-warn" x="340" y="754" width="144" height="20" rx="10"/>
-    <text class="pill-warn-t" x="412" y="768" text-anchor="middle">Code and workflow</text>
+    <rect class="box" x="24.5" y="745.5" width="23" height="13" rx="3"/>
+    <text class="tp" x="56" y="756" font-size="12">Built</text>
+    <path class="edge-acc" d="M104,751.5 H128"/>
+    <text class="tp" x="136" y="756" font-size="12">Main path</text>
+    <path class="edge-bad" d="M214,751.5 H238"/>
+    <path class="ah-bad" d="M220.3,747.2 L230.3,757.2 L231.7,755.8 L221.7,745.8 Z"/>
+    <path class="ah-bad" d="M220.3,755.8 L221.7,757.2 L231.7,747.2 L230.3,745.8 Z"/>
+    <text class="tp" x="246" y="756" font-size="12">Refused or not allowed</text>
+    <rect class="box-warn" x="398.5" y="745.5" width="23" height="13" rx="3"/>
+    <text class="tp" x="430" y="756" font-size="12">Gap or caveat</text>
+    <text class="tp" x="24" y="776" font-size="12">Guard enforced by:</text>
+    <rect class="pill-built" x="156" y="762" width="48" height="20" rx="10"/>
+    <text class="pill-built-t" x="180" y="776" text-anchor="middle">IAM</text>
+    <rect class="pill-built" x="216" y="762" width="68" height="20" rx="10"/>
+    <text class="pill-built-t" x="250" y="776" text-anchor="middle">Network</text>
+    <rect class="pill-built" x="296" y="762" width="82" height="20" rx="10"/>
+    <text class="pill-built-t" x="337" y="776" text-anchor="middle">PostgreSQL</text>
+    <rect class="box-soft" x="390.5" y="762.5" width="111" height="19" rx="9.5"/>
+    <text class="pill-plan-t" x="446" y="776" text-anchor="middle">GitHub setting</text>
+    <rect class="pill-warn" x="514" y="762" width="144" height="20" rx="10"/>
+    <text class="pill-warn-t" x="586" y="776" text-anchor="middle">Code and workflow</text>
   </g>
 </svg>
