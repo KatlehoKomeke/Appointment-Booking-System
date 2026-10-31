@@ -143,8 +143,17 @@ describe('GuardrailsStack', () => {
     });
     template.hasResource('AWS::Config::DeliveryChannel', {
       Properties: Match.objectLike({ S3KeyPrefix: 'config' }),
-      DependsOn: Match.arrayWith([Match.stringLikeRegexp('^ConfigRecorder')]),
+      DependsOn: Match.arrayWith([Match.stringLikeRegexp('^AuditBucketPolicy')]),
     });
+  });
+
+  test('never makes the delivery channel wait for the recorder, which waits for a channel before it reports created', () => {
+    const channels = Object.values(template.findResources('AWS::Config::DeliveryChannel'));
+    expect(channels).toHaveLength(1);
+    const dependsOn = (channels[0] as { DependsOn?: string[] }).DependsOn ?? [];
+    expect(dependsOn.filter((id) => id.startsWith('ConfigRecorder'))).toEqual([]);
+    const recorder = Object.values(template.findResources('AWS::Config::ConfigurationRecorder'))[0] as { DependsOn?: string[] };
+    expect(recorder.DependsOn ?? []).toEqual([]);
   });
 
   test('enables Security Hub with only the AWS Foundational Security Best Practices standard, after AWS Config', () => {
