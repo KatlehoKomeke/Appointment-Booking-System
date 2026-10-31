@@ -159,4 +159,22 @@ The decision otherwise stands.
   deploys that stack ([infra/README.md](../../infra/README.md#what-exists-today)).
 - **EKS is one production path, not the only one.** The design does not depend on which scheduler runs the
   container. Production runs at least two replicas on the bank's own platform
-  ([production-notes.md](../production-notes.md#more-than-one-task)).
+  ([production-readiness.md](../production-readiness.md#resilience)).
+
+**2026-10-30, two environments.** What replaces the single hosted demo, each in its own record. The data-residency,
+CDK and no-RDS-Proxy decisions stand.
+
+- **Two environments,** staging at https://stg.branchbook.click and production at https://branchbook.click, the
+  image built once and promoted by digest, production after a person's approval
+  ([ADR-0008](0008-two-environments-promoted-by-digest.md)). The hosted demo becomes production on its next deployment.
+- **Private subnets and NAT.** The tasks have no public IP and reach AWS through one NAT gateway per zone in
+  production ([ADR-0010](0010-private-network-and-iam-database-auth.md)).
+- **IAM database authentication with `verify-full`,** in place of the master user and `sslmode=require`: the service
+  signs in as `branchbook_app` (V9), which may change rows only, and has no database password
+  ([ADR-0010](0010-private-network-and-iam-database-auth.md)).
+- **Migrations are a deployment step,** a one-off task the deployment waits for, not app start-up
+  ([ADR-0010](0010-private-network-and-iam-database-auth.md)).
+- **A CAPTCHA on every booking and cancellation,** and per-address limits on lookups and all requests as well
+  ([ADR-0011](0011-waf-captcha-instead-of-a-one-time-pin.md)).
+- **Multi-AZ, deletion protection and 14-day backups** for production's database, and a `prod` Spring profile that
+  fails closed ([ADR-0009](0009-configuration-from-the-environment.md)).
