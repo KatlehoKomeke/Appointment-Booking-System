@@ -26,7 +26,7 @@ address, set `E2E_BASE_URL`, for example `make e2e E2E_BASE_URL=http://localhost
 | `npm run typecheck` | Type-checks the tests |
 | `npx playwright show-trace test-results/<test>/trace.zip` | Replays a failed test step by step |
 
-Each test books real appointments, so run them against a local or demo stack, never one whose data matters. They
+Each test books real appointments, so run them against a local stack or staging, never production. They
 need no reset between runs: see [Running them again](#running-them-again).
 
 ### Against a deployment
@@ -90,4 +90,6 @@ and annotates the pull request, and a failed test is retried once. A failure kee
 
 On CI they run in `ci`'s `stack` job, on every push to `main` and every pull request, against the stack that job
 starts, and a failed run keeps `playwright-report/` and `test-results/` as the `e2e-report` artifact
-([docs/delivery.md](../docs/delivery.md#the-workflows)).
+([docs/delivery.md](../docs/delivery.md#the-workflows)). On a push to `main` they run again in `deploy-staging`,
+against https://stg.branchbook.click with the synthetic-traffic token, before production is offered
+([docs/delivery.md](../docs/delivery.md#deploy-staging-environment-staging)).
