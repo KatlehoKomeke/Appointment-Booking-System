@@ -1,25 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
   <title id="title">From a commit to Cape Town</title>
-  <desc id="desc">From a commit to Cape Town, in three lanes: Laptop, GitHub (KatlehoKomeke/Appointment-Booking-System) and AWS. Everything drawn is built. Step A, along the top: the administrator, branchbook-admin signed in with aws login, runs cdk deploy BranchbookAccount by hand with BRANCHBOOK_ALERT_EMAIL set. Laptop: step 1, git commit. Step 2, the pre-commit hook refuses .env files, keys, .claude/ and cdk.context.json, then runs gitleaks on the staged diff; it fails closed, and a refused edge leads to 'commit refused: a finding, or no scanner'. Step 3, the post-commit hook prints a reminder after a major commit and never blocks. A caveat note joined to both hooks: they are opt-in (make hooks), and --no-verify skips the pre-commit hook. Step 4, git push, the start of the main path, which crosses into GitHub. GitHub: a small file, aws-connection-check.yml, runs only by hand. Step 5, push protection refuses known provider secrets; a refused edge leads to 'push rejected'. Step 6, main, a gate: a push starts ci and secret-scan; a push or merge needs the required checks api, web, stack, infra and gitleaks, and a force-push is refused. Step 7, ci.yml: the jobs api, web, stack and infra run together with no AWS access. Four needs edges lead to step 8, the deploy job, which needs all four: it runs on an ARM runner, builds the ARM64 image natively, never runs on a pull request, and leaves with an OIDC token through the gate environment aws-demo, which admits main and v* tags only. Below ci.yml, secret-scan.yml, job gitleaks, scans the full history after the push; it cannot block a push, but its check is required to merge. AWS: step 9, AWS STS, AssumeRoleWithWebIdentity, returns credentials for at most 1 h; a dotted line joins STS to the role's trust policy. In AWS · us-east-1 (N. Virginia), the BranchbookAccount stack holds the IAM OIDC provider GitHubOidcProvider and the IAM role branchbook-github-deploy, whose trust policy requires aud and sub to match; IAM is global, so the stack lives in us-east-1, and it also holds the cost budget. In AWS · af-south-1 (Cape Town): step 10, the CDK bootstrap roles file-publishing, image-publishing and deploy; the image is pushed to ECR. Step 11, AWS CloudFormation, as the cfn-exec role, deploys BranchbookData, the network and the database, then BranchbookApp, WAF, the load balancer and the task; both are built by the pipeline. Step 12, on the edge to the next stack, the job smoke-tests branchbook.click. Step 13, the BranchbookRelease stack, which the same job deploys, highlighted, records /branchbook/release = GITHUB_SHA. Step 14, the main path returns to GitHub: the job reads /branchbook/release back, and it must equal GITHUB_SHA, or the job fails. Last in GitHub, Dependabot opens weekly pull requests; ci and secret-scan run on them, and deploy never does. Legend: Built; Main path; Refused or not allowed; Gap or caveat; AWS category: security, management and integration.</desc>
+  <desc id="desc">From a commit to Cape Town, in three lanes: Laptop, GitHub (KatlehoKomeke/Appointment-Booking-System) and AWS. Everything drawn is built. Step A, along the top: the administrator, branchbook-admin signed in with aws login, runs cdk deploy BranchbookAccount and BranchbookGuardrails by hand; the edge leads to BranchbookAccount in us-east-1. Laptop: git commit. Step 1, the pre-commit hook refuses secret files, then runs gitleaks on the staged diff; it fails closed, and a refused edge leads to 'commit refused'. The post-commit hook prints a reminder only. Then git push, the start of the main path, which crosses into GitHub. A caveat note joined to both hooks: they are opt-in (make hooks), and --no-verify skips the pre-commit hook. GitHub: push protection refuses known provider secrets; a refused edge leads to 'push rejected'. Step 2, main, a gate: the ruleset Protect main starts the workflows, requires every check before a push or merge to main, and refuses a force-push. From it, three more workflows: codeql.yml, static analysis; dependency-review.yml, on pull requests only; and secret-scan.yml, gitleaks over the full history, which cannot block a push. Below them, Dependabot opens weekly pull requests, on which the checks run and nothing is delivered; and aws-connection-check.yml runs by hand as either environment's role. The main path enters ci.yml, whose checks have no AWS access: api, web, infra and workflow-lint, and step 3, image, which builds the ARM64 image once, then stack, which runs the end-to-end tests, k6 and ZAP against that same image. Once every check is green on a push to main, the main path continues through the delivery jobs. Step 4, publish, in the staging environment, pushes the image to ECR and attests its provenance and SBOM; its digest is what every later job deploys. Step 5, deploy-staging, deploys that digest to staging, runs the smoke and end-to-end tests there and records the release. A gate, approval: the production environment needs a person's approval. Step 6, deploy-production, verifies the image's provenance, deploys the same digest to production, smoke-tests it and records the release. If it fails, rollback-production redeploys the previous release; a caveat note says the rollback waits for the same approval. AWS: every delivery job signs in through OpenID Connect via AWS STS, AssumeRoleWithWebIdentity, with no stored keys; a dotted line joins STS to the role it trusts. In AWS · us-east-1 (N. Virginia), the BranchbookAccount stack holds the OIDC provider, the budget and the deploy roles branchbook-github-deploy-staging and branchbook-github-deploy-production, one per environment. In AWS · af-south-1 (Cape Town): publish deploys the stack BranchbookRegistry, the ECR repository with immutable tags; deploy-staging updates staging at stg.branchbook.click, the stacks BranchbookStagingData, BranchbookStagingApp and BranchbookStagingRelease; the main path ends at production, highlighted, at branchbook.click, the stacks BranchbookData, BranchbookApp and BranchbookRelease, which deploy-production and rollback-production update. Last, BranchbookGuardrails, deployed by hand, holds the audit trail and the limits on every deployment. Legend: Built; Main path; Refused or not allowed; Gap or caveat; AWS category: security.</desc>
   <!--
     Diagram id: delivery-pipeline
     Shown in: README.md (How it is tested and delivered); docs/delivery.md (At a glance);
       docs/architecture.md (10.2 From a commit to AWS)
     Sources: .githooks/pre-commit (forbidden files, gitleaks on the staged diff, fails closed);
       .githooks/post-commit (reminder only, exit 0); Makefile (hooks: core.hooksPath .githooks);
-      .github/workflows/ci.yml (push to main, pull requests and manual runs; jobs api, web, stack and infra, then
-      deploy with needs: [api, web, stack, infra], if: not a pull request, runs-on ubuntu-24.04-arm, environment
-      aws-demo, OIDC sign-in in af-south-1, cdk deploy BranchbookData BranchbookApp, scripts/smoke.sh against the
-      demoDomain in infra/cdk.json, cdk deploy BranchbookRelease, read-back of /branchbook/release);
+      .github/workflows/ci.yml (push to main, pull requests and manual runs; checks api, web, infra, workflow-lint,
+      image and stack (needs: image); delivery on a push to main only: publish (environment staging,
+      needs every check), deploy-staging (needs publish), deploy-production (environment production, needs publish
+      and deploy-staging; gh attestation verify), rollback-production (needs deploy-production, on its rollback
+      verdict)); .github/workflows/codeql.yml; .github/workflows/dependency-review.yml (pull requests only);
       .github/workflows/secret-scan.yml (every push and pull request; job gitleaks);
-      .github/workflows/aws-connection-check.yml (workflow_dispatch only); .github/dependabot.yml (weekly);
-      infra/bin/branchbook.ts; infra/lib/account-stack.ts; infra/lib/release-stack.ts;
-      GitHub settings: push protection on; environment aws-demo limited to main and v* tags; ruleset Protect main
-      (no force-push or deletion; required checks api, web, stack, infra and gitleaks, not strict).
-    Verified at 21798b6 (2026-10-27)
+      .github/workflows/aws-connection-check.yml (workflow_dispatch, staging or production); .github/dependabot.yml
+      (weekly); infra/lib/app.ts; infra/lib/environment.ts; infra/lib/account-stack.ts; infra/lib/registry-stack.ts;
+      infra/lib/release-stack.ts; infra/lib/guardrails-stack.ts; infra/config/*.json; docs/delivery.md (GitHub
+      settings: push protection on; ruleset Protect main with every check required, no force-push or deletion;
+      environments staging (main only) and production (main only, approval required)).
+    Verified at 90bf68b (2026-10-30)
     Conventions: docs/assets/diagrams/README.md
     Planned elements carry class="planned" data-milestone; none is left in this diagram.
-    Steps 1 to 14 and A match the numbered list in docs/delivery.md (At a glance).
+    Steps 1 to 6 and A match the numbered list in docs/delivery.md (At a glance).
   -->
   <style>
 :root{--bg:#F2F5F2;--surface:#FFFFFF;--surface-2:#E8EEE9;--ink:#15201A;--ink-2:#46534C;--ink-3:#69766E;--line:#D3DCD5;--line-strong:#AEBDB3;--accent:#1E6B52;--accent-strong:#164F3D;--accent-soft:#DCEDE4;--bad:#A63650;--bad-soft:#F6E0E6;--warn:#775C10;--warn-soft:#F5ECCD}
@@ -55,6 +57,7 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
 .badge{fill:var(--accent)}.badge-t{fill:var(--surface);font-size:12px;font-weight:700}
 .aws-compute{fill:#ED7100}.aws-db{fill:#C925D1}.aws-net{fill:#8C4FFF}.aws-sec{fill:#DD344C}.aws-mgmt{fill:#E7157B}.aws-store{fill:#7AA116}
   </style>
+  <style>.t.mono.x-file{font-size:12px}</style>
   <defs>
     <marker id="ah" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah" d="M0,0 L8,4 L0,8 z"/></marker>
     <marker id="ah-acc" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path class="ah-acc" d="M0,0 L8,4 L0,8 z"/></marker>
@@ -69,268 +72,255 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
       <text class="badge-t" x="44" y="36" text-anchor="middle">A</text>
       <text class="s" x="62" y="37"><tspan class="t">Administrator</tspan> · <tspan class="s mono">branchbook-admin</tspan> · <tspan class="s mono">aws login</tspan></text>
     </g>
-    <path class="edge" d="M384,32.5 H866 Q872.5,32.5 872.5,39 V136" marker-end="url(#ah)"/>
-    <text class="l halo" x="396" y="57"><tspan class="l mono">cdk deploy BranchbookAccount</tspan> by hand, <tspan class="l mono">BRANCHBOOK_ALERT_EMAIL</tspan> set</text>
+    <path class="edge" d="M384,32.5 H650 Q656.5,32.5 656.5,39 V172.5 Q656.5,178.5 662.5,178.5 H680" marker-end="url(#ah)"/>
+    <text class="l mono halo" x="400" y="54">cdk deploy BranchbookAccount</text>
+    <text class="l halo" x="400" y="68">and <tspan class="l mono">BranchbookGuardrails</tspan>, by hand</text>
   </g>
   <g id="lane-laptop">
-    <rect class="box-soft" x="24.5" y="72.5" width="219" height="663" rx="12"/>
-    <text class="g" x="40" y="94">Laptop</text>
+    <rect class="box-soft" x="24.5" y="76.5" width="184" height="659" rx="12"/>
+    <text class="g" x="40" y="98">Laptop</text>
     <g id="node-git-commit">
-      <rect class="box" x="32.5" y="108.5" width="203" height="43" rx="8"/>
-      <circle class="badge" cx="52" cy="130" r="10"/>
-      <text class="badge-t" x="52" y="134" text-anchor="middle">1</text>
-      <text class="t mono" x="70" y="135">git commit</text>
+      <rect class="box" x="32.5" y="108.5" width="168" height="43" rx="8"/>
+      <text class="t mono" x="44" y="135">git commit</text>
     </g>
     <g id="node-pre-commit">
-      <rect class="box" x="32.5" y="172.5" width="203" height="142" rx="8"/>
-      <circle class="badge" cx="52" cy="194" r="10"/>
-      <text class="badge-t" x="52" y="198" text-anchor="middle">2</text>
-      <text class="t" x="70" y="199">pre-commit hook</text>
-      <text class="s" x="44" y="219">refuses <tspan class="s mono">.env</tspan>, keys,</text>
-      <text class="s" x="44" y="237"><tspan class="s mono">.claude/</tspan>, <tspan class="s mono">cdk.context.json</tspan></text>
-      <text class="s" x="44" y="255">then gitleaks on the</text>
-      <text class="s" x="44" y="273">staged diff</text>
-      <rect class="pill-built" x="44" y="282" width="81" height="20" rx="10"/>
-      <text class="pill-built-t" x="84.5" y="296" text-anchor="middle">fails closed</text>
+      <rect class="box" x="32.5" y="168.5" width="168" height="103" rx="8"/>
+      <circle class="badge" cx="52" cy="168.5" r="10"/>
+      <text class="badge-t" x="52" y="172.5" text-anchor="middle">1</text>
+      <text class="t" x="44" y="196">pre-commit hook</text>
+      <text class="s" x="44" y="216">refuses secret files,</text>
+      <text class="s" x="44" y="234">then runs gitleaks</text>
+      <rect class="pill-built" x="44" y="243" width="81" height="20" rx="10"/>
+      <text class="pill-built-t" x="84.5" y="257" text-anchor="middle">fails closed</text>
     </g>
     <g id="outcome-commit-refused">
-      <path class="edge-bad" d="M180,315 V343" marker-end="url(#ah-bad)"/>
-      <path class="ah-bad" d="M174.3,323.7 L175.7,322.3 L185.7,332.3 L184.3,333.7 Z"/>
-      <path class="ah-bad" d="M174.3,332.3 L175.7,333.7 L185.7,323.7 L184.3,322.3 Z"/>
-      <rect class="box-bad" x="60.5" y="343.5" width="175" height="69" rx="8"/>
-      <text class="s" x="72" y="364">commit refused:</text>
-      <text class="s" x="72" y="382">a finding, or</text>
-      <text class="s" x="72" y="400">no scanner</text>
+      <path class="edge-bad" d="M160,272 V300" marker-end="url(#ah-bad)"/>
+      <path class="ah-bad" d="M154.3,280.7 L155.7,279.3 L165.7,289.3 L164.3,290.7 Z"/>
+      <path class="ah-bad" d="M154.3,289.3 L155.7,290.7 L165.7,280.7 L164.3,279.3 Z"/>
+      <rect class="box-bad" x="72.5" y="300.5" width="128" height="40" rx="8"/>
+      <text class="s" x="136.5" y="325" text-anchor="middle">commit refused</text>
     </g>
     <g id="node-post-commit">
-      <rect class="box" x="32.5" y="432.5" width="203" height="75" rx="8"/>
-      <circle class="badge" cx="52" cy="454" r="10"/>
-      <text class="badge-t" x="52" y="458" text-anchor="middle">3</text>
-      <text class="t" x="70" y="459">post-commit hook</text>
-      <text class="s" x="44" y="478">reminder after a major</text>
-      <text class="s" x="44" y="496">commit; never blocks</text>
+      <rect class="box" x="32.5" y="356.5" width="168" height="56" rx="8"/>
+      <text class="t" x="44" y="380">post-commit hook</text>
+      <text class="s" x="44" y="400">reminder only</text>
     </g>
     <g id="node-git-push">
-      <rect class="box" x="32.5" y="532.5" width="203" height="43" rx="8"/>
-      <circle class="badge" cx="52" cy="554" r="10"/>
-      <text class="badge-t" x="52" y="558" text-anchor="middle">4</text>
-      <text class="t mono" x="70" y="559">git push</text>
+      <rect class="box" x="32.5" y="428.5" width="168" height="44" rx="8"/>
+      <text class="t mono" x="44" y="455">git push</text>
     </g>
     <g id="note-hooks-opt-in">
-      <path class="box-warn" d="M40.5,600.5 H225.5 L235.5,610.5 V657.5 A8,8 0 0 1 227.5,665.5 H40.5 A8,8 0 0 1 32.5,657.5 V608.5 A8,8 0 0 1 40.5,600.5 Z"/>
-      <path class="box-warn" d="M225.5,600.5 V610.5 H235.5 Z"/>
-      <text class="s" x="44" y="621">Caveat: opt-in via</text>
-      <text class="s" x="44" y="639"><tspan class="s mono">make hooks</tspan>; <tspan class="s mono">--no-verify</tspan></text>
-      <text class="s" x="44" y="657">skips the pre-commit hook</text>
+      <path class="box-warn" d="M40.5,488.5 H190.5 L200.5,498.5 V552.5 A8,8 0 0 1 192.5,560.5 H40.5 A8,8 0 0 1 32.5,552.5 V496.5 A8,8 0 0 1 40.5,488.5 Z"/>
+      <path class="box-warn" d="M190.5,488.5 V498.5 H200.5 Z"/>
+      <text class="s" x="44" y="510">Caveat: opt-in via</text>
+      <text class="s" x="44" y="528"><tspan class="s mono">make hooks</tspan>;</text>
+      <text class="s" x="44" y="546"><tspan class="s mono">--no-verify</tspan> skips it</text>
     </g>
     <g id="edges-laptop">
-      <path class="edge" d="M134,152 V172" marker-end="url(#ah)"/>
-      <path class="edge" d="M46.5,315 V432" marker-end="url(#ah)"/>
-      <path class="edge" d="M134,508 V532" marker-end="url(#ah)"/>
-      <path class="probe" d="M32,633.5 H28.5 V243.5 H32"/>
-      <path class="probe" d="M28.5,470.5 H32"/>
+      <path class="edge" d="M116.5,152 V168" marker-end="url(#ah)"/>
+      <path class="edge" d="M46.5,272 V356" marker-end="url(#ah)"/>
+      <path class="edge" d="M116.5,413 V428" marker-end="url(#ah)"/>
+      <path class="probe" d="M32,524.5 H28.5 V220.5 H32"/>
+      <path class="probe" d="M28.5,384.5 H32"/>
     </g>
   </g>
   <g id="lane-github">
-    <rect class="box-soft" x="260.5" y="72.5" width="347" height="663" rx="12"/>
-    <text class="g" x="276" y="94">GitHub</text>
-    <text class="s mono" x="276" y="115">KatlehoKomeke/Appointment-Booking-System</text>
-    <g id="file-aws-connection-check">
-      <path class="box" d="M346.5,78.5 H587.5 L595.5,86.5 V91.5 A6,6 0 0 1 589.5,97.5 H346.5 A6,6 0 0 1 340.5,91.5 V84.5 A6,6 0 0 1 346.5,78.5 Z"/>
-      <path class="box" d="M587.5,78.5 V86.5 H595.5 Z"/>
-      <text class="s" x="352" y="92"><tspan class="s mono">aws-connection-check.yml</tspan> · manual</text>
-    </g>
+    <rect class="box-soft" x="224.5" y="76.5" width="424" height="659" rx="12"/>
+    <text class="g" x="240" y="98">GitHub</text>
+    <text class="s mono" x="240" y="116">KatlehoKomeke/Appointment-Booking-System</text>
     <g id="gate-push-protection">
-      <rect class="box" x="272.5" y="124.5" width="171" height="79" rx="8"/>
-      <path class="badge" d="M274.5,127.5 A8,8 0 0 1 280.5,124.5 H435.5 A8,8 0 0 1 441.5,127.5 Z"/>
-      <circle class="badge" cx="292" cy="150" r="10"/>
-      <text class="badge-t" x="292" y="154" text-anchor="middle">5</text>
-      <text class="t" x="310" y="155">push protection</text>
-      <text class="s" x="284" y="175">refuses known</text>
-      <text class="s" x="284" y="193">provider secrets</text>
+      <rect class="box" x="232.5" y="128.5" width="208" height="72" rx="8"/>
+      <path class="badge" d="M234.5,131.5 A8,8 0 0 1 240.5,128.5 H432.5 A8,8 0 0 1 438.5,131.5 Z"/>
+      <text class="t" x="244" y="154">push protection</text>
+      <text class="s" x="244" y="174">refuses known</text>
+      <text class="s" x="244" y="192">provider secrets</text>
     </g>
     <g id="outcome-push-rejected">
-      <path class="edge-bad" d="M444,164.5 H476" marker-end="url(#ah-bad)"/>
-      <path class="ah-bad" d="M454.3,160.2 L455.7,158.8 L465.7,168.8 L464.3,170.2 Z"/>
-      <path class="ah-bad" d="M454.3,168.8 L455.7,170.2 L465.7,160.2 L464.3,158.8 Z"/>
-      <rect class="box-bad" x="476.5" y="142.5" width="119" height="43" rx="8"/>
-      <text class="s" x="536" y="169" text-anchor="middle">push rejected</text>
+      <path class="edge-bad" d="M441,164.5 H472" marker-end="url(#ah-bad)"/>
+      <path class="ah-bad" d="M450.3,160.2 L451.7,158.8 L461.7,168.8 L460.3,170.2 Z"/>
+      <path class="ah-bad" d="M450.3,168.8 L451.7,170.2 L461.7,160.2 L460.3,158.8 Z"/>
+      <rect class="box-bad" x="472.5" y="144.5" width="168" height="40" rx="8"/>
+      <text class="s" x="556.5" y="169" text-anchor="middle">push rejected</text>
     </g>
     <g id="gate-main">
-      <rect class="box" x="272.5" y="220.5" width="323" height="83" rx="8"/>
-      <path class="badge" d="M274.5,223.5 A8,8 0 0 1 280.5,220.5 H587.5 A8,8 0 0 1 593.5,223.5 Z"/>
-      <circle class="badge" cx="292" cy="240" r="10"/>
-      <text class="badge-t" x="292" y="244" text-anchor="middle">6</text>
-      <text class="s" x="310" y="245"><tspan class="t mono">main</tspan> · starts ci and secret-scan</text>
-      <text class="s" x="284" y="265">required checks · force-push refused</text>
-      <rect class="box-soft" x="284.5" y="273.5" width="39" height="19" rx="9.5"/>
-      <text class="s mono" x="304" y="287" text-anchor="middle">api</text>
-      <rect class="box-soft" x="329.5" y="273.5" width="39" height="19" rx="9.5"/>
-      <text class="s mono" x="349" y="287" text-anchor="middle">web</text>
-      <rect class="box-soft" x="374.5" y="273.5" width="53" height="19" rx="9.5"/>
-      <text class="s mono" x="401" y="287" text-anchor="middle">stack</text>
-      <rect class="box-soft" x="433.5" y="273.5" width="49" height="19" rx="9.5"/>
-      <text class="s mono" x="458" y="287" text-anchor="middle">infra</text>
-      <rect class="box-soft" x="488.5" y="273.5" width="73" height="19" rx="9.5"/>
-      <text class="s mono" x="525" y="287" text-anchor="middle">gitleaks</text>
+      <rect class="box" x="232.5" y="216.5" width="208" height="80" rx="8"/>
+      <path class="badge" d="M234.5,219.5 A8,8 0 0 1 240.5,216.5 H432.5 A8,8 0 0 1 438.5,219.5 Z"/>
+      <circle class="badge" cx="254" cy="241" r="10"/>
+      <text class="badge-t" x="254" y="245" text-anchor="middle">2</text>
+      <text class="s" x="272" y="246"><tspan class="t mono">main</tspan> · Protect main</text>
+      <text class="s" x="244" y="267">every check required</text>
+      <text class="s" x="244" y="285">no force-push</text>
     </g>
-    <g id="file-ci">
-      <path class="box" d="M308.5,320.5 H585.5 L595.5,330.5 V479.5 A8,8 0 0 1 587.5,487.5 H308.5 A8,8 0 0 1 300.5,479.5 V328.5 A8,8 0 0 1 308.5,320.5 Z"/>
-      <path class="box" d="M585.5,320.5 V330.5 H595.5 Z"/>
-      <circle class="badge" cx="322" cy="336" r="10"/>
-      <text class="badge-t" x="322" y="340" text-anchor="middle">7</text>
-      <text class="s" x="340" y="340"><tspan class="t mono">ci.yml</tspan> · four jobs, no AWS access</text>
-      <rect class="box-soft" x="312.5" y="350.5" width="39" height="19" rx="9.5"/>
-      <text class="s mono" x="332" y="364" text-anchor="middle">api</text>
-      <rect class="box-soft" x="357.5" y="350.5" width="39" height="19" rx="9.5"/>
-      <text class="s mono" x="377" y="364" text-anchor="middle">web</text>
-      <rect class="box-soft" x="402.5" y="350.5" width="53" height="19" rx="9.5"/>
-      <text class="s mono" x="429" y="364" text-anchor="middle">stack</text>
-      <rect class="box-soft" x="461.5" y="350.5" width="49" height="19" rx="9.5"/>
-      <text class="s mono" x="486" y="364" text-anchor="middle">infra</text>
-      <g id="edges-needs">
-        <path class="edge" d="M332,370 V384.5"/>
-        <path class="edge" d="M377,370 V384.5"/>
-        <path class="edge" d="M429,370 V384.5"/>
-        <path class="edge" d="M486,370 V384.5"/>
-        <path class="edge" d="M332,384.5 H486"/>
-        <path class="edge" d="M367.5,384.5 V404" marker-end="url(#ah)"/>
-        <text class="l" x="496" y="389">needs all four</text>
-      </g>
-      <circle class="badge" cx="322" cy="414" r="10"/>
-      <text class="badge-t" x="322" y="418" text-anchor="middle">8</text>
-      <rect class="box-soft" x="338.5" y="404.5" width="58" height="19" rx="9.5"/>
-      <text class="s mono" x="367.5" y="418" text-anchor="middle">deploy</text>
-      <text class="l" x="436" y="408">environment <tspan class="l mono">aws-demo</tspan></text>
-      <text class="l" x="436" y="432"><tspan class="l mono">main</tspan>, <tspan class="l mono">v*</tspan> tags only</text>
-      <text class="s" x="312" y="456">ARM runner, native ARM64 image</text>
-      <text class="s" x="312" y="472">never on a pull request</text>
+    <g id="file-codeql">
+      <path class="box" d="M264.5,312.5 H430.5 L440.5,322.5 V352.5 A8,8 0 0 1 432.5,360.5 H264.5 A8,8 0 0 1 256.5,352.5 V320.5 A8,8 0 0 1 264.5,312.5 Z"/>
+      <path class="box" d="M430.5,312.5 V322.5 H440.5 Z"/>
+      <text class="t mono x-file" x="268" y="333">codeql.yml</text>
+      <text class="s" x="268" y="351">static analysis</text>
+    </g>
+    <g id="file-dependency-review">
+      <path class="box" d="M264.5,376.5 H430.5 L440.5,386.5 V416.5 A8,8 0 0 1 432.5,424.5 H264.5 A8,8 0 0 1 256.5,416.5 V384.5 A8,8 0 0 1 264.5,376.5 Z"/>
+      <path class="box" d="M430.5,376.5 V386.5 H440.5 Z"/>
+      <text class="t mono x-file" x="268" y="397">dependency-review.yml</text>
+      <text class="s" x="268" y="415">pull requests only</text>
     </g>
     <g id="file-secret-scan">
-      <path class="box" d="M308.5,504.5 H585.5 L595.5,514.5 V571.5 A8,8 0 0 1 587.5,579.5 H308.5 A8,8 0 0 1 300.5,571.5 V512.5 A8,8 0 0 1 308.5,504.5 Z"/>
-      <path class="box" d="M585.5,504.5 V514.5 H595.5 Z"/>
-      <text class="t mono" x="312" y="524">secret-scan.yml</text>
-      <rect class="box-soft" x="437.5" y="511.5" width="73" height="19" rx="9.5"/>
-      <text class="s mono" x="474" y="525" text-anchor="middle">gitleaks</text>
-      <text class="s" x="312" y="544">scans the full history after the push</text>
-      <rect class="pill-warn" x="312" y="552" width="145" height="20" rx="10"/>
-      <text class="pill-warn-t" x="384.5" y="566" text-anchor="middle">cannot block a push</text>
-      <text class="s" x="468" y="566">required to merge</text>
+      <path class="box" d="M264.5,440.5 H430.5 L440.5,450.5 V504.5 A8,8 0 0 1 432.5,512.5 H264.5 A8,8 0 0 1 256.5,504.5 V448.5 A8,8 0 0 1 264.5,440.5 Z"/>
+      <path class="box" d="M430.5,440.5 V450.5 H440.5 Z"/>
+      <text class="t mono x-file" x="268" y="461">secret-scan.yml</text>
+      <text class="s" x="268" y="479">gitleaks, full history</text>
+      <rect class="pill-warn" x="268" y="487" width="145" height="20" rx="10"/>
+      <text class="pill-warn-t" x="340.5" y="501" text-anchor="middle">cannot block a push</text>
     </g>
-    <g id="node-verify">
-      <rect class="box" x="272.5" y="596.5" width="323" height="43" rx="8"/>
-      <circle class="badge" cx="292" cy="618" r="10"/>
-      <text class="badge-t" x="292" y="622" text-anchor="middle">14</text>
-      <text class="s" x="310" y="613">reads <tspan class="s mono">/branchbook/release</tspan> back:</text>
-      <text class="s" x="310" y="631">equals <tspan class="s mono">GITHUB_SHA</tspan>, or the job fails</text>
+    <g id="edges-workflows">
+      <path class="edge" d="M244.5,297 V470.5 Q244.5,476.5 250.5,476.5 H256" marker-end="url(#ah)"/>
+      <path class="edge" d="M244.5,336.5 H256" marker-end="url(#ah)"/>
+      <path class="edge" d="M244.5,400.5 H256" marker-end="url(#ah)"/>
     </g>
     <g id="node-dependabot">
-      <rect class="box" x="272.5" y="656.5" width="323" height="43" rx="8"/>
-      <text class="s" x="284" y="675"><tspan class="t">Dependabot</tspan> · weekly pull requests</text>
-      <text class="s" x="284" y="693">ci and secret-scan run; deploy never does</text>
+      <rect class="box" x="232.5" y="528.5" width="208" height="48" rx="8"/>
+      <text class="s" x="244" y="549"><tspan class="t">Dependabot</tspan> · weekly</text>
+      <text class="s" x="244" y="567">checks run, no delivery</text>
     </g>
-    <g id="edges-github">
-      <path class="edge" d="M284.5,304 V535.5 Q284.5,542 291,542 H300" marker-end="url(#ah)"/>
+    <g id="file-aws-connection-check">
+      <path class="box" d="M240.5,592.5 H430.5 L440.5,602.5 V632.5 A8,8 0 0 1 432.5,640.5 H240.5 A8,8 0 0 1 232.5,632.5 V600.5 A8,8 0 0 1 240.5,592.5 Z"/>
+      <path class="box" d="M430.5,592.5 V602.5 H440.5 Z"/>
+      <text class="t mono x-file" x="244" y="613">aws-connection-check.yml</text>
+      <text class="s" x="244" y="631">manual, either role</text>
+    </g>
+    <g id="note-rollback-waits">
+      <path class="box-warn" d="M240.5,656.5 H430.5 L440.5,666.5 V712.5 A8,8 0 0 1 432.5,720.5 H240.5 A8,8 0 0 1 232.5,712.5 V664.5 A8,8 0 0 1 240.5,656.5 Z"/>
+      <path class="box-warn" d="M430.5,656.5 V666.5 H440.5 Z"/>
+      <text class="s" x="244" y="679">Caveat: the rollback</text>
+      <text class="s" x="244" y="697">waits for the same</text>
+      <text class="s" x="244" y="715">approval</text>
+      <path class="probe" d="M441,688.5 H464"/>
+    </g>
+    <g id="file-ci">
+      <path class="box" d="M464.5,216.5 H630.5 L640.5,226.5 V719.5 A8,8 0 0 1 632.5,727.5 H464.5 A8,8 0 0 1 456.5,719.5 V224.5 A8,8 0 0 1 464.5,216.5 Z"/>
+      <path class="box" d="M630.5,216.5 V226.5 H640.5 Z"/>
+      <text class="t mono x-file" x="468" y="238">ci.yml</text>
+      <text class="s" x="468" y="256">checks: no AWS access</text>
+      <rect class="box-soft" x="468.5" y="266.5" width="39" height="19" rx="9.5"/>
+      <text class="s mono" x="488" y="280" text-anchor="middle">api</text>
+      <rect class="box-soft" x="513.5" y="266.5" width="39" height="19" rx="9.5"/>
+      <text class="s mono" x="533" y="280" text-anchor="middle">web</text>
+      <rect class="box-soft" x="558.5" y="266.5" width="49" height="19" rx="9.5"/>
+      <text class="s mono" x="583" y="280" text-anchor="middle">infra</text>
+      <rect class="box-soft" x="468.5" y="291.5" width="110" height="19" rx="9.5"/>
+      <text class="s mono" x="523.5" y="305" text-anchor="middle">workflow-lint</text>
+      <circle class="badge" cx="478" cy="328" r="10"/>
+      <text class="badge-t" x="478" y="332" text-anchor="middle">3</text>
+      <rect class="box-soft" x="494.5" y="318.5" width="53" height="19" rx="9.5"/>
+      <text class="s mono" x="521" y="332" text-anchor="middle">image</text>
+      <path class="edge" d="M548,328 H563" marker-end="url(#ah)"/>
+      <rect class="box-soft" x="563.5" y="318.5" width="53" height="19" rx="9.5"/>
+      <text class="s mono" x="590" y="332" text-anchor="middle">stack</text>
+      <text class="s" x="468" y="356">image: ARM64, once</text>
+      <text class="s" x="468" y="374">stack: e2e, k6, ZAP</text>
+      <text class="l" x="558" y="392">all green</text>
+      <g id="job-publish">
+        <rect class="box" x="464.5" y="396.5" width="168" height="56" rx="8"/>
+        <circle class="badge" cx="484.5" cy="396.5" r="10"/>
+        <text class="badge-t" x="484.5" y="400.5" text-anchor="middle">4</text>
+        <text class="t mono" x="476" y="422">publish</text>
+        <rect class="box-soft" x="548.5" y="409.5" width="72" height="19" rx="9.5"/>
+        <text class="s mono" x="584.5" y="423" text-anchor="middle">staging</text>
+        <text class="s" x="476" y="444">ECR push · attest</text>
+      </g>
+      <g id="job-deploy-staging">
+        <rect class="box" x="464.5" y="468.5" width="168" height="72" rx="8"/>
+        <circle class="badge" cx="484.5" cy="468.5" r="10"/>
+        <text class="badge-t" x="484.5" y="472.5" text-anchor="middle">5</text>
+        <text class="t mono" x="476" y="494">deploy-staging</text>
+        <text class="s" x="476" y="514">smoke · e2e tests</text>
+        <text class="s" x="476" y="532">record the release</text>
+      </g>
+      <g id="job-deploy-production">
+        <rect class="box" x="464.5" y="572.5" width="168" height="72" rx="8"/>
+        <circle class="badge" cx="484.5" cy="572.5" r="10"/>
+        <text class="badge-t" x="484.5" y="576.5" text-anchor="middle">6</text>
+        <text class="t mono" x="476" y="598">deploy-production</text>
+        <text class="s" x="476" y="618">verify provenance</text>
+        <text class="s" x="476" y="636">smoke · record</text>
+      </g>
+      <g id="job-rollback-production">
+        <rect class="box" x="464.5" y="660.5" width="168" height="56" rx="8"/>
+        <text class="t mono" x="476" y="684">rollback-production</text>
+        <text class="s" x="476" y="704">previous release</text>
+      </g>
+      <path class="edge" d="M548.5,645 V660" marker-end="url(#ah)"/>
+      <text class="l" x="560" y="657">if it fails</text>
     </g>
   </g>
   <g id="lane-aws">
-    <rect class="box-soft" x="624.5" y="72.5" width="311" height="663" rx="12"/>
-    <text class="g" x="640" y="94">AWS</text>
+    <rect class="box-soft" x="664.5" y="76.5" width="271" height="659" rx="12"/>
+    <text class="g" x="680" y="98">AWS</text>
     <g id="region-us-east-1">
-      <rect class="box" x="632.5" y="104.5" width="287" height="151" rx="12"/>
-      <text class="g" x="648" y="126">AWS · us-east-1 (N. Virginia)</text>
+      <rect class="box" x="672.5" y="104.5" width="255" height="128" rx="12"/>
+      <text class="g" x="688" y="124">AWS · us-east-1 (N. Virginia)</text>
       <g id="stack-branchbook-account">
-        <rect class="box" x="640.5" y="136.5" width="271" height="111" rx="8"/>
-        <path class="pill-built" d="M641.1,164.5 V144.5 A7.4,7.4 0 0 1 648.5,137.1 H903.5 A7.4,7.4 0 0 1 910.9,144.5 V164.5 Z"/>
-        <text class="t mono" x="652" y="155">BranchbookAccount</text>
-        <g id="tile-oidc-provider">
-          <rect class="box" x="646.5" y="170.5" width="259" height="23" rx="6"/>
-          <rect class="aws-sec" x="650" y="174" width="4" height="16"/>
-          <text class="s" x="662" y="187">OIDC provider <tspan class="s mono">GitHubOidcProvider</tspan></text>
-        </g>
-        <g id="tile-deploy-role">
-          <rect class="box" x="646.5" y="198.5" width="259" height="43" rx="6"/>
-          <rect class="aws-sec" x="650" y="202" width="4" height="36"/>
-          <text class="s" x="662" y="216">IAM role <tspan class="s mono">branchbook-github-deploy</tspan></text>
-          <text class="s" x="662" y="234">trust policy: aud and sub match</text>
-        </g>
+        <rect class="box" x="680.5" y="132.5" width="239" height="92" rx="8"/>
+        <path class="pill-built" d="M681.1,160.5 V140.5 A7.4,7.4 0 0 1 688.5,133.1 H911.5 A7.4,7.4 0 0 1 918.9,140.5 V160.5 Z"/>
+        <text class="t mono" x="692" y="151">BranchbookAccount</text>
+        <text class="s" x="692" y="178">OIDC provider · budget</text>
+        <text class="s mono" x="692" y="196">branchbook-github-deploy-*</text>
+        <text class="s" x="692" y="214">a role per environment</text>
       </g>
     </g>
     <g id="tile-sts">
-      <rect class="box" x="632.5" y="272.5" width="287" height="71" rx="6"/>
-      <rect class="aws-sec" x="636" y="276" width="4" height="64"/>
-      <circle class="badge" cx="660" cy="294" r="10"/>
-      <text class="badge-t" x="660" y="298" text-anchor="middle">9</text>
-      <text class="t" x="678" y="299">AWS STS</text>
-      <text class="s mono" x="648" y="318">AssumeRoleWithWebIdentity</text>
-      <text class="s" x="648" y="336">credentials for at most 1 h</text>
+      <rect class="box" x="680.5" y="248.5" width="239" height="72" rx="6"/>
+      <rect class="aws-sec" x="684" y="252" width="4" height="65"/>
+      <text class="t" x="696" y="270">AWS STS</text>
+      <text class="s mono" x="696" y="289">AssumeRoleWithWebIdentity</text>
+      <text class="s" x="696" y="308">no stored keys</text>
     </g>
-    <path id="probe-trust-policy" class="probe" d="M920,292.5 H928.5 V230.5 H906"/>
+    <path id="probe-trust-policy" class="probe" d="M920,284.5 H923.5 V196.5 H920"/>
     <g id="region-af-south-1">
-      <rect class="box" x="632.5" y="360.5" width="287" height="367" rx="12"/>
-      <text class="g" x="648" y="382">AWS · af-south-1 (Cape Town)</text>
-      <g id="tile-cdk-bootstrap-roles">
-        <rect class="box" x="640.5" y="388.5" width="271" height="71" rx="6"/>
-        <rect class="aws-sec" x="644" y="392" width="4" height="64"/>
-        <circle class="badge" cx="664" cy="410" r="10"/>
-        <text class="badge-t" x="664" y="414" text-anchor="middle">10</text>
-        <text class="t" x="682" y="415">CDK bootstrap roles</text>
-        <text class="s" x="656" y="434">file-publishing · image-publishing</text>
-        <text class="s" x="656" y="452">deploy · the image is pushed to ECR</text>
+      <rect class="box" x="672.5" y="336.5" width="255" height="391" rx="12"/>
+      <text class="g" x="688" y="358">AWS · af-south-1 (Cape Town)</text>
+      <g id="stack-branchbook-registry">
+        <rect class="box" x="680.5" y="396.5" width="239" height="56" rx="8"/>
+        <path class="pill-built" d="M681.1,424.5 V404.5 A7.4,7.4 0 0 1 688.5,397.1 H911.5 A7.4,7.4 0 0 1 918.9,404.5 V424.5 Z"/>
+        <text class="t mono" x="692" y="415">BranchbookRegistry</text>
+        <text class="s" x="692" y="444">ECR · immutable tags</text>
       </g>
-      <g id="tile-cloudformation">
-        <rect class="box" x="640.5" y="469.5" width="271" height="43" rx="6"/>
-        <rect class="aws-mgmt" x="644" y="473" width="4" height="36"/>
-        <circle class="badge" cx="664" cy="486" r="10"/>
-        <text class="badge-t" x="664" y="490" text-anchor="middle">11</text>
-        <text class="t" x="682" y="490">AWS CloudFormation</text>
-        <text class="s" x="656" y="507">as the cfn-exec role</text>
+      <g id="env-staging">
+        <rect class="box" x="680.5" y="468.5" width="239" height="72" rx="8"/>
+        <text class="t" x="692" y="490">staging</text>
+        <text class="s mono" x="692" y="509">stg.branchbook.click</text>
+        <text class="s" x="692" y="527">Data · App · Release stacks</text>
       </g>
-      <g id="stack-branchbook-data">
-        <rect class="box" x="640.5" y="522.5" width="271" height="47" rx="8"/>
-        <path class="pill-built" d="M641.1,550.5 V530.5 A7.4,7.4 0 0 1 648.5,523.1 H903.5 A7.4,7.4 0 0 1 910.9,530.5 V550.5 Z"/>
-        <text class="t mono" x="652" y="541">BranchbookData</text>
-        <rect class="pill-built" x="790" y="526.5" width="110" height="20" rx="10"/>
-        <text class="pill-built-t" x="845" y="540.5" text-anchor="middle">built · pipeline</text>
-        <text class="s" x="652" y="563">the network and the database</text>
+      <g id="env-production">
+        <rect class="box-ok" x="680.5" y="572.5" width="239" height="72" rx="8"/>
+        <text class="t" x="692" y="594">production</text>
+        <text class="s mono" x="692" y="613">branchbook.click</text>
+        <text class="s" x="692" y="631">Data · App · Release stacks</text>
       </g>
-      <g id="stack-branchbook-app">
-        <rect class="box" x="640.5" y="577.5" width="271" height="47" rx="8"/>
-        <path class="pill-built" d="M641.1,605.5 V585.5 A7.4,7.4 0 0 1 648.5,578.1 H903.5 A7.4,7.4 0 0 1 910.9,585.5 V605.5 Z"/>
-        <text class="t mono" x="652" y="596">BranchbookApp</text>
-        <rect class="pill-built" x="790" y="581.5" width="110" height="20" rx="10"/>
-        <text class="pill-built-t" x="845" y="595.5" text-anchor="middle">built · pipeline</text>
-        <text class="s" x="652" y="618">WAF, the load balancer, the task</text>
-      </g>
-      <g id="stack-branchbook-release">
-        <rect class="box-ok" x="640.5" y="662.5" width="271" height="55" rx="8"/>
-        <path class="box-ok" d="M641,690.5 H911"/>
-        <circle class="badge" cx="660" cy="677" r="10"/>
-        <text class="badge-t" x="660" y="681" text-anchor="middle">13</text>
-        <text class="t mono" x="678" y="681">BranchbookRelease</text>
-        <text class="s mono" x="652" y="708">/branchbook/release = GITHUB_SHA</text>
-      </g>
-      <g id="edges-af-south-1">
-        <path class="edge-acc" d="M776,460 V469" marker-end="url(#ah-acc)"/>
-        <path class="edge-acc" d="M776,513 V522" marker-end="url(#ah-acc)"/>
-        <path class="edge-acc" d="M776,570 V577" marker-end="url(#ah-acc)"/>
-        <path class="edge-acc" d="M776,625 V662" marker-end="url(#ah-acc)"/>
-        <circle class="badge" cx="776" cy="643" r="10"/>
-        <text class="badge-t" x="776" y="647" text-anchor="middle">12</text>
-        <text class="l" x="762" y="639" text-anchor="end">smoke-test</text>
-        <text class="l mono" x="762" y="655" text-anchor="end">branchbook.click</text>
+      <g id="stack-branchbook-guardrails">
+        <rect class="box" x="680.5" y="660.5" width="239" height="56" rx="8"/>
+        <path class="pill-built" d="M681.1,688.5 V668.5 A7.4,7.4 0 0 1 688.5,661.1 H911.5 A7.4,7.4 0 0 1 918.9,668.5 V688.5 Z"/>
+        <text class="t mono" x="692" y="679">BranchbookGuardrails</text>
+        <text class="s" x="692" y="708">by hand: audit, limits</text>
       </g>
     </g>
   </g>
+  <g id="edges-to-aws">
+    <path id="edge-oidc" class="edge" d="M641,380.5 H650 Q656.5,380.5 656.5,374 V291 Q656.5,284.5 663,284.5 H680" marker-end="url(#ah)"/>
+    <path id="edge-publish-to-registry" class="edge" d="M633,424.5 H680" marker-end="url(#ah)"/>
+    <path id="edge-staging" class="edge" d="M633,504.5 H680" marker-end="url(#ah)"/>
+    <path id="edge-rollback" class="edge" d="M633,688.5 H650 Q656.5,688.5 656.5,682 V608.5"/>
+  </g>
   <g id="main-path">
-    <path id="edge-push" class="edge-acc" d="M236,554.5 H246 Q252.5,554.5 252.5,548 V170.5 Q252.5,164.5 258.5,164.5 H272" marker-end="url(#ah-acc)"/>
-    <path class="edge-acc" d="M358,204 V220" marker-end="url(#ah-acc)"/>
-    <path id="edge-main-to-ci" class="edge-acc" d="M448,304 V320" marker-end="url(#ah-acc)"/>
-    <path id="edge-deploy-to-gate" class="edge-acc" d="M397,414 H413"/>
-    <path id="gate-environment-aws-demo" class="edge-acc" d="M413,414 L420,407 L427,414 L420,421 Z"/>
-    <path id="edge-oidc-to-sts" class="edge-acc" d="M427,414 H609.5 Q616.5,414 616.5,407.5 V314.5 Q616.5,308 622.5,308 H632" marker-end="url(#ah-acc)"/>
-    <path id="edge-sts-to-bootstrap" class="edge-acc" d="M900,344 V388" marker-end="url(#ah-acc)"/>
-    <path id="edge-verify" class="edge-acc" d="M640,690 H623.5 Q616.5,690 616.5,683.5 V624.5 Q616.5,618 610.5,618 H596" marker-end="url(#ah-acc)"/>
+    <path id="edge-push" class="edge-acc" d="M201,450.5 H210 Q216.5,450.5 216.5,444 V170.5 Q216.5,164.5 222.5,164.5 H232" marker-end="url(#ah-acc)"/>
+    <path class="edge-acc" d="M336.5,201 V216" marker-end="url(#ah-acc)"/>
+    <path id="edge-main-to-ci" class="edge-acc" d="M441,256.5 H456" marker-end="url(#ah-acc)"/>
+    <path class="edge-acc" d="M548.5,380 V396" marker-end="url(#ah-acc)"/>
+    <path class="edge-acc" d="M548.5,453 V468" marker-end="url(#ah-acc)"/>
+    <path class="edge-acc" d="M548.5,541 V549"/>
+    <path id="gate-approval" class="edge-acc" d="M541.5,556 L548.5,549 L555.5,556 L548.5,563 Z"/>
+    <path class="edge-acc" d="M548.5,563 V572" marker-end="url(#ah-acc)"/>
+    <text class="l" x="564" y="560">approval</text>
+    <path id="edge-production" class="edge-acc" d="M633,608.5 H680" marker-end="url(#ah-acc)"/>
   </g>
   <g id="legend">
     <rect class="box" x="24.5" y="745.5" width="23" height="13" rx="3"/>
@@ -344,9 +334,7 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <rect class="box-warn" x="398.5" y="745.5" width="23" height="13" rx="3"/>
     <text class="tp" x="430" y="756" font-size="12">Gap or caveat</text>
     <text class="tp" x="24" y="776" font-size="12">AWS category:</text>
-    <rect class="aws-sec" x="112" y="765" width="4" height="14"/>
-    <text class="tp" x="122" y="776" font-size="12">security</text>
-    <rect class="aws-mgmt" x="179" y="765" width="4" height="14"/>
-    <text class="tp" x="189" y="776" font-size="12">management and integration</text>
+    <rect class="aws-sec" x="122" y="765" width="4" height="14"/>
+    <text class="tp" x="132" y="776" font-size="12">security</text>
   </g>
 </svg>

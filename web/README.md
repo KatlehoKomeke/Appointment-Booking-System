@@ -10,7 +10,9 @@ live delivery status, `/manage` and the simulated inbox, with the landing page, 
 and an error page. Each page but the landing, not-found and error pages loads when it is first opened, and the
 confirmation page offers to book the same service again. From Tier 2, the appointment page cancels an appointment
 until it starts, and the inbox retries a message the dispatcher gave up on; neither is drawn yet (see the end of the
-[UI design](#ui-design)).
+[UI design](#ui-design)). Where the firewall asks for a CAPTCHA, as in staging and production, it shows AWS's puzzle in
+an accessible dialog and sends the request again once it is solved
+([When the firewall asks for a CAPTCHA](#when-the-firewall-asks-for-a-captcha)).
 Playwright tests the flow end to end in a real browser ([e2e/](../e2e/README.md)).
 
 ## Stack
@@ -89,8 +91,8 @@ once more, with the same body and the same `Idempotency-Key`, so it can never bo
 - **The settings** come from `GET /api/v1/client-config` ([src/api/clientConfig.ts](src/api/clientConfig.ts)): AWS's
   script URL and the public CAPTCHA key, or `{"captcha": null}` where none is configured, as on a local run. They are
   read the first time a request is challenged and kept for the session. Settings that cannot be read, or a script
-  that is not `https:`, count as no CAPTCHA, and a 405 is then an ordinary failure. Until the contract lists the
-  endpoint, its type is written by hand there, to be replaced by the generated one.
+  that is not `https:`, count as no CAPTCHA, and a 405 is then an ordinary failure. Their types come from the
+  contract (`ClientConfig` and `CaptchaConfig` in `schema.d.ts`).
 - **The script**, AWS's `jsapi.js`, is added as one `<script src>` the first time a challenge needs it, never before,
   and the app waits up to 15 s for `window.AwsWafCaptcha`
   ([src/captcha/awsWafCaptcha.ts](src/captcha/awsWafCaptcha.ts)). A script that fails is removed, so the next
@@ -102,7 +104,12 @@ once more, with the same body and the same `Idempotency-Key`, so it can never bo
 
 The tests drive a fake `window.AwsWafCaptcha` ([src/test/fakeCaptcha.ts](src/test/fakeCaptcha.ts)) through a booking
 and a cancel that are challenged and solved, a check closed with Escape or Close, a puzzle that fails, a script that
-does not load, and a 405 with no CAPTCHA configured.
+does not load, and a 405 with no CAPTCHA configured. The real puzzle is seen only by hand: CI's end-to-end run against
+staging carries the synthetic-traffic token that lets it past, and production's smoke test checks only that a
+booking is challenged ([docs/threat-model.md](../docs/threat-model.md), [SECURITY.md](../SECURITY.md#known-risks)).
+The copy for each way a check can end is in [docs/errors.md](../docs/errors.md#when-the-firewall-asks-for-a-captcha);
+why a CAPTCHA rather than a one-time PIN is in
+[ADR-0011](../docs/adr/0011-waf-captcha-instead-of-a-one-time-pin.md).
 
 ## Quality gates
 

@@ -12,192 +12,215 @@ and [ADR-0007](../docs/adr/0007-continuous-deployment-from-main.md).
 - [Who can change what in AWS](#who-can-change-what-in-aws)
 - [Environments: staging and production](#environments-staging-and-production)
 - [Configuration](#configuration)
+- [Observability and fault injection](#observability-and-fault-injection)
 - [The hosted demo](#the-hosted-demo)
 - [Commands](#commands), [First-time setup](#first-time-setup) and [Removing it](#removing-it)
 
+Every control here, with the test or cdk-nag rule that proves it, is listed in
+[docs/production-readiness.md](../docs/production-readiness.md); what each failure does and how it is rehearsed is in
+[docs/resilience.md](../docs/resilience.md).
+
 ## What exists today
 
-*Status: Built: four stacks deployed. The pipeline deploys the hosted demo and the release record on every push to
-`main`; the administrator deploys `BranchbookAccount` by hand, and deployed the hosted demo by hand first, on
-2026-10-26.*
+*Status: The picture is built in code and not yet deployed: two environments, `staging` and `production`, selected
+with `BRANCHBOOK_ENV`, the ECR repository `BranchbookRegistry` and the account's guardrails, `BranchbookGuardrails`.
+The table below is what is deployed today: four stacks, which the single-environment pipeline deployed on every push
+to `main` until this change, first by hand on 2026-10-26.*
 
-![BranchBook in AWS, all built: the administrator's account stack in us-east-1 (OIDC provider, narrow deploy role, $110 budget), and in Cape Town the three stacks the pipeline deploys on every push to main: the release record and the demo, where Route 53, WAF and a load balancer front two Fargate tasks in two availability zones that use RDS and texts only South African numbers through AWS End User Messaging.](../docs/assets/diagrams/aws-footprint.svg)
+![BranchBook in AWS, all built: two environments, staging and production, in one account. Along the top, a customer's browser with no sign-in, GitHub's staging and production environments (production needs an approval), and the administrator. In us-east-1, BranchbookAccount holds the GitHub OIDC provider, one deploy role per environment and the budget. In Cape Town, staging and production are built from the same three stacks: WAF with a CAPTCHA and per-address limits, a load balancer, autoscaled Fargate tasks in private subnets, a migration task, alarms, a canary and fault-injection experiments; a VPC over two zones with a NAT gateway per zone, Secrets Manager and a Multi-AZ RDS database the tasks sign in to as branchbook_app with IAM; and the release record. Shared: the ECR registry, AWS End User Messaging SMS (production only), BranchbookGuardrails and the CDK bootstraps. The administrator deploys the account-level stacks by hand (A); a delivery job signs in through OpenID Connect (1); the image is pushed once (2); staging is deployed, then production after approval (3).](../docs/assets/diagrams/aws-footprint.svg)
 
-*Built in code, not yet deployed: the CDK app now defines two environments, `staging` and `production`, selected
-with `BRANCHBOOK_ENV`, and the ECR repository `BranchbookRegistry`
-([Environments](#environments-staging-and-production)). Production keeps the stack IDs and physical names deployed
-on 2026-10-26, and its first deployment replaces no live resource but the ECS task definition. The rest of this
-section describes what is deployed today.*
+**A.** The administrator deploys `BranchbookAccount` (in `us-east-1`), `BranchbookGuardrails` and the CDK bootstraps by
+hand, from their own machine. The pipeline never deploys them ([Who can change what in AWS](#who-can-change-what-in-aws)).
 
-**A.** The administrator runs `cdk deploy` by hand from their own machine for `BranchbookAccount` in `us-east-1`,
-the stack that grants the pipeline its access, and did so for the hosted demo's first deployment on 2026-10-26. The
-pipeline never deploys `BranchbookAccount`.
+1. **Keyless sign-in.** Each delivery job of [ci.yml](../.github/workflows/ci.yml) signs in through OpenID Connect,
+   via AWS STS, as its GitHub environment's deploy role, `branchbook-github-deploy-staging` or `-production`. No access
+   key is stored ([How GitHub reaches AWS without keys](#how-github-reaches-aws-without-keys)).
+2. **The image is pushed once.** `publish` pushes the image the checks tested to the `branchbook` repository of
+   `BranchbookRegistry`, with immutable tags; both environments run it by digest.
+3. **Staging, then production.** `deploy-staging` deploys staging's three stacks through its own bootstrap, `bbstg`;
+   once a person approves, `deploy-production` deploys production's through `hnb659fds`
+   ([Automatic deployment](#automatic-deployment)).
 
-1. On every push to `main`, once `ci`'s `api`, `web`, `stack` and `infra` jobs pass, its `deploy` job
-   ([ci.yml](../.github/workflows/ci.yml)) enters the GitHub environment `aws-demo` and signs in to AWS through
-   OpenID Connect, via AWS STS, as `branchbook-github-deploy`. No access key is stored.
-2. The deploy role assumes the CDK bootstrap roles (`cdk-hnb659fds-*`) in `af-south-1`: the image-publishing role
-   pushes the ARM64 image built on the runner to the bootstrap ECR repository, and the file-publishing role uploads
-   the templates.
-3. CloudFormation updates `BranchbookData`, then `BranchbookApp`, and the job smoke-tests https://branchbook.click.
-4. CloudFormation updates `BranchbookRelease`, which records `GITHUB_SHA`.
-5. The job reads `/branchbook/release` back and fails unless it equals `GITHUB_SHA`.
+Until this change, the pipeline signed in through the single GitHub environment `aws-demo` as
+`branchbook-github-deploy`, built the image on the runner, deployed `BranchbookData` and `BranchbookApp`,
+smoke-tested https://branchbook.click and recorded the commit in `BranchbookRelease`. Production keeps the stack IDs
+and physical names deployed on 2026-10-26, and its first deployment replaces no live resource but the ECS task
+definition.
 
 | Stack and Region | Deployed by | What it creates |
 |---|---|---|
-| [`BranchbookAccount`](lib/account-stack.ts)<br>`us-east-1` | Administrator, by hand | The GitHub OIDC provider, the role `branchbook-github-deploy`, the budget `branchbook-monthly` and the output `DeployRoleArn` |
-| [`BranchbookRelease`](lib/release-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` | The SSM parameter `/branchbook/release`: the last commit the pipeline deployed |
+| [`BranchbookAccount`](lib/account-stack.ts)<br>`us-east-1` | Administrator, by hand | The GitHub OIDC provider, the deploy roles, the budget `branchbook-monthly` and the role ARNs as outputs. Deployed today with the single role `branchbook-github-deploy`; in code, one role per environment, `branchbook-github-deploy-staging` and `branchbook-github-deploy-production` |
+| [`BranchbookGuardrails`](lib/guardrails-stack.ts)<br>`af-south-1` | Not yet deployed (administrator, by hand) | CloudTrail, GuardDuty, AWS Config, Security Hub, IAM Access Analyzer, the permissions boundary and each environment's execution policy |
+| [`BranchbookRelease`](lib/release-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` | The SSM parameters `/branchbook/release` and, in code, `/branchbook/release-image`: the last commit and digest the pipeline deployed |
 | [`BranchbookData`](lib/data-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` (first by hand, 2026-10-26) | Production's VPC, its RDS for PostgreSQL 17 database and the SMS daily cap's key ([Environments](#environments-staging-and-production)) |
 | [`BranchbookApp`](lib/app-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` (first by hand, 2026-10-26) | Production's certificate, WAF, load balancer, Fargate service, schema migration, SMS protect configuration, logs, alarms and DNS record |
 | [`BranchbookRegistry`](lib/registry-stack.ts)<br>`af-south-1` | Not yet deployed | The ECR repository `branchbook`: immutable tags, scan on push, the newest 50 images kept |
 | `BranchbookStagingData`, `BranchbookStagingApp`, `BranchbookStagingRelease`<br>`af-south-1` | Not yet deployed | Staging's copies of the three stacks, at https://stg.branchbook.click |
-| `CDKToolkit`<br>both Regions | Administrator, once per Region | The `cdk bootstrap` stack, qualifier `hnb659fds`: the deploy, file-publishing, image-publishing, lookup and cfn-exec roles, an assets bucket and an ECR repository |
+| `CDKToolkit`<br>both Regions | Administrator, once per Region | The `cdk bootstrap` stack, qualifier `hnb659fds`: the deploy, file-publishing, image-publishing, lookup and cfn-exec roles, an assets bucket and an ECR repository. In `af-south-1` it becomes production's bootstrap |
+| `CDKToolkitStaging`<br>`af-south-1` | Not yet created (administrator, once) | Staging's own bootstrap, qualifier `bbstg` ([First-time setup](#first-time-setup)) |
 
 - **Cost.** `BranchbookAccount` and `BranchbookRelease` cost nothing to run; the bootstrap storage costs cents. The
-  hosted demo costs about $102 a month while it runs. The budget e-mails at 50, 80 and 100 percent of $110 a month
-  ($55, $88 and $110).
+  hosted demo costs about $102 a month while it runs. Both environments, the guardrails and the observability are
+  estimated, not measured, at about $380 to $450 a month. The budget e-mails at 50, 80 and 100 percent of the
+  monthly limit in [config/account.json](config/account.json).
 - **Why `us-east-1`.** IAM is global, AWS Budgets lives in `us-east-1`, and the stack holds no customer data.
   Everything that holds customer data is in Cape Town.
-- **The GitHub side.** The environment `aws-demo`, which admits only the branch `main` and `v*` tags, holds the secret
-  `AWS_DEPLOY_ROLE_ARN`, and may hold `BRANCHBOOK_DEMO_ALERT_EMAIL`, not set today. The `infra` job of
-  [ci.yml](../.github/workflows/ci.yml) tests and synthesises this app, every stack included, on every push to `main`
-  and every pull request, with placeholder inputs and no AWS access.
+- **The GitHub side.** The environments `staging` and `production` each admit only the branch `main`, and
+  `production` requires a person's approval. Each holds the secret `AWS_DEPLOY_ROLE_ARN`, its own role's ARN, and
+  may hold `ALERT_EMAIL` ([docs/delivery.md](../docs/delivery.md#github-settings-this-relies-on)). The `infra` job of
+  [ci.yml](../.github/workflows/ci.yml) tests and synthesises this app, both environments and every stack included,
+  on every push to `main` and every pull request, with placeholder inputs and no AWS access.
 
 ## Automatic deployment
 
-Every push to `main`, and a manual run of `ci` from `main`, runs the `deploy` job of
-[.github/workflows/ci.yml](../.github/workflows/ci.yml) once the `api`, `web`, `stack` and `infra` jobs have passed
-([ADR-0007](../docs/adr/0007-continuous-deployment-from-main.md)). The job, on an `ubuntu-24.04-arm` runner:
+Every push to `main` runs the delivery jobs of [.github/workflows/ci.yml](../.github/workflows/ci.yml) once every
+check has passed ([ADR-0008](../docs/adr/0008-two-environments-promoted-by-digest.md)):
 
-1. **Signs in** to AWS through OpenID Connect as `branchbook-github-deploy`, in the `aws-demo` environment. Nothing
-   reaches AWS if a check failed: the four jobs are required checks on `main`, and `deploy` `needs` them.
-2. **Deploys the hosted demo.** `cdk deploy BranchbookData BranchbookApp` with `BRANCHBOOK_ENV=production` and
-   `BRANCHBOOK_IMAGE_DIGEST` (which replace `BRANCHBOOK_HOSTED_DEMO=true`; see
-   [Environments](#environments-staging-and-production)), which bring the two stacks into the app, and `BRANCHBOOK_DEMO_ALERT_EMAIL` from the environment secret of that name,
-   if one is set. CDK works through the `af-south-1` bootstrap roles: the image-publishing role pushes the ARM64
-   image built on the runner to the bootstrap ECR repository, the file-publishing role uploads the templates, and the
-   deploy role hands each change set to CloudFormation, which applies it as the cfn-exec role.
-3. **Smoke-tests** https://branchbook.click with [scripts/smoke.sh](../scripts/smoke.sh), the address read from
-   `domain.name` in [config/production.json](config/production.json).
-4. **Records the commit.** `cdk deploy BranchbookRelease` writes `GITHUB_SHA` to `/branchbook/release`, only now.
-5. **Verifies.** Reads `/branchbook/release` back from AWS and fails unless it equals the pushed commit. A passing
-   run ends with the log line `AWS af-south-1 now records commit <sha>`.
+1. **`publish`** (environment `staging`) deploys `BranchbookRegistry`, pushes the image the checks tested to ECR as
+   `branchbook:<commit>` and attests its provenance and SBOM. Its digest is what every later job deploys.
+2. **`deploy-staging`** deploys `BranchbookStagingData` and `BranchbookStagingApp` with `BRANCHBOOK_ENV=staging` and
+   `BRANCHBOOK_IMAGE_DIGEST`, smoke-tests and end-to-end-tests https://stg.branchbook.click, then deploys
+   `BranchbookStagingRelease` and reads it back.
+3. **`deploy-production`** (environment `production`, after a person approves) verifies the image's provenance,
+   deploys `BranchbookData` and `BranchbookApp` with the same digest, smoke-tests https://branchbook.click, then
+   deploys `BranchbookRelease` and reads it back.
+4. **`rollback-production`** redeploys the last recorded release, its commit's CDK app with its digest, if production's
+   deployment or smoke test failed.
 
-To see what is live, read the parameter:
+No image is built at deploy time, and each environment's address comes from `domain.name` in its file under
+[config/](config). To see what is live, read the release record:
 
 ```bash
 aws ssm get-parameter --name /branchbook/release \
   --query Parameter.Value --output text --profile branchbook-admin
+aws ssm get-parameter --name /branchbook/release-image \
+  --query Parameter.Value --output text --profile branchbook-admin
 ```
 
-The deploy job step by step, what the read-back proves and what it does not, and how runs queue are in
+Staging's are `/branchbook-staging/release` and `/branchbook-staging/release-image`. Each job step by step, what the
+record proves and what it does not, and how runs queue are in
 [docs/delivery.md](../docs/delivery.md#continuous-deployment).
 
 ## How GitHub reaches AWS without keys
 
+*Status: Built in code; not yet deployed. The live account still has the single role `branchbook-github-deploy`,
+trusted by the environment `aws-demo`, until the administrator deploys `BranchbookAccount`
+([Hardening the account that already runs production](#hardening-the-account-that-already-runs-production)).*
+
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Job as deploy job of ci.yml<br/>(aws-demo)
+    participant Job as delivery job of ci.yml<br/>(staging or production)
     participant Issuer as GitHub<br/>OIDC issuer
     participant STS as AWS STS
-    participant CFN as CloudFormation, through<br/>the bootstrap roles (af-south-1)
-    participant SSM as /branchbook/release
-    Note over Job: only main or a v* tag gets in
+    participant CFN as CloudFormation, through that<br/>environment's bootstrap roles (af-south-1)
+    participant SSM as /<prefix>/release<br/>and release-image
+    Note over Job: only main gets in;<br/>production waits for an approval
     Job->>Issuer: ID token for sts.amazonaws.com
-    Issuer-->>Job: signed token for this repo and aws-demo
+    Issuer-->>Job: signed token for this repo and that environment
     Job->>STS: AssumeRoleWithWebIdentity
     Note over STS: aud and sub must match exactly
-    STS-->>Job: branchbook-github-deploy, at most 1 hour
-    Job->>CFN: cdk deploy BranchbookData BranchbookApp
-    Note over Job: smoke test at branchbook.click
-    Job->>CFN: cdk deploy BranchbookRelease
-    CFN->>SSM: set the value to GITHUB_SHA
+    STS-->>Job: that environment's deploy role, at most 1 hour
+    Job->>CFN: cdk deploy the environment's Data and App stacks, by digest
+    Note over Job: smoke test at the environment's address
+    Job->>CFN: cdk deploy the environment's Release stack
+    CFN->>SSM: set the commit and the digest
     Job->>SSM: ssm:GetParameter
-    SSM-->>Job: the recorded commit
-    Note over Job: fail unless it equals GITHUB_SHA
+    SSM-->>Job: the recorded commit and digest
+    Note over Job: fail unless they match
 ```
 
-Everything in this diagram is built. Solid arrows are calls; dashed arrows are their replies.
+Everything in this diagram is built in code. Solid arrows are calls; dashed arrows are their replies.
 
-- **No access key exists anywhere.** The job takes the ARN of `branchbook-github-deploy` from the environment secret
-  `AWS_DEPLOY_ROLE_ARN`.
-  GitHub proves the job's identity with a short-lived token, and AWS answers with credentials that expire within an
-  hour (`maxSessionDuration` in [account-stack.ts](lib/account-stack.ts)).
-- **The trust is narrow.** The trust policy requires, with `StringEquals`, the audience `sts.amazonaws.com` and
-  GitHub's immutable subject
-  `repo:KatlehoKomeke@88820937/Appointment-Booking-System@1423867330:environment:aws-demo`. It carries the numeric
-  owner and repository IDs, so forks, other repositories and a repository recreated later under the same name cannot
-  match. The IDs are public GitHub identifiers, kept in [cdk.json](cdk.json). The repository's subject setting can be
-  read with `gh api repos/KatlehoKomeke/Appointment-Booking-System/actions/oidc/customization/sub`.
-- **The environment decides which refs get in.** `aws-demo` admits only the branch `main` and `v*` tags. It has no
-  required reviewers, and repository administrators may bypass its rules. Its branch policy is what stops a job on a
-  feature branch from declaring the environment and matching the trust. Check it with
-  `gh api repos/KatlehoKomeke/Appointment-Booking-System/environments/aws-demo/deployment-branch-policies`.
-- **The subject names no workflow.** Any workflow on `main` that declares `aws-demo` can assume the role: today the
-  `deploy` job of [ci.yml](../.github/workflows/ci.yml) and
+- **No access key exists anywhere.** Each job takes its role's ARN from its environment's secret
+  `AWS_DEPLOY_ROLE_ARN`. GitHub proves the job's identity with a short-lived token, and AWS answers with credentials
+  that expire within an hour (`maxSessionMinutes` in [config/account.json](config/account.json)).
+- **The trust is narrow.** Each role's trust policy requires, with `StringEquals`, the audience `sts.amazonaws.com`
+  and GitHub's immutable subject for one environment,
+  `repo:KatlehoKomeke@88820937/Appointment-Booking-System@1423867330:environment:staging` or `...:production`. It
+  carries the numeric owner and repository IDs, so forks, other repositories and a repository recreated later under
+  the same name cannot match. The IDs are public GitHub identifiers, kept in [config/account.json](config/account.json).
+  The repository's subject setting can be read with
+  `gh api repos/KatlehoKomeke/Appointment-Booking-System/actions/oidc/customization/sub`.
+- **The environment decides which refs get in.** `staging` and `production` admit only the branch `main`, and
+  `production` requires an approval that administrators may not bypass. The branch policy is what stops a job on a
+  feature branch from declaring the environment and matching the trust.
+- **The subject names no workflow.** Any workflow on `main` that declares the environment can assume its role: today
+  the delivery jobs of [ci.yml](../.github/workflows/ci.yml) and
   [aws-connection-check.yml](../.github/workflows/aws-connection-check.yml).
-- **The role can do almost nothing itself.** It may assume the roles that `cdk bootstrap` created, which carry out
-  deployments, and read the single release parameter. [account-stack.test.ts](test/account-stack.test.ts) fails if
-  the stack's IAM policies gain a statement or a bare `*`; it does not inspect managed policies, or inline `Policies`
-  written on the role itself.
-- **No account ID is ever committed.** The account comes from the credentials in use, the role ARN lives only in the
-  environment secret, and both workflows mask the account ID in their public logs.
+- **Each role can do little itself.** It may assume only its own environment's bootstrap roles in `af-south-1`
+  (`AssumeOwnCdkBootstrapRoles`), read its own release records (`ReadOwnReleaseRecords`), log in to ECR and push and
+  pull the one image repository, and, for staging alone, read the synthetic-traffic token. A deny
+  (`OnlyThisEnvironmentsStacks`) keeps it off the other environment's stacks and the administrator's.
+  [account-stack.test.ts](test/account-stack.test.ts) checks each statement.
+- **No account ID is ever committed.** The account comes from the credentials in use, the role ARNs live only in the
+  environment secrets, and the workflows mask the account ID in their public logs.
 
 ## Who can change what in AWS
 
-*Status: Built. Everything in this section exists today.*
+*Status: Built in code; not yet deployed. Until the administrator's steps in
+[Hardening the account that already runs production](#hardening-the-account-that-already-runs-production) run, the
+account has the single `aws-demo` environment and deploy role described in [What exists today](#what-exists-today).*
 
-![Who can change what in AWS: by hand, the administrator sets BRANCHBOOK_ALERT_EMAIL and deploys BranchbookAccount. The pipeline's deploy job passes the required checks, the aws-demo branch policy and two IAM guards, then deploys BranchbookData, BranchbookApp and BranchbookRelease, never BranchbookAccount, because its CDK app omits it. That guard is code, not IAM, and main requires checks but no review.](../docs/assets/diagrams/access-boundary.svg)
+![Who can reach and change what in AWS, all built. By hand (A), the administrator sets BRANCHBOOK_ALERT_EMAIL or BRANCHBOOK_GUARDRAILS=true and deploys BranchbookAccount and BranchbookGuardrails. The pipeline, in a staging lane and a production lane, passes four guards: the delivery jobs never set those switches (1, code and workflow); the GitHub environments admit main only, and production needs an approval (2, GitHub setting); each environment's deploy role trusts only this repository and that environment and assumes only its own bootstrap's roles (3, IAM); and each bootstrap's deploy scope and execution policy keep it off the other environment's stacks and the administrator's (4, IAM). A crossed arrow shows staging cannot reach the administrator's stacks. At run time, WAF asks for a CAPTCHA, applies per-address limits and blocks /actuator (5), the load balancer forwards only to port 8080, never the actuator's 8081 (6), every app role carries the permissions boundary (7), and the task signs in to the database as branchbook_app with an IAM token and row privileges only (8). The gaps: one account for both environments, and a merge to main needs no second person's approval.](../docs/assets/diagrams/access-boundary.svg)
 
 **A.** By hand, the administrator `branchbook-admin`, an IAM user who signs in with `aws login`, runs the CDK app with
-`BRANCHBOOK_ALERT_EMAIL` set, so the app includes `BranchbookAccount`. `cdk deploy` then updates that stack in
-`us-east-1` through the `us-east-1` CDK bootstrap roles. Code and workflow enforce that switch. Each environment's
-stacks have a switch of their own, `BRANCHBOOK_ENV`, which the pipeline's deploy jobs set, and an administrator sets
-to deploy them by hand ([Environments](#environments-staging-and-production)).
+`BRANCHBOOK_ALERT_EMAIL` or `BRANCHBOOK_GUARDRAILS=true` set, so the app includes `BranchbookAccount` (the GitHub
+OIDC provider, a deploy role per environment and the budget, in `us-east-1`) or `BranchbookGuardrails` (the audit and
+detection services, each environment's execution policy and the permissions boundary, in `af-south-1`). `cdk deploy`
+then updates that stack with the administrator's own credentials. Code and workflow enforce that switch. Each
+environment's stacks have a switch of their own, `BRANCHBOOK_ENV`, which the delivery jobs set, and an administrator
+sets to deploy them by hand ([Environments](#environments-staging-and-production)).
 
-1. The job `deploy` in `ci.yml` runs only after `api`, `web`, `stack` and `infra` pass (`needs`), which `main` also
-   requires as checks, and declares the GitHub environment `aws-demo`, which only the branch `main` and `v*` tags
-   may use (GitHub settings). `aws-connection-check.yml`, run by hand, also declares it.
-2. AWS STS accepts GitHub's OIDC token only on an exact match with the role's trust policy (`StringEquals`): `aud` is
-   `sts.amazonaws.com`, and `sub` names this repository by ID and the environment `aws-demo` (IAM).
-3. The deploy role's sessions last at most 1 hour, and its policy has two statements: `AssumeCdkBootstrapRolesOnly`
-   (`sts:AssumeRole` on `cdk-hnb659fds-*`) and `ReadReleaseRecordOnly` (`ssm:GetParameter` on
-   `/branchbook/release`) (IAM).
-4. `ci.yml` never sets `BRANCHBOOK_ALERT_EMAIL`, so the pipeline's CDK app never holds `BranchbookAccount`; its
-   `deploy` job sets `BRANCHBOOK_ENV`, so the app holds that environment's `Release`, `Data` and `App` stacks. Deploying `BranchbookAccount` is not allowed because the stack is not in the app
-   ([bin/branchbook.ts](bin/branchbook.ts)). Code and workflow enforce this, not IAM.
-5. Through the `af-south-1` bootstrap roles and CloudFormation, the pipeline deploys the three `af-south-1` stacks:
-   the hosted demo, and the SSM parameter `/branchbook/release`, which holds the deployed commit.
+The pipeline, on a push to `main`, in a staging lane and a production lane:
+
+1. **The delivery jobs never set the administrator's switches.** `ci.yml` never sets `BRANCHBOOK_ALERT_EMAIL` or
+   `BRANCHBOOK_GUARDRAILS` outside the credential-free `infra` job, so the delivery jobs' CDK app never holds the
+   administrator's stacks; it holds only the registry and the environment `BRANCHBOOK_ENV` names
+   ([lib/app.ts](lib/app.ts), [app.test.ts](test/app.test.ts)). Code and workflow enforce this.
+2. **The GitHub environments.** Each delivery job declares `staging` or `production`; both admit only the branch
+   `main`, and `production` waits for a person's approval, which administrators cannot bypass. The jobs run only after
+   every check passes, on a push to `main`. `aws-connection-check.yml`, run by hand, declares the one chosen. GitHub
+   settings enforce this.
+3. **Each environment's deploy role**, `branchbook-github-deploy-staging` or `-production`. AWS STS accepts GitHub's
+   OIDC token only on an exact match (`StringEquals`): `aud` is `sts.amazonaws.com`, and `sub` names this repository
+   by ID and that environment alone. Sessions last at most 1 hour. The role may assume only its own bootstrap's roles
+   in `af-south-1` (`cdk-bbstg-*` for staging, `cdk-hnb659fds-*` for production), never the `us-east-1` ones, and
+   otherwise only read its own release records, push to and pull from the image repository and, on staging, read the
+   synthetic-traffic token ([account-stack.test.ts](test/account-stack.test.ts)). IAM enforces this.
+4. **Each environment's CDK bootstrap.** Its deploy role carries the deploy scope `branchbook-cdk-deploy-scope-<env>`,
+   which denies CloudFormation on the other environment's stacks and the administrator's. Its execution role carries
+   `branchbook-cdk-cfn-exec-<env>` instead of `AdministratorAccess`: the application's services, and IAM only on that
+   environment's own stacks' roles, created only with the permissions boundary
+   ([guardrails-stack.test.ts](test/guardrails-stack.test.ts),
+   [deployment-policies.test.ts](test/deployment-policies.test.ts)). IAM enforces this. So `BranchbookAccount` and
+   `BranchbookGuardrails` are out of the pipeline's reach in IAM, not only in code (guards 1, 3 and 4): a workflow
+   that set `BRANCHBOOK_ALERT_EMAIL` would find that no deploy role can reach the `us-east-1` bootstrap, or run
+   CloudFormation on either stack.
+
+At run time, in each environment:
+
+5. **AWS WAF** asks for a CAPTCHA on every booking and cancellation, applies the per-address limits and blocks
+   `/actuator` ([Environments](#environments-staging-and-production)). The network enforces this.
+6. **The load balancer** ends HTTPS and has one target, port 8080. The actuator's port, 8081, is in no target group or
+   rule, and the tasks, in private subnets with no public address, admit 8080 from the load balancer alone. The
+   network enforces this.
+7. **The permissions boundary**, `branchbook-permissions-boundary`, on every role the application stacks create,
+   denies IAM users and keys, leaving or changing the boundary, assuming other roles, account and Organizations
+   changes, and tampering with CloudTrail, GuardDuty, AWS Config, Security Hub and the audit records. IAM enforces this.
+8. **`branchbook_app`.** The task signs in to the database as `branchbook_app` with an IAM token and no password; that
+   role has row privileges only, no DDL and no access to Flyway's history, and the master secret goes to the
+   migration task alone. IAM and PostgreSQL enforce this.
 
 Each guard carries a badge naming what enforces it:
 
 | Badge | What enforces it | Guards | Who can change it |
 |---|---|---|---|
-| **IAM** | AWS refuses the call, whatever the workflow asks for | 2, 3 | A deploy that changes IAM: the administrator's, or, through cfn-exec, the pipeline's (see below) |
-| **GitHub setting** | GitHub refuses to start the job | 1 | A repository administrator, in the settings |
-| **Code and workflow** | The CDK app and `ci.yml` never ask for it | A, 4 | Any commit that reaches `main`: its checks must pass, but no review is required |
-
-**The pipeline does not change its own access, but IAM would not stop it.** `BranchbookAccount` defines the role the
-pipeline assumes, so it is part of the CDK app only when `BRANCHBOOK_ALERT_EMAIL` is set: by an administrator on
-their own machine, or with the placeholder `alerts@example.com` in the credential-free `infra` job. The `deploy` job
-never sets it, so it cannot synthesise that stack, let alone deploy it. That guard lives in the repository,
-so a change to the repository can remove it.
-
-**Built in code, not yet deployed: the IAM limits on a deployment** ([guardrails-stack.ts](lib/guardrails-stack.ts),
-[account-stack.ts](lib/account-stack.ts); the steps are under [First-time setup](#first-time-setup)):
-
-- Each environment's deploy role assumes only its own bootstrap's roles in `af-south-1` (`cdk-bbstg-*` for staging,
-  `cdk-hnb659fds-*` for production), never the `us-east-1` ones.
-- Each bootstrap's execution role carries `branchbook-cdk-cfn-exec-<env>` instead of `AdministratorAccess`: the
-  application services, and IAM only on that environment's stacks' roles, which must carry
-  `branchbook-permissions-boundary`. The boundary denies IAM users and keys, leaving or changing the boundary,
-  Organizations and account changes, tampering with CloudTrail, GuardDuty, AWS Config and Security Hub, and borrowing
-  an unbounded role.
-- A deploy scope keeps each bootstrap's deploy role off the other environment's stacks and the administrator's.
-- So `BranchbookAccount` and `BranchbookGuardrails` are out of the pipeline's reach in IAM, not only in code: a
-  workflow that set `BRANCHBOOK_ALERT_EMAIL` would find that no deploy role can reach the `us-east-1` bootstrap, or
-  run CloudFormation on either stack.
+| **IAM** | AWS refuses the call, whatever the workflow asks for | 3, 4, 7, and 8 with PostgreSQL | A deploy that changes IAM: the administrator's, or, within the boundary, the pipeline's |
+| **Network** | The firewall, the load balancer or a security group refuses the request | 5, 6 | A deploy of the environment's `App` stack |
+| **PostgreSQL** | The database refuses the statement | 8 | A migration, which runs as the master user |
+| **GitHub setting** | GitHub refuses to start the job | 2 | A repository administrator, in the settings |
+| **Code and workflow** | The CDK app and `ci.yml` never ask for it | A, 1 | Any commit that reaches `main`: its checks must pass, but no second person's approval is required |
 
 **Not prevented by IAM, even then:**
 
@@ -206,13 +229,15 @@ so a change to the repository can remove it.
   Only separate accounts would close that.
 - A role a deployment creates may still be given any permissions inside the boundary, and a trust policy naming
   another account: the boundary stops an account takeover, not access to the data.
-- `main` requires its checks to pass but no review ([docs/delivery.md](../docs/delivery.md#known-gaps)), so a
-  change merged to `main` can still change what each environment's own stacks do.
+- `main` requires its checks to pass but no second person's approval
+  ([docs/delivery.md](../docs/delivery.md#known-gaps)), so a change merged to `main` can still change what each
+  environment's own stacks do; production's approval still gates every production deployment.
 
 What else limits this is the repository: it has one collaborator, who is an administrator, and each GitHub
 environment's branch policy admits only `main`.
 
-**Option, not done:** require a review on `main`, and add a `CODEOWNERS` entry for `.github/` and `infra/`.
+**Option, not done:** require an approval on pull requests to `main`, and add a `CODEOWNERS` entry for `.github/` and
+`infra/`. These remaining risks are listed, with their reasons, in [SECURITY.md](../SECURITY.md#known-risks).
 
 ## Environments: staging and production
 
@@ -372,8 +397,9 @@ worst task's view.
 | `CanaryFailing` | Synthetics `SuccessPercent`, Average, 5 min | under 90% for 2 runs in a row | **a breach** |
 
 `outbox.failed` is a level that falls only when retention deletes old messages, so an alarm on the level would stay
-raised for days and miss the next failure; the alarm watches its change instead. A booking for the demo number ending
-0000, whose simulated delivery fails on purpose, raises `OutboxNewFailures` too.
+raised for days and miss the next failure; the alarm watches its change instead. The gauge leaves out the simulated
+gateway's deliberate failures, so a booking for a demo number ending 0000, whose delivery fails on purpose, raises
+nothing.
 
 **Dashboard** `<resourcePrefix>` (`branchbook`, `branchbook-staging`): the alarms' states; requests, 5xx, p50 and p99
 response time and healthy tasks; pending, FAILED, oldest-pending age and dispatcher tick age; the SMS breaker; database
@@ -445,7 +471,7 @@ Both stacks are in `af-south-1`:
   `/branchbook/app`, kept 7 days; three CloudWatch alarms; and the Route 53 A alias that points the domain at the load
   balancer.
 
-A reviewer's request takes this path:
+A request takes this path:
 
 1. The browser resolves `branchbook.click` through Route 53, whose alias names the load balancer. DNS answers the
    name; it is not in the data path.
@@ -486,7 +512,7 @@ Any South African mobile number may book: the demo-numbers-only rule (`BRANCHBOO
 off, because the demo now texts the number it is given.
 
 **No sign-in.** Anyone with the address can try the demo: a sign-in prompt in front of a demo is a poor experience
-for everyone who opens it, reviewers included
+for everyone who opens it
 ([ADR-0006, Notes](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). What limits what a visitor can do is
 the deletion of each booking once its appointment is over, the SMS controls under [Real SMS](#real-sms), and WAF's limit on
 bookings and cancellations. The inbox is off because, with no sign-in, it would list every booking's reference to
@@ -502,8 +528,8 @@ with less than 2 GB free. They are e-mailed only if `BRANCHBOOK_DEMO_ALERT_EMAIL
 Fargate ARM in Cape Town is $0.04372 per vCPU-hour and $0.0048 per GB-hour, and each task has 0.5 vCPU and 1 GB. The
 domain costs about $3 a year. Each SMS is charged on top, up to the account's SMS spend limit ([Real SMS](#real-sms)).
 
-**Teardown date: 2026-11-30**, the end of the review window. Extend it here, with the reason, if the review runs
-longer; until then the budget's alerts at $55, $88 and $110 are the backstop.
+**Teardown date: 2026-11-30.** Extend it here, with the reason, if the demo must run longer; until then the budget's
+alerts are the backstop.
 
 ### Real SMS
 
@@ -569,8 +595,8 @@ BRANCHBOOK_DEMO_ALERT_EMAIL=<your address> \
   other secret is supplied at deploy time. `BRANCHBOOK_ENV=staging` deploys `BranchbookStagingData` and
   `BranchbookStagingApp` the same way.
 - **`BRANCHBOOK_DEMO_ALERT_EMAIL` is optional.** Without it the alarms still exist, on a topic with no subscriber. The
-  pipeline passes the `aws-demo` environment secret of that name, not set today, so the next push to `main` removes a
-  subscription a hand deploy added.
+  pipeline passes its environment's secret `ALERT_EMAIL` as this variable, so the next push to `main` removes a
+  subscription a hand deploy added unless that secret holds the same address.
 - **`BRANCHBOOK_SMS_AWS_DRY_RUN=true` is optional.** It deploys a task that asks AWS to check each send without sending
   it. Deploy again without it, or let the next push to `main` do so, to text for real.
 - **No image is built at deploy time.** The tasks pull the image the pipeline built once and pushed to the
@@ -732,7 +758,8 @@ These steps need you personally, and only happen once.
 
 10. **Tell GitHub about it (console).** In the repository settings, under **Environments**, create `staging` and
     `production`. In each, under **Deployment branches and tags**, choose **Selected branches and tags** and add
-    `main`; give `production` a required reviewer. The trust policies name the environment, not a branch, so this
+    `main`; in `production`, also require a person's approval and do not let administrators bypass it. The trust
+    policies name the environment, not a branch, so this
     rule is what keeps a feature branch out. Check it:
 
     ```bash
@@ -821,8 +848,8 @@ bootstrap goes last.
    (`cdk-<qualifier>-assets-<account>-<region>`) on purpose. In the S3 console, empty it, which also removes its old
    versions, then delete it.
 
-6. Delete the `AWS_DEPLOY_ROLE_ARN` secrets from the `staging` and `production` environments, last. Every later push to `main` fails
-   `ci`'s `deploy` job at sign-in; remove that job from `ci.yml` to stop it running.
+6. Delete the `AWS_DEPLOY_ROLE_ARN` secrets from the `staging` and `production` environments, last. Every later push
+   to `main` fails `ci`'s delivery jobs at sign-in; remove them from `ci.yml` to stop them running.
 
 ## Dependency notes
 

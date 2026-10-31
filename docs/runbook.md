@@ -1,10 +1,13 @@
 # Runbook
 
 How to look after a running BranchBook: whether it is healthy, what happened to a message, what an AWS refusal
-means and how to let the hosted demo send real SMS, how to replay one that failed, what the daily cap's ledger holds,
-whether a reference is blocked, whether the hosted demo's retention purge ran, and how to follow one request through
-the logs. The commands are for the local stack that `make up` starts; `make psql` opens a SQL prompt on its database.
-Every number in this file is a synthetic demo number.
+means and how to let production send real SMS, how to replay one that failed, what the daily cap's ledger holds,
+whether a reference is blocked, whether the retention purge ran, how to follow one request through the logs and read
+the metrics, what each alarm means and what to do, how to run a fault-injection experiment, restore the database to
+a point in time and roll back by hand, and how to write a migration a rollback can survive. The commands are for the
+local stack that `make up` starts, where `make psql` opens a SQL prompt on its database, unless a section says it is
+for staging or production. Every number in this file is a synthetic demo number. The failure modes behind the alarms,
+and the drills that rehearse them, are in [resilience.md](resilience.md).
 
 ## Is it healthy?
 
@@ -14,6 +17,7 @@ Every number in this file is a synthetic demo number.
 | Ready for traffic | `curl -s localhost:8080/readyz` | `{"status":"UP"}`: started, and PostgreSQL answers. Docker and the load balancer use it. |
 | The whole stack | `make smoke` | `All checks passed`. It writes nothing. |
 | The race for the last seat | `make demo-409` | `Exactly one booking won the seat`. It books one appointment, so only on a local stack. |
+| A deployed environment | `EXPECT_PROD_PROFILE=1 EXPECT_CAPTCHA=1 scripts/smoke.sh https://branchbook.click` (or `https://stg.branchbook.click`) | `All checks passed`. The checks a CAPTCHA stops are skipped; it writes nothing. Each environment's dashboard and its canary watch the same from outside ([Alarms](#alarms)). |
 
 ## What happened to a message?
 
@@ -28,8 +32,11 @@ curl -s 'localhost:8080/api/v1/messages?limit=20'
 
 A message is in one of three states:
 
-- **PENDING**: waiting for its next attempt at `nextAttemptAt`. A refused attempt is retried after 2, 4, 8 and 16
-  seconds, unless the refusal is permanent; `attempts` and `lastError` say how far it got.
+- **PENDING**: waiting for its next attempt at `nextAttemptAt`. A refused attempt is retried after about 2, 4, 8
+  and 16 seconds, each wait up to a fifth shorter at random (`branchbook.dispatcher.backoff`,
+  [configuration.md](configuration.md#notifications)), unless the refusal is permanent; `attempts` and `lastError`
+  say how far it got. While the [SMS circuit is open](#sms-circuit-open) no message is claimed, so a message waits
+  PENDING with no attempt spent.
 - **SENT**: the gateway accepted it at `sentAt`.
 - **FAILED**: it will not be tried again on its own. `failureReason` says why:
   - `DELIVERY_FAILED`: the gateway refused all five attempts, or refused one permanently, as AWS refuses a number it
@@ -68,13 +75,14 @@ LIMIT 20;
 
 ## What the AWS codes mean
 
-Where `BRANCHBOOK_SMS_GATEWAY=aws`, as on the hosted demo, every number outside the published demo block, 082 555 0000
+Where `BRANCHBOOK_SMS_GATEWAY=aws`, as in production, every number outside the published demo block, 082 555 0000
 to 0199, is sent through AWS End User Messaging SMS, and the start-up log has one line naming the gateway, the
 region and whether a protect configuration and a daily cap are set. A refusal that sending again cannot cure, marked
 *At once* below, makes the message FAILED with `DELIVERY_FAILED` on that attempt. Any other, marked *Retried*, is
-tried again after 2, 4, 8 and 16 seconds, as the simulated gateway's refusal is, and the fifth makes it FAILED with
-`DELIVERY_FAILED`. Either way `lastError` holds the last code. Each code is the exception's type and, where AWS gives
-one, its reason; AWS's message is never kept, because it can quote the number.
+tried again after the backoff above, as the simulated gateway's refusal is, and the fifth makes it FAILED with
+`DELIVERY_FAILED`; a run of *Retried* refusals also opens the [SMS circuit](#sms-circuit-open). Either way
+`lastError` holds the last code. Each code is the exception's type and, where AWS gives one, its reason; AWS's
+message is never kept, because it can quote the number.
 
 | `lastError` | Fails | What happened | What to do |
 |---|---|---|---|
@@ -97,22 +105,26 @@ message by its id, never its number, and end with the code. A code marked *At on
 that met it, usually the first; any other shows on `outbox.retry` until the fifth attempt's `outbox.failed`:
 
 ```text
-outbox.retry messageId=... attempts=1 retryInSeconds=2 code=AWS_THROTTLED
+outbox.retry messageId=... attempts=1 retryInSeconds=1.734 code=AWS_THROTTLED
 outbox.failed messageId=... attempts=1 code=AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED
 ```
 
-Locally, `docker compose logs app | grep outbox.failed` lists them; on the hosted demo, search CloudWatch Logs for
-`outbox.failed`. The inbox or the SQL above shows the message by that id. Replaying a message that failed at once
+`retryInSeconds` is the wait with its jitter, to the millisecond. Locally, `docker compose logs app | grep
+outbox.failed` lists them; in staging and production, search the log group `/<prefix>/app` in CloudWatch Logs for
+`outbox.failed` (the `prod` profile writes each line as one JSON object, so the line is in its `message` field). The inbox or the SQL above shows the message by that id. Replaying a message that failed at once
 ([below](#replay-a-failed-message)) sends it again, so fix the cause first, or it fails at once again.
 
 A message AWS accepted is SENT with AWS's `MessageId` as its provider id. SENT means AWS took it, not that the phone
 received it: South Africa supports no sender IDs, so with no origination identity AWS sends over a shared route, best
 effort.
 
-### Let the hosted demo send real SMS
+<a id="let-the-hosted-demo-send-real-sms"></a>
 
-The account owner does these steps in the AWS console, in Cape Town (af-south-1); the CDK app creates the protect
-configuration, the task role's permission and the settings, but not these.
+### Let production send real SMS
+
+Production texts for real (`sms.gateway` is `aws` in [infra/config/production.json](../infra/config/production.json));
+staging stays simulated. The account owner does these steps in the AWS console, in Cape Town (af-south-1); the CDK
+app creates the protect configuration, the task role's permission and the settings, but not these.
 
 1. **In the sandbox, verify each number that should receive SMS.** A new account is in the SMS sandbox: it sends only
    to verified destination numbers, at most 10, and spends at most US$1 a month. In AWS End User Messaging SMS, open
@@ -127,8 +139,9 @@ configuration, the task role's permission and the settings, but not these.
 3. **Check the start-up log** after the next deployment: `SMS gateway: AWS End User Messaging SMS in af-south-1 ...`,
    with a protect configuration and a daily cap set.
 
-To stop real SMS at once, set `BRANCHBOOK_SMS_GATEWAY=simulated` and redeploy; every message then goes to the
-simulated gateway.
+To stop real SMS, set `sms.gateway` to `simulated` in the environment's configuration and let the pipeline deploy
+it; every message then goes to the simulated gateway. While AWS itself is failing, the
+[SMS circuit](#sms-circuit-open) already holds messages back on its own.
 
 ## Replay a failed message
 
@@ -212,7 +225,7 @@ never told.
 
 ## The daily cap's ledger
 
-Where `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` is above 0, as on the hosted demo, every SMS written to a number outside
+Where `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` is above 0, as in staging and production, every SMS written to a number outside
 the demo block adds one row to `sms_recipient_sends` ([BR-17](domain-rules.md#br-17)), in the transaction that
 writes the message. A row holds two things: `recipient_fingerprint`, HMAC-SHA256 of the number's E.164 form under
 `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY`, in lower-case hex, and `written_at`. There is no number, name, reference, text,
@@ -257,8 +270,8 @@ Recipient daily cap: branchbook.sms.recipient-cap-key is not set, so the ledger'
 
 The rows from before a restart then match no number, so they stop counting, and the purge removes them within a day.
 To keep counts across restarts, set the variable from a secret store to at least 32 characters, such as the output
-of `openssl rand -base64 48`; a shorter one stops start-up. The hosted demo does: its task gets the key from the
-`branchbook/sms-cap-key` secret in AWS Secrets Manager. The key is never logged or printed. Changing it has the same
+of `openssl rand -base64 48`; a shorter one stops start-up. Staging and production do: each task gets the key from
+the `<prefix>/sms-cap-key` secret in AWS Secrets Manager. The key is never logged or printed. Changing it has the same
 effect as a restart: every count starts again.
 
 ## Is a reference blocked?
@@ -289,7 +302,7 @@ lookup_attempts.purged count=3
 
 ## Did the retention purge run?
 
-The hosted demo keeps every booking until its appointment is over, then deletes it, with its messages and idempotency
+Staging and production keep every booking until its appointment is over, then delete it, with its messages and idempotency
 keys ([SECURITY.md](../SECURITY.md#personal-information-popia)). A booking for a future date is never touched. The retention job does it: a minute after start-up, then
 every hour. Each run writes one INFO line with what it deleted, and nothing else:
 
@@ -336,9 +349,9 @@ Right after a run it is 0, apart from what a failed batch or a held appointment 
 
 ### Switch it on
 
-It is off unless the deployment sets `BRANCHBOOK_RETENTION_ENABLED=true`, which only the hosted demo's ECS task
-definition does. `BRANCHBOOK_RETENTION_AFTER_END` keeps a booking for longer after its appointment ends, as an
-ISO-8601 duration (`PT0S` by default); a negative value stops start-up. The query above then needs that delay
+It is off unless the deployment sets `BRANCHBOOK_RETENTION_ENABLED=true`, which staging's and production's
+configuration files do (`appEnvironment` in [infra/config](../infra/config)). `BRANCHBOOK_RETENTION_AFTER_END` keeps
+a booking for longer after its appointment ends, as an ISO-8601 duration (`PT0S` by default); a negative value stops start-up. The query above then needs that delay
 subtracted from `now()`. To watch the job locally, start the API with the variable set and look for the line a minute later:
 
 ```bash
@@ -357,13 +370,19 @@ its delivery read as one story:
 docker compose logs app | grep '<correlation id>'
 ```
 
+In staging and production the lines are in the log group `/<prefix>/app`, one JSON object each under the `prod`
+profile; CloudWatch Logs Insights finds a request's lines with `filter @message like '<correlation id>'`.
+
 Log lines name appointments and messages by id. They never hold a name, a number in any form, or a reference
 ([BR-19](domain-rules.md#br-19)), so a log can be shared to diagnose a problem.
 
 ## Read the metrics
 
-`/actuator/prometheus` serves every meter in Prometheus's text format, on the app's own port, with no personal data
-in it. Two are BranchBook's own (FR-30; the full mapping is in [api/README.md](../api/README.md#metrics)):
+`/actuator/prometheus` serves every meter in Prometheus's text format, with no personal data in it. Locally it is on
+the app's own port. Under the `prod` profile the actuator moves to port 8081, which the load balancer never routes,
+and staging and production expose only `health` and `info` there; their meters reach CloudWatch instead, in the
+namespace `BranchBook/<environment>`, where the [alarms](#alarms) and each environment's dashboard read them
+([infra/README.md](../infra/README.md#observability-and-fault-injection)). Two are BranchBook's own (FR-30; the full mapping is in [api/README.md](../api/README.md#metrics)):
 
 ```bash
 curl -s localhost:8080/actuator/prometheus | grep -E '^(outbox_pending|appointments_booked_total)'
@@ -399,3 +418,179 @@ GROUP BY status;
   [errors.md](errors.md) explains each code.
 - A 500 is not an outcome and is not counted here, unless the booking had already committed, when it counts as
   `confirmed`: look for `status="500"` in `http_server_requests_seconds` and for `Unexpected failure` in the log.
+
+## Alarms
+
+Staging and production each have these alarms, on the environment's SNS topic, which e-mails the `ALERT_EMAIL` of
+that GitHub environment where one is set. What each watches, its threshold and how missing data counts are in
+[infra/README.md](../infra/README.md#observability-and-fault-injection); the thresholds themselves are in the
+`alarms` and `monitoring` sections of [infra/config/](../infra/config). Each environment's dashboard,
+`branchbook` or `branchbook-staging` in CloudWatch, shows every alarm beside the figures it reads. The logs are in
+`/<prefix>/app` ([Follow one request](#follow-one-request)).
+
+| Alarm | What it means | First three checks | The fix |
+|---|---|---|---|
+| `ServerErrors` | The app answered 5xx to 5 or more requests in 5 minutes. During a deployment it also rolls the deployment back. | 1. The ECS service's events: is a deployment running or rolling back? 2. The log for `Unexpected failure`, `Database unavailable` and `Temporary database failure`. 3. The database alarms and the RDS instance's events (a failover?). | A deployment that caused it is rolled back by ECS. A database cause: see its alarm. Otherwise [roll back by hand](#roll-back-by-hand). |
+| `NoHealthyTask` | No task has passed `/readyz` for 3 minutes: nothing is serving. | 1. The service's events and the stopped tasks' reasons. 2. The newest task's start-up log (a refused IAM database sign-in, a setting `ProductionProfileGuard` refuses). 3. The RDS instance's status: `/readyz` needs the database. | A bad image: [roll back by hand](#roll-back-by-hand). A database outage: wait for the failover, or [restore](#restore-the-database-to-a-point-in-time). |
+| `DatabaseStorage` | The database has less than 2 GB free. Storage grows by itself up to `maxAllocatedStorageGiB`. | 1. Free storage on the dashboard, and whether it fell suddenly. 2. That the retention purge runs (`retention.purged` lines; [above](#did-the-retention-purge-run)). 3. The current allocation against `maxAllocatedStorageGiB` in the config. | Raise `database.maxAllocatedStorageGiB` and deploy; fix the purge if it stopped. |
+| `OutboxBacklogAge` | A message has waited more than 300 seconds to be sent. | 1. `SmsCircuitOpen` and `DispatcherStalled`. 2. The log's `outbox.retry` codes ([the AWS codes](#what-the-aws-codes-mean)). 3. The SQL count in [Read the metrics](#read-the-metrics). | As for the alarm or code it points to. Nothing is lost: the messages stay PENDING. |
+| `OutboxNewFailures` | One or more messages turned FAILED in 5 minutes and will not be sent without an operator. The simulated gateway's deliberate failures, for numbers ending 0000, are left out. | 1. The log's `outbox.failed` lines and their codes. 2. One number or many? 3. For `RECIPIENT_DAILY_CAP`, [the ledger](#the-daily-caps-ledger). | Fix the cause the code names, then [replay](#replay-a-failed-message). |
+| `DispatcherStalled` | No dispatcher tick for over 60 seconds, for 2 minutes; or the app stopped exporting metrics, since missing data counts. | [Below](#dispatcher-stalled). | Restart one task. |
+| `SmsCircuitOpen` | The SMS circuit breaker is open: the provider is failing or slow, and the dispatcher holds messages back. | [Below](#sms-circuit-open). | Usually none: it closes by itself. |
+| `ResponseTimeP99` | The slowest 1% of requests took over 1.5 seconds for 15 minutes. | 1. `DatabaseCpu` and `DatabaseConnections`. 2. `ServiceCpu` and the running task count. 3. Requests and WAF blocks on the dashboard: a surge, or one address? | Let autoscaling add tasks; raise `service.maxTasks` within the connection budget, or `database.instanceClass`. |
+| `DatabaseCpu` | The database's CPU averaged over 80% for 15 minutes. | 1. Requests on the dashboard. 2. `try_again` bookings ([Read the metrics](#read-the-metrics)). 3. A retention batch failing hour after hour ([above](#did-the-retention-purge-run)). | A larger `database.instanceClass`; in production the change is applied through the Multi-AZ standby. |
+| `DatabaseConnections` | More than 80% of the connection budget (60 of 75) is in use. | 1. Running tasks against `service.maxTasks`. 2. A migration task still running. 3. A deployment with old and new tasks side by side. | `config.ts` keeps the most the service can open inside the budget, so a breach means something else connects: find and stop it. |
+| `DatabaseMemory` | The database had under 128 MiB of freeable memory for 15 minutes. | 1. `DatabaseConnections`. 2. `DatabaseCpu`. 3. The trend since the last deployment. | A larger `database.instanceClass`. |
+| `ServiceCpu` | The tasks' CPU averaged over 85% for 15 minutes, beyond what autoscaling absorbed. | 1. Is the service at `service.maxTasks`? 2. Requests per task on the dashboard. 3. WAF's per-address blocks: one client driving it? | Raise `service.maxTasks` within the connection budget, or `service.cpu`. |
+| `ServiceMemory` | A task used over 85% of its memory for 15 minutes. | 1. Tasks restarting? 2. Since which deployment? 3. The same on the other tasks? | Raise `service.memoryMiB`, or roll back the deployment that started it. |
+| `CanaryFailing` | The outside-in canary failed two runs in a row: `/readyz` or the availability API did not answer 200 with a sane body. | 1. The canary's last run in the CloudWatch Synthetics console. 2. `EXPECT_PROD_PROFILE=1 EXPECT_CAPTCHA=1 scripts/smoke.sh <address>` from your machine. 3. `NoHealthyTask` and `ServerErrors`. | As for the alarm it points to; if only the canary fails, the domain, the certificate or WAF. |
+
+### SMS circuit open
+
+The dispatcher sends through a circuit breaker named `sms`. It opens when half of the last 10 calls failed (once at
+least 5 were made) or all of them took over 8 seconds; a retryable refusal or a gateway that throws is a failure, a
+permanent refusal is not ([configuration.md](configuration.md#notifications)). It logs one WARN line:
+
+```text
+outbox.circuit from=CLOSED to=OPEN failureRate=60.0 slowCallRate=0.0
+```
+
+While it is open the dispatcher claims no message, so every message stays PENDING and **no attempt is spent**. After
+30 seconds it lets two messages through as probes; it closes if they pass, logged as `outbox.circuit from=HALF_OPEN
+to=CLOSED`, and the waiting messages are sent. A provider outage needs no action.
+
+1. **AWS's side.** The AWS Health Dashboard for AWS End User Messaging in af-south-1, and the `outbox.retry` codes in
+   the log: `AWS_THROTTLED`, `AWS_INTERNAL` and `AWS_QUOTA_*` are AWS; `AWS_UNREACHABLE` is the task's route to AWS
+   (the NAT gateways) or its credentials.
+2. **The account's SMS limits.** The spend limit and quotas in the AWS End User Messaging console. A spent monthly
+   limit fails messages at once (`AWS_QUOTA_MONTHLY_SPEND_LIMIT_REACHED_FOR_TEXT`), so it shows as
+   `OutboxNewFailures` rather than here.
+3. **How long it has been open.** `OutboxBacklogAge` follows after 5 minutes. A breaker that opens and closes over
+   and over means calls are slow rather than failing.
+
+Leave the gateway as it is: switching to `simulated` would mark the waiting messages SENT without sending them.
+
+### Dispatcher stalled
+
+`outbox.last.tick.age` is the time since the dispatcher last finished a tick, and the alarm also fires when a task
+stops exporting it.
+
+1. **Is a task running?** `NoHealthyTask` and the service's running count.
+2. **The dispatcher's own lines.** Search the log for `outbox.`: `outbox.tick_failed` and `outbox.claim_failed` are
+   its errors, and no `outbox.` line since bookings were last made means its thread has stopped.
+3. **The export.** If ticks are logged and the alarm stays raised, the metrics are not reaching CloudWatch: look for
+   CloudWatch errors in the same log, and check the task role may still call `cloudwatch:PutMetricData`.
+
+The fix is to restart one task: in the ECS console, open the environment's service and stop one task; ECS starts a
+replacement, and the other tasks keep serving. The PENDING messages are sent once a dispatcher ticks again.
+
+## Run a fault-injection experiment
+
+Each environment has two AWS FIS experiment templates: `<prefix>-stop-one-task`, and in production
+`<prefix>-database-failover`. What each does, what to expect and the commands to start one are in
+[infra/README.md](../infra/README.md#observability-and-fault-injection); what each rehearses is in
+[resilience.md](resilience.md).
+
+1. **Before.** Check that `ServerErrors` and `NoHealthyTask` are OK: they are the experiments' stop conditions, so
+   FIS refuses to start, or stops, while either is raised. Run the smoke test against the environment
+   ([Is it healthy?](#is-it-healthy)) and open its dashboard.
+2. **During.** Start the experiment, then watch healthy tasks, 5xx and response times on the dashboard, and
+   `aws fis get-experiment` for its state.
+3. **After.** Run the smoke test again, note when the service was whole again, and record the date and the measured
+   recovery in [resilience.md](resilience.md).
+
+Run them on staging first. Staging runs one task, so stopping it shows recovery from zero rather than continuity.
+
+## Restore the database to a point in time
+
+RDS keeps automated backups for `database.backupRetentionDays` (14 days in production, 3 in staging) and can restore
+to any second in that window, up to about five minutes ago. A restore always makes a **new** instance; the live one
+is left as it was. This procedure has not been rehearsed yet: the restore drill in [resilience.md](resilience.md)
+will time it.
+
+1. **Find the live instance and its settings** (production shown; staging's stack is `BranchbookStagingData`):
+
+   ```bash
+   aws cloudformation describe-stack-resources --stack-name BranchbookData --region af-south-1 \
+     --profile branchbook-admin --query "StackResources[?ResourceType=='AWS::RDS::DBInstance'].PhysicalResourceId"
+   aws rds describe-db-instances --db-instance-identifier <id> --region af-south-1 --profile branchbook-admin \
+     --query "DBInstances[0].{subnets:DBSubnetGroup.DBSubnetGroupName,groups:VpcSecurityGroups[].VpcSecurityGroupId,params:DBParameterGroups[0].DBParameterGroupName,latest:LatestRestorableTime}"
+   ```
+
+2. **Restore to a new instance** in the same subnet group, security group and parameter group, with IAM
+   authentication on, so the tasks could reach it:
+
+   ```bash
+   aws rds restore-db-instance-to-point-in-time --region af-south-1 --profile branchbook-admin \
+     --source-db-instance-identifier <id> --target-db-instance-identifier <id>-restored \
+     --restore-time <UTC instant, e.g. 2026-11-02T09:15:00Z> \
+     --db-subnet-group-name <subnets> --vpc-security-group-ids <groups> --db-parameter-group-name <params> \
+     --enable-iam-database-authentication --multi-az --no-publicly-accessible --deletion-protection
+   ```
+
+   Leave out `--multi-az` and `--deletion-protection` for staging. The restored instance keeps the source's
+   encryption key and master credentials.
+
+3. **Point the stack at it.** The stack has no setting for this today: the tasks' endpoint, the master secret and the
+   task role's `rds-db:connect` grant, which names the instance's resource ID and so changes with a restore, all come
+   from the instance [data-stack.ts](../infra/lib/data-stack.ts) defines. Switching is therefore a change to that
+   stack, deployed through the pipeline, and is what the drill is to settle. Where only some rows were lost, copying
+   them back from the restored instance into the live one avoids the switch.
+
+4. **Afterwards,** delete the instance that is no longer used, once nothing needs it; with deletion protection on,
+   turn it off first.
+
+## Roll back by hand
+
+The pipeline rolls production back by itself when a deployment or its smoke test fails, after the same approval as a
+deployment ([delivery.md](delivery.md#rollback-production-environment-production)). To roll back by hand, for example
+when a release that passed its smoke test turns out to be wrong, redeploy the previous release: its commit's CDK app
+with its image digest, as the pipeline does.
+
+1. **Find the previous release.** `/<prefix>/release` names the commit and `/<prefix>/release-image` the digest of
+   the release now recorded; their history holds the earlier ones:
+
+   ```bash
+   aws ssm get-parameter-history --name /branchbook/release-image --region af-south-1 --profile branchbook-admin \
+     --query "Parameters[].[LastModifiedDate,Value]" --output text
+   aws ssm get-parameter-history --name /branchbook/release --region af-south-1 --profile branchbook-admin \
+     --query "Parameters[].[LastModifiedDate,Value]" --output text
+   ```
+
+2. **Deploy that commit with that digest,** from a checkout of the commit (a separate worktree keeps yours):
+
+   ```bash
+   git worktree add ../branchbook-rollback <commit> && cd ../branchbook-rollback/infra && npm ci
+   AWS_PROFILE=branchbook-admin BRANCHBOOK_ENV=production BRANCHBOOK_IMAGE_DIGEST=<digest> \
+   BRANCHBOOK_DEMO_ALERT_EMAIL=<the address in the environment's ALERT_EMAIL> \
+     npx cdk deploy BranchbookData BranchbookApp
+   ```
+
+   Without `BRANCHBOOK_DEMO_ALERT_EMAIL` the deployment removes the alarms' e-mail subscription, which is the last
+   thing wanted during an incident.
+
+3. **Check it.** `EXPECT_PROD_PROFILE=1 EXPECT_CAPTCHA=1 scripts/smoke.sh https://branchbook.click`.
+
+A hand deployment writes no release record, so `/<prefix>/release` still names the release it replaced, and the next
+push to `main` deploys `main` over it: revert the bad commit on `main` too. The previous image runs against the
+schema as the newer release left it, which is why every migration must be one
+[a rollback can survive](#write-migrations-a-rollback-can-survive).
+
+## Write migrations a rollback can survive
+
+A rollback redeploys the previous image, but never undoes a migration: the schema stays as the newer release left it.
+The previous image's migration task finds the newer migrations already applied and ignores them (Flyway's default
+`ignoreMigrationPatterns` is `*:future`), and its service then validates its entities against that schema
+(`ddl-auto: validate`). So every migration must be backward-compatible with the release before it:
+
+- **Expand first.** Add a table, a nullable column, or a column with a default; add an index. The previous release
+  never reads them, so it runs unchanged.
+- **Contract a release later.** Drop or rename a column, tighten a constraint or change a type only once no release
+  that a rollback could return to still reads it. A rename is an add, a copy and, later, a drop.
+- **Keep data changes additive.** A backfill the previous release does not depend on is safe; one it would misread
+  is not.
+- **Grants come with the table.** The runtime role `branchbook_app` (V9) gets row access to new tables through default
+  privileges; check a new migration leaves it no more than row access.
+
+Before merging a migration, ask: would the release now in production start and work against this schema? If not,
+split it.

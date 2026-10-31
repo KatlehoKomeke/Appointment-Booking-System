@@ -15,39 +15,27 @@ GitHub settings the pipeline relies on, and the known gaps. AWS resources and th
 
 ## At a glance
 
-```mermaid
-flowchart LR
-  subgraph checks["ci checks: every pull request and every push to main, no AWS access"]
-    api
-    web
-    infra
-    lint["workflow-lint"]
-    image --> stack
-  end
-  checks -- "push to main, all green" --> publish["publish (staging): registry, push branchbook:commit, attest"]
-  publish --> staging["deploy-staging: deploy the digest, smoke, e2e, record"]
-  staging --> approval{"production approval"}
-  approval --> production["deploy-production: verify attestation, deploy the same digest, smoke, record"]
-  production -- "deploy or smoke failed" --> rollback["rollback-production: redeploy the previous release, smoke"]
-```
+![From a commit to Cape Town, all built, in three lanes: Laptop, GitHub and AWS. On the laptop, the opt-in pre-commit hook refuses secret files and runs gitleaks, failing closed (1); push protection refuses known provider secrets. In GitHub, main's ruleset requires every check before a push or merge (2), and codeql, dependency-review and secret-scan run beside ci, whose checks have no AWS access: api, web, infra, workflow-lint, and image, which builds the ARM64 image once (3), then stack, which tests that same image. On a push to main, publish pushes it to ECR and attests it (4); deploy-staging deploys its digest to staging and tests it there (5); and, after a person's approval, deploy-production verifies its provenance and deploys the same digest to production (6), with rollback-production if it fails. Every delivery job signs in through OpenID Connect as its environment's deploy role; the administrator deploys BranchbookAccount and BranchbookGuardrails by hand (A).](assets/diagrams/delivery-pipeline.svg)
 
-1. A commit passes the opt-in **pre-commit hook** (gitleaks) and, on push, GitHub's **push protection**.
-2. On a pull request, **`ci`**, **`codeql`**, **`dependency-review`** and **`secret-scan`** run; the `Protect main`
-   ruleset requires their checks before a merge.
+The numbered steps in the image:
+
+1. A commit passes the opt-in **pre-commit hook** (gitleaks), and, on push, GitHub's **push protection**.
+2. **`main`**: the `Protect main` ruleset requires every check of **`ci`**, **`codeql`**, **`dependency-review`** and
+   **`secret-scan`** before a push or merge, and refuses a force-push.
 3. `ci`'s **`image`** job builds the ARM64 image once; **`stack`** runs that exact build; nothing rebuilds it later.
 4. On a push to `main`, once every `ci` check is green, **`publish`** pushes the image to ECR as `branchbook:<commit>`
    and attests it; its digest is what every later job deploys.
 5. **`deploy-staging`** deploys the digest to https://stg.branchbook.click, smoke- and end-to-end-tests it, then
    records it.
-6. **`deploy-production`** waits for a reviewer, verifies the attestation, deploys the same digest to
+6. **`deploy-production`** waits for a person's approval, verifies the attestation, deploys the same digest to
    https://branchbook.click, smoke-tests it, then records it. If the deployment or the smoke test fails after
    production changed, **`rollback-production`** redeploys the previous release.
 
 A. **Administrator**: `branchbook-admin`, `aws login`, `BRANCHBOOK_ALERT_EMAIL` or `BRANCHBOOK_GUARDRAILS=true`
 set; `cdk deploy BranchbookAccount` and `BranchbookGuardrails`, by hand.
 
-[delivery-pipeline.svg](assets/diagrams/delivery-pipeline.svg) still draws the single-environment pipeline that
-preceded this one; until it is redrawn, the flowchart above is the reference.
+Also drawn: Dependabot's weekly pull requests, on which the checks run and nothing is delivered, the manual
+`aws-connection-check.yml`, and every delivery job's sign-in through OpenID Connect.
 
 ## On your machine: the hooks
 

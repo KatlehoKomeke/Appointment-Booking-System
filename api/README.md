@@ -12,6 +12,10 @@ to every number outside the published demo block, with a per-recipient daily cap
 SMS; retries a failed message from the simulated inbox; books three demo appointments on a fresh compose stack; and
 serves two meters of its own on `/actuator/prometheus`. Where a deployment switches them on, it takes bookings only
 from the demo numbers and deletes each booking once its appointment is over. It publishes its OpenAPI contract.
+For staging and production it reads every setting from the environment, runs a `prod` profile that refuses unsafe
+settings, migrates as a separate step and signs in to RDS with IAM as a role that can change rows but not the
+schema, holds SMS back behind a circuit breaker while a provider fails, and exports its outbox and breaker figures
+to CloudWatch ([Configuration](#configuration), [docs/production-readiness.md](../docs/production-readiness.md)).
 
 ## Prerequisites
 
@@ -67,8 +71,10 @@ Integration tests are annotated `@IntegrationTest` (in `support/`). It starts th
 `MutableClock` that tests set, so rules about dates and times are tested at fixed moments. Integration tests share
 that configuration, so Spring builds the context once and one container serves them. The six that switch a
 setting, `InboxSwitchedOffIT`, `InboxReferencesHiddenIT`, `DispatcherLoopIT`, `DemoNumbersOnlyIT`,
-`RecipientDailyCapIT` and `RecipientCapLedgerIT`, each build a context of their own, and with it a container of their
-own, because the container is a bean of the context.
+`RecipientDailyCapIT`, `RecipientCapLedgerIT` and `CaptchaConfiguredIT`, each build a context of their own, and with
+it a container of their own, because the container is a bean of the context. `ProdProfileIT`, `AwsJdbcWrapperIT` and
+`MigrateOnlyIT` start the application their own way, under the `prod` profile, through the AWS JDBC wrapper, and as
+the migration task does, each against a PostgreSQL container of its own.
 
 Tests that book through the API add `@ExtendWith(DatabaseReset.class)`, which empties the booking tables before and
 after each test, `lookup_attempts` with them, so the lookup counts start again. The lookup limiter's tests are
@@ -139,13 +145,13 @@ sets it, its default, whether it is secret, and its value locally, in staging an
 | `GET /api/v1/messages?limit=` | The simulated inbox: the newest messages of every booking, recipients redacted to `082 *** ****`, and references to `APT-****-****` while `branchbook.inbox.redact-references` is true. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
 | `GET /api/v1/client-config` | The deployment's client settings: AWS WAF's CAPTCHA script and API key where a CAPTCHA protects bookings and cancels, otherwise `{"captcha":null}` |
 | `POST /api/v1/messages/{id}/retry` | Make a FAILED message due again (the web inbox's Retry button calls it); any other message is returned unchanged. The answer is the message as the inbox shows it, its reference redacted the same way. Only while `branchbook.inbox.enabled` is true; otherwise a plain 404 |
-| `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml) |
-| `/swagger-ui.html` | Swagger UI, to read and try the API |
+| `/v3/api-docs`, `/v3/api-docs.yaml` | The OpenAPI 3.1 document, the same as [docs/openapi.yaml](../docs/openapi.yaml). Off under `prod` |
+| `/swagger-ui.html` | Swagger UI, to read and try the API. Off under `prod` |
 | `/` and the app's routes (`/book`, `/manage`, `/messages`, `/privacy`, `/appointments/{reference}`) | The React app |
-| `/readyz` | Readiness: up once the app has started and PostgreSQL answers. Used by the image's Docker health check and the hosted demo's load balancer. |
+| `/readyz` | Readiness: up once the app has started and PostgreSQL answers. Used by the image's Docker health check and each environment's load balancer. |
 | `/livez` | Liveness: up while the process is healthy. Deliberately ignores the database. |
-| `/actuator/health`, `/actuator/info` | Overall health (no details) and build information |
-| `/actuator/prometheus` | Every meter in Prometheus's text format, the application's two included ([Metrics](#metrics)) |
+| `/actuator/health`, `/actuator/info` | Overall health (no details) and build information. On port 8081 under `prod`, which no load balancer routes |
+| `/actuator/prometheus` | Every meter in Prometheus's text format, the application's own included ([Metrics](#metrics)). On port 8081 under `prod`; staging and production expose only health and info there |
 
 Every other actuator endpoint is closed: `env`, `beans`, `heapdump`, `metrics` and `loggers` answer 404
 (`SecurityHeadersIT`). Every response carries the security headers described in
@@ -295,12 +301,20 @@ not its message, which could quote personal data:
 
 `GET /actuator/prometheus` serves every meter in Prometheus's text format (`text/plain;version=0.0.4`). Spring
 Boot's own are there: `http_server_requests_seconds` by method, URI template, status and exception type,
-`hikaricp_connections_*`, `jvm_*`, `process_*` and `logback_events_total`. The application adds two (FR-30):
+`hikaricp_connections_*`, `jvm_*`, `process_*` and `logback_events_total`. The application adds its own (FR-30):
 
 | Metric | Type | What it says |
 |---|---|---|
 | `appointments_booked_total{outcome}` | Counter | Every `POST /api/v1/appointments`, counted once its response is written, by how it ended. `outcome` is its only tag. |
 | `outbox_pending` | Gauge | The messages still PENDING after the dispatcher's last tick, those backing off after a refusal included. One `COUNT` query per tick, every 2 seconds; a scrape never touches the database. `NaN` until the first tick, so a dispatcher that is switched off shows no number rather than a healthy 0. |
+| `outbox_oldest_pending_age_seconds` | Gauge | How long the oldest PENDING message has waited, 0 when none waits. Read once per tick, aged at each scrape from the clock ([OutboxHealthGauges](src/main/java/za/co/fynbos/branchbook/notification/application/OutboxHealthGauges.java)). |
+| `outbox_failed` | Gauge | How many messages are FAILED, leaving out the simulated gateway's deliberate refusal of a demo number ending 0000. |
+| `outbox_last_tick_age_seconds` | Gauge | How long ago the dispatcher last finished a tick; it keeps growing while the dispatcher is stopped. |
+| `resilience4j_circuitbreaker_state{name="sms",state}` and the breaker's call counters | Gauge, counters | The SMS circuit breaker's state, 1 for the state it is in ([DeliveryCircuit](src/main/java/za/co/fynbos/branchbook/notification/application/DeliveryCircuit.java)). |
+
+Where `BRANCHBOOK_METRICS_CLOUDWATCH_ENABLED` is true, as in staging and production, the meters whose names start
+`outbox.`, `resilience4j.circuitbreaker.` or `appointments.booked` are also exported to CloudWatch every minute, where
+the alarms read them ([docs/configuration.md](../docs/configuration.md), [docs/runbook.md](../docs/runbook.md#alarms)).
 
 [BookingOutcome](src/main/java/za/co/fynbos/branchbook/booking/application/BookingOutcome.java) is the one place
 that decides the outcome, and it must name every problem code to compile (`BookingOutcomeTest`). The counting happens
@@ -372,7 +386,7 @@ in step:
 1. `OpenApiContractIT` fails when the API no longer generates exactly the committed document.
 2. CI regenerates `web/src/api/schema.d.ts` from the document and fails if anything changed.
 
-So an API change shows up in review as a diff of the contract, and `make contract` refreshes both files after an
+So an API change shows up in its pull request as a diff of the contract, and `make contract` refreshes both files after an
 intended one. In the document every response property is required, because the API always sends it; one that can be
 empty is nullable instead, so the generated types say exactly what arrives. The `Problem` schema's `code` lists every
 `ProblemCode`, so the web app's type for it is the exact set of codes in [docs/errors.md](../docs/errors.md).
@@ -408,12 +422,14 @@ api/
     │       ├── problem/                 RFC 9457 error responses
     │       ├── correlation/             correlation ids
     │       ├── time/                    the injected Clock and the one format for instants
-    │       ├── config/                  typed settings
+    │       ├── config/                  typed settings, the prod profile's guard, the migrate-only mode
+    │       ├── metrics/                 the CloudWatch export of the alarm meters, where switched on
     │       ├── security/                HTTP security and headers
     │       └── web/                     serving the React app; the OpenAPI description
     ├── main/resources/
     │   ├── application.yml              configuration, one comment per property
-    │   └── db/migration/                Flyway migrations V1 to V8, one header comment each
+    │   ├── application-prod.yml         the prod profile that staging and production run
+    │   └── db/migration/                Flyway migrations V1 to V9, one header comment each
     └── test/java/za/co/fynbos/branchbook/
         └── support/                     @IntegrationTest, MutableClock, DatabaseReset, Bookings, the container
 ```
