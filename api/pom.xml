@@ -17,7 +17,7 @@
   <parent>
     <groupId>org.springframework.boot</groupId>
     <artifactId>spring-boot-starter-parent</artifactId>
-    <version>4.1.1</version>
+    <version>4.1.2</version>
     <relativePath/>
   </parent>
 
@@ -48,7 +48,7 @@
     <!-- Java 25 LTS. The day-0 spike passed on it, so the Java 21 fallback was not needed. -->
     <java.version>25</java.version>
     <!-- Build plugins that the Spring Boot parent does not manage. -->
-    <jacoco-maven-plugin.version>0.8.15</jacoco-maven-plugin.version>
+    <jacoco-maven-plugin.version>0.8.16</jacoco-maven-plugin.version>
     <spotless-maven-plugin.version>3.10.4</spotless-maven-plugin.version>
     <!-- 1.37.0 fails inside Spotless 3.10.4 (its Markdown Javadoc support cannot load), so 1.36.0 is pinned. -->
     <google-java-format.version>1.36.0</google-java-format.version>
@@ -56,11 +56,11 @@
     <springdoc.version>3.2.0</springdoc.version>
     <!-- Parses and checks South African mobile numbers (BR-19). Not managed by Spring Boot; Dependabot bumps it, and
          MobileNumberTest asserts the number types the rules depend on, so a metadata change cannot slip through. -->
-    <libphonenumber.version>9.0.41</libphonenumber.version>
+    <libphonenumber.version>9.0.42</libphonenumber.version>
     <!-- The AWS SDK for Java v2, for the real SMS gateway (AWS End User Messaging SMS). Pinned to the newest release that
          was at least two weeks old when it was added (2.55.15, published 2026-10-12): the project waits two weeks
          before taking a new release, so a broken or withdrawn one is caught upstream first. -->
-    <aws-sdk.version>2.55.15</aws-sdk.version>
+    <aws-sdk.version>2.57.5</aws-sdk.version>
     <!-- The AWS Advanced JDBC Wrapper, whose iam plugin signs in to RDS with IAM database authentication. 4.5.0,
          published 2026-10-14, was the newest release at least two weeks old when it was added. -->
     <aws-advanced-jdbc-wrapper.version>4.5.0</aws-advanced-jdbc-wrapper.version>
