@@ -49,14 +49,14 @@ files live in `.github/workflows/`.
 
 | Diagram | Watch paths | Expected to change at | Verified at |
 | --- | --- | --- | --- |
-| system-at-a-glance | the module packages, their controllers and their scheduled jobs; `web/src/`; `api/src/main/resources/application.yml`; `compose.yaml`; `infra/bin/branchbook.ts`; `infra/lib/app-stack.ts` (the task's settings); `infra/cdk.json` | when a module, a background job, the SMS gateway or the path to AWS changes | `21798b6` |
+| system-at-a-glance | the module packages, their controllers and their scheduled jobs; `web/src/`; `api/src/main/resources/application.yml`; `compose.yaml`; `infra/bin/branchbook.ts`; `infra/lib/app.ts`; `infra/lib/app-stack.ts` (the task's settings); `infra/config/`; `infra/cdk.json` | when a module, a background job, the SMS gateway or the path to AWS changes | `90bf68b` |
 | request-flow | `scheduling/`; `catalogue/application/BranchCalendarProvider.java`; `catalogue/infrastructure/`; `booking/infrastructure/JdbcBookedIntervals.java`; `shared/correlation/`; `shared/security/`; `shared/problem/` | when the availability path changes | `85cd726` |
 | module-map | the top-level packages; `ArchitectureTest.java` in `api/src/test/` | when a module or a dependency between modules changes | `85cd726` |
 | booking-transaction | `booking/application/`; `V2__schema.sql` | when the booking transaction's steps change | `85cd726` |
 | confirmation-states | `notification/`; the `notification_messages` table in `V2__schema.sql` and `V6__cancel_deletes_the_booking.sql` | when the outbox, the dispatcher or the daily cap changes | `4d4ba68` |
 | appointment-lifecycle | `booking/domain/AppointmentStatus.java`; `booking/application/CancelAppointmentHandler.java` | when a status or a transition changes | `85cd726` |
-| data-model | `api/src/main/resources/db/migration/`; the writers in `booking/application/` and `notification/application/` | With a new migration | `44b8d1c` |
-| local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; the `Makefile` up and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box) | when a route, a management endpoint or the compose stack changes | `44b8d1c` |
+| data-model | `api/src/main/resources/db/migration/`; the writers in `booking/application/` and `notification/application/` | With a new migration | `90bf68b` |
+| local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; `.env.example`; the `Makefile` up, db-password and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box); `ci.yml` (jobs `image` and `stack`) | when a route, a management endpoint, the image or the compose stack changes | `90bf68b` |
 | delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/lib/app.ts`; `infra/lib/account-stack.ts`; `infra/lib/registry-stack.ts`; the `main` ruleset and the `staging` and `production` environments | when a workflow, a job, a hook, a stack the pipeline deploys or a GitHub setting changes | `90bf68b` |
 | push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured after the first run of the pipeline with `deploy` inside `ci` | `85cd726` (measured at `c5feafe`, before the `deploy` job joined `ci`) |
 | aws-footprint | `infra/bin/`; `infra/lib/`; `infra/config/`; `infra/cdk.json` | when a stack, an environment, or who deploys it, changes | `90bf68b` |
