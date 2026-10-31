@@ -37,7 +37,7 @@ The rows run in reading order: the system, the application, the local stack, del
 | [aws-footprint](aws-footprint.svg) | SVG | What exists in AWS, in which Region, what staging and production share, who deploys each part, how a customer's request reaches the app, and how production's SMS leave it | [infra/README.md](../../../infra/README.md#what-exists-today); [architecture.md, section 10.3](../../architecture.md#103-in-aws) |
 | keyless-deploy | Mermaid | How the deploy job gets short-lived credentials, what is checked, and how it proves the deploy landed | [infra/README.md](../../../infra/README.md#how-github-reaches-aws-without-keys) |
 | [access-boundary](access-boundary.svg) | SVG | Who can reach the app, whether either environment's pipeline can reach the other's stacks or widen its own access, and what enforces each guard | [infra/README.md](../../../infra/README.md#who-can-change-what-in-aws) |
-| [secret-layers](secret-layers.svg) | SVG | Which layer stops a secret at each stage, which layers can be skipped, and which act only after the code is public | [SECURITY.md](../../../SECURITY.md#secrets) |
+| [secret-layers](secret-layers.svg) | SVG | Which layer stops a secret at each stage, which layers can be skipped, which act only after the code is public, and what holds each secret at run time | [SECURITY.md](../../../SECURITY.md#secrets) |
 | [diagram key](_template.svg) | SVG | What each colour, stroke, shape and pill means | [this page](#key) |
 
 ### Keeping each diagram true
@@ -62,7 +62,7 @@ files live in `.github/workflows/`.
 | aws-footprint | `infra/bin/`; `infra/lib/`; `infra/config/`; `infra/cdk.json` | when a stack, an environment, or who deploys it, changes | `90bf68b` |
 | keyless-deploy | `ci.yml` (job `deploy`); `infra/lib/account-stack.ts` | on hardening; when the `deploy` job's steps change | `21798b6` |
 | access-boundary | `infra/lib/account-stack.ts`; `infra/lib/guardrails-stack.ts`; `infra/lib/app.ts`; `infra/lib/app-stack.ts` (ports, WAF, the task's database user); `infra/cdk.json` (the permissions boundary); `V9__runtime_role.sql`; `ci.yml` (the delivery jobs); `aws-connection-check.yml`; the `staging` and `production` environments; the `main` ruleset; the bootstrap commands in infra/README.md | when a guard changes | `90bf68b` |
-| secret-layers | `.gitignore`; `.githooks/pre-commit`; `.gitleaks.toml`; `secret-scan.yml`; `ci.yml` (job `stack`); `infra/lib/data-stack.ts` and `infra/lib/app-stack.ts` (the generated secrets and the task's secrets); the repository's security settings | when a layer is added or changes | `21798b6` |
+| secret-layers | `.gitignore`; `.githooks/pre-commit`; `.gitleaks.toml`; `secret-scan.yml`; `ci.yml` (job `stack` and the delivery jobs); `compose.yaml` and the `Makefile` (the local password); `infra/lib/data-stack.ts`, `infra/lib/app-stack.ts` and `infra/lib/captcha-api-key.ts` (the generated secrets, the task's secrets and IAM database authentication); the environments' secrets; the repository's security settings | when a layer is added or changes | `90bf68b` |
 | diagram key | the rules on this page | only with the visual language | `85cd726` |
 
 The post-commit hook (`make hooks`) prints a reminder after a major commit, as `scripts/major-commits.sh` defines it:
