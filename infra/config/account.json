@@ -1,0 +1,46 @@
+{
+  "namePrefix": "branchbook",
+  "github": {
+    "repository": "KatlehoKomeke/Appointment-Booking-System",
+    "ownerId": "88820937",
+    "repositoryId": "1423867330"
+  },
+  "accountRegion": "us-east-1",
+  "budget": {
+    "monthlyUsd": 450,
+    "alertThresholdsPercent": [50, 80, 100]
+  },
+  "deploy": {
+    "maxSessionMinutes": 60,
+    "registryEnvironment": "staging",
+    "environments": {
+      "staging": {
+        "githubEnvironment": "staging",
+        "cdkBootstrapQualifier": "bbstg"
+      },
+      "production": {
+        "githubEnvironment": "production",
+        "cdkBootstrapQualifier": "bbprod"
+      }
+    }
+  },
+  "guardrails": {
+    "auditLogRetentionDays": 365,
+    "auditLogNoncurrentVersionDays": 30,
+    "guardDuty": {
+      "findingPublishingFrequency": "FIFTEEN_MINUTES",
+      "features": {
+        "S3_DATA_EVENTS": "ENABLED",
+        "RDS_LOGIN_EVENTS": "ENABLED",
+        "LAMBDA_NETWORK_LOGS": "ENABLED",
+        "EBS_MALWARE_PROTECTION": "DISABLED",
+        "EKS_AUDIT_LOGS": "DISABLED",
+        "RUNTIME_MONITORING": "DISABLED"
+      }
+    },
+    "config": {
+      "recordingFrequency": "CONTINUOUS",
+      "snapshotDeliveryFrequency": "TwentyFour_Hours"
+    }
+  }
+}

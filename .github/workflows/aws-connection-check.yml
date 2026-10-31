@@ -1,32 +1,40 @@
 # .github/workflows/aws-connection-check.yml
 #
-# Proves that GitHub Actions can reach AWS through OpenID Connect, without any stored access key.
-# Run it by hand from the Actions tab after deploying the BranchbookAccount stack (see infra/README.md).
+# Proves that GitHub Actions can reach AWS through OpenID Connect, without any stored access key, as the deploy role
+# of one environment. Run it by hand from the Actions tab, choosing staging or production, after deploying the
+# BranchbookAccount stack (see infra/README.md). A run for production waits for that environment's reviewer, like a
+# deployment.
 #
-# Needs: the GitHub environment `aws-demo` holding the secret `AWS_DEPLOY_ROLE_ARN`.
+# Needs: the GitHub environment chosen, holding the secret AWS_DEPLOY_ROLE_ARN and the variable AWS_REGION.
 # The account ID is masked in the log, because the logs of a public repository are public.
 
 name: aws-connection-check
 
 on:
   workflow_dispatch:
+    inputs:
+      environment:
+        description: The GitHub environment whose deploy role to assume
+        type: choice
+        options: [staging, production]
+        default: staging
 
-permissions:
-  id-token: write   # lets the job request a GitHub OIDC token for AWS
-  contents: read
+permissions: {}
 
 jobs:
   assume-deploy-role:
     runs-on: ubuntu-24.04
-    environment: aws-demo
+    environment: ${{ inputs.environment }}
     timeout-minutes: 5
+    permissions:
+      id-token: write   # lets the job request a GitHub OIDC token for AWS
     steps:
       - name: Assume the deploy role through OpenID Connect
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           role-session-name: aws-connection-check-${{ github.run_id }}
-          aws-region: us-east-1
+          aws-region: ${{ vars.AWS_REGION }}
           mask-aws-account-id: true
 
       - name: Report the role obtained, with the account ID hidden
