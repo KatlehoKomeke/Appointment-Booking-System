@@ -94,8 +94,8 @@ const ENVIRONMENTS = [
 ] as const;
 
 describe('the account configuration', () => {
-  test('the committed file is valid, sets a 350 USD budget and gives staging and production their own bootstraps', () => {
-    expect(config.budget.monthlyUsd).toBe(350);
+  test('the committed file is valid, sets a 450 USD budget and gives staging and production their own bootstraps', () => {
+    expect(config.budget.monthlyUsd).toBe(450);
     expect(config.budget.alertThresholdsPercent).toEqual([50, 80, 100]);
     expect(config.deploy.environments.production.cdkBootstrapQualifier).toBe('hnb659fds');
     expect(config.deploy.environments.staging.cdkBootstrapQualifier).toBe('bbstg');
@@ -300,9 +300,9 @@ describe('AccountStack', () => {
     }
   });
 
-  test('e-mails budget alerts at 50, 80 and 100 percent of a 350 USD monthly limit', () => {
+  test('e-mails budget alerts at 50, 80 and 100 percent of a 450 USD monthly limit', () => {
     template.hasResourceProperties('AWS::Budgets::Budget', {
-      Budget: Match.objectLike({ BudgetName: 'branchbook-monthly', BudgetLimit: { Amount: 350, Unit: 'USD' }, TimeUnit: 'MONTHLY' }),
+      Budget: Match.objectLike({ BudgetName: 'branchbook-monthly', BudgetLimit: { Amount: 450, Unit: 'USD' }, TimeUnit: 'MONTHLY' }),
       NotificationsWithSubscribers: [50, 80, 100].map((threshold) =>
         Match.objectLike({ Notification: Match.objectLike({ Threshold: threshold }) }),
       ),

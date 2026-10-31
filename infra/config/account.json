@@ -7,7 +7,7 @@
   },
   "accountRegion": "us-east-1",
   "budget": {
-    "monthlyUsd": 350,
+    "monthlyUsd": 450,
     "alertThresholdsPercent": [50, 80, 100]
   },
   "deploy": {
