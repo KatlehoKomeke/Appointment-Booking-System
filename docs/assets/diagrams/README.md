@@ -57,7 +57,7 @@ files live in `.github/workflows/`.
 | appointment-lifecycle | `booking/domain/AppointmentStatus.java`; `booking/application/CancelAppointmentHandler.java` | when a status or a transition changes | `85cd726` |
 | data-model | `api/src/main/resources/db/migration/`; the writers in `booking/application/` and `notification/application/` | With a new migration | `44b8d1c` |
 | local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; the `Makefile` up and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box) | when a route, a management endpoint or the compose stack changes | `44b8d1c` |
-| delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/bin/branchbook.ts`; the `main` ruleset and the `aws-demo` environment | when a workflow, a job, a hook or a GitHub setting changes | `21798b6` |
+| delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/lib/app.ts`; `infra/lib/account-stack.ts`; `infra/lib/registry-stack.ts`; the `main` ruleset and the `staging` and `production` environments | when a workflow, a job, a hook, a stack the pipeline deploys or a GitHub setting changes | `90bf68b` |
 | push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured after the first run of the pipeline with `deploy` inside `ci` | `85cd726` (measured at `c5feafe`, before the `deploy` job joined `ci`) |
 | aws-footprint | `infra/bin/`; `infra/lib/`; `infra/config/`; `infra/cdk.json` | when a stack, an environment, or who deploys it, changes | `90bf68b` |
 | keyless-deploy | `ci.yml` (job `deploy`); `infra/lib/account-stack.ts` | on hardening; when the `deploy` job's steps change | `21798b6` |
@@ -266,13 +266,13 @@ lines; a diagram's legend is usually one.
   `app · branchbook:local`.
 - A Region is a `box-soft` group titled `AWS · us-east-1 (N. Virginia)` or `AWS · af-south-1 (Cape Town)`. The account
   appears only as a group titled `AWS account (ID never committed)`.
-- AWS STS sits outside both Region groups: IAM is global, and the deploy job calls the af-south-1 endpoint. IAM
+- AWS STS sits outside both Region groups: IAM is global, and the delivery jobs call the af-south-1 endpoint. IAM
   resources sit inside the `BranchbookAccount` stack frame, because that stack defines them.
 - Account-specific names are written `-<account>-<region>`, and an ARN, if one is needed at all, as
   `arn:aws:iam::<account>:role/cdk-hnb659fds-*`.
 - GitHub is a neutral group titled `GitHub`, with the slug `KatlehoKomeke/Appointment-Booking-System` in mono.
-  Workflows are file shapes named by their `.yml` file, with job ids as small pills. The environment is a gate
-  labelled `environment aws-demo`.
+  Workflows are file shapes named by their `.yml` file, with job ids as small pills or nodes. A GitHub environment is
+  a gate or a node labelled with its name, such as `environment production`.
 
 ### Light and dark
 
