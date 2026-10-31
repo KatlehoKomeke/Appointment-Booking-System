@@ -401,4 +401,7 @@ export const handlers = [
     retried.set(id, reset);
     return HttpResponse.json(reset);
   }),
+
+  // No CAPTCHA, as on a local run. A test of the firewall's challenge overrides it with `captchaConfigured`.
+  http.get(`${API}/client-config`, () => HttpResponse.json({ captcha: null })),
 ];

@@ -5,6 +5,7 @@
  *
  * @packageDocumentation
  */
+import { CaptchaError, type CaptchaFailure } from './captcha';
 import { ApiProblem, type Problem } from './client';
 
 /** A failure as the customer reads it: a short title, and a sentence on what to do. */
@@ -130,12 +131,35 @@ const OFFLINE: ProblemMessage = {
 };
 
 /**
- * The copy for any error a call can throw: an {@link ApiProblem} by its code, a network failure as being offline,
- * and anything else, a 5xx without a code included, as a failure on our side with the correlation id to quote.
+ * The copy when the firewall's CAPTCHA was not solved (`captcha.ts`). The request was stopped before the API, so
+ * each one says that nothing was sent, which is what the customer needs to know before trying again.
+ */
+const CAPTCHA_COPY: Record<CaptchaFailure, ProblemMessage> = {
+  cancelled: {
+    title: 'The check was closed before it was finished',
+    body: 'Nothing was sent. Try again, and solve the puzzle when it appears.',
+  },
+  failed: {
+    title: "We couldn't complete the check",
+    body: 'Nothing was sent. Please try again.',
+  },
+  unavailable: {
+    title: "We couldn't load the check",
+    body: 'Nothing was sent. Check your internet connection, then try again.',
+  },
+};
+
+/**
+ * The copy for any error a call can throw: an {@link ApiProblem} by its code, a CAPTCHA that was not solved by why, a
+ * network failure as being offline, and anything else, a 5xx without a code included, as a failure on our side with
+ * the correlation id to quote.
  *
  * @param error - what the call threw, as TanStack Query passes it on
  */
 export function problemMessage(error: unknown): ProblemMessage {
+  if (error instanceof CaptchaError) {
+    return CAPTCHA_COPY[error.reason];
+  }
   if (error instanceof ApiProblem) {
     if (error.code !== undefined) {
       return COPY[error.code](error.correlationId);

@@ -76,6 +76,34 @@ openapi-typescript 7.13.0 declares TypeScript 5 as its peer, while the app uses 
 in [package.json](package.json) makes it use the app's TypeScript. openapi-typescript only prints the file through
 the compiler's API, and the type check and the client's tests run against what it prints.
 
+### When the firewall asks for a CAPTCHA
+
+In AWS the web application firewall puts a CAPTCHA in front of every booking and cancel POST. A request without a
+valid token is answered `405` with `x-amzn-waf-action: captcha`; the app is on the same origin, so it can read that
+header. The client wraps its fetch ([src/api/captcha.ts](src/api/captcha.ts)): on that answer it asks the
+`CaptchaProvider` ([src/captcha/](src/captcha/)) to have the puzzle solved and, once it is, sends the same request
+once more, with the same body and the same `Idempotency-Key`, so it can never book twice. WAF's token travels in its
+`aws-waf-token` cookie. The screens have no code of their own for it: a check that is not solved reaches them as a
+`CaptchaError`, which `problemMessage` words by why, each time saying that nothing was sent.
+
+- **The settings** come from `GET /api/v1/client-config` ([src/api/clientConfig.ts](src/api/clientConfig.ts)): AWS's
+  script URL and the public CAPTCHA key, or `{"captcha": null}` where none is configured, as on a local run. They are
+  read the first time a request is challenged and kept for the session. Settings that cannot be read, or a script
+  that is not `https:`, count as no CAPTCHA, and a 405 is then an ordinary failure. Until the contract lists the
+  endpoint, its type is written by hand there, to be replaced by the generated one.
+- **The script**, AWS's `jsapi.js`, is added as one `<script src>` the first time a challenge needs it, never before,
+  and the app waits up to 15 s for `window.AwsWafCaptcha`
+  ([src/captcha/awsWafCaptcha.ts](src/captcha/awsWafCaptcha.ts)). A script that fails is removed, so the next
+  challenge tries again.
+- **The dialog** is a `role="dialog"` with `aria-modal`, named by its heading, which takes focus. The app behind it is
+  `inert`; Escape or Close ends the check, focus goes back to the element that had it (Confirm, or "Yes, cancel
+  it"), and a status region outside the app says how the check ended. AWS's puzzle is drawn into the dialog only once
+  its container is in the page.
+
+The tests drive a fake `window.AwsWafCaptcha` ([src/test/fakeCaptcha.ts](src/test/fakeCaptcha.ts)) through a booking
+and a cancel that are challenged and solved, a check closed with Escape or Close, a puzzle that fails, a script that
+does not load, and a 405 with no CAPTCHA configured.
+
 ## Quality gates
 
 The `web` job of CI checks the generated API types, then runs lint, the type check, the format check, the tests and
@@ -101,13 +129,15 @@ web/
 ├── public/            files served as they are (the favicon)
 └── src/
     ├── main.tsx       loads the font and the global styles, and mounts the app
-    ├── App.tsx        the router and the API cache around routes.tsx
+    ├── App.tsx        the API cache, the CAPTCHA controller and the router around routes.tsx
     ├── routes.tsx     every page, inside the shell, with the error page
     ├── app/           the API cache's settings: when a query retries, how long an answer is reused
     ├── ui/            the design tokens, global styles, the shell and the shared components
     ├── booking/       the five steps at /book: the URL state, session storage, the idempotency key, each step
     ├── pages/         landing, confirmation, manage, inbox, privacy, not found, error
-    ├── api/           the typed client, the query hooks and the copy by code; schema.d.ts is generated
+    ├── api/           the typed client, the query hooks, the client settings and the copy by code; schema.d.ts is
+    │                  generated
+    ├── captcha/       the WAF CAPTCHA: AWS's script loader, the controller and its dialog
     ├── lib/           SAST formatting, the cellphone parser, safe session storage, shared copy, zod's settings
     └── test/          the fake API (MSW), its fixtures from the seed data, and the render helpers
 ```
@@ -115,8 +145,10 @@ web/
 ## Security
 
 The API sends a strict Content Security Policy (`default-src 'self'`), so the app must never rely on inline
-scripts, inline `<style>` elements or third-party origins. Fonts, images and scripts are bundled and served from
-the same origin: the design's font, Nunito Sans, is self-hosted rather than loaded from Google Fonts, and no font
+scripts, inline `<style>` elements or third-party origins. The one third-party script is AWS WAF's CAPTCHA, loaded
+from AWS by a `<script src>` only when the firewall challenges a request, from an origin the API's policy allows
+only where a CAPTCHA is configured ([When the firewall asks for a CAPTCHA](#when-the-firewall-asks-for-a-captcha)).
+Fonts, images and the app's own scripts are bundled and served from the same origin: the design's font, Nunito Sans, is self-hosted rather than loaded from Google Fonts, and no font
 is inlined as a `data:` URI ([Building it](#building-it)). zod parses without compiling
 ([src/lib/zodConfig.ts](src/lib/zodConfig.ts)), because its compiler first probes for `new Function`, which the
 policy refuses, and the browser reports every probe as a violation. A real-browser pass over every screen at 390
