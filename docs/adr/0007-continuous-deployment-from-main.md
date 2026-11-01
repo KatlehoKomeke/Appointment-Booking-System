@@ -1,6 +1,8 @@
 # ADR-0007: Continuous deployment from main
 
-- **Status:** Accepted. Supersedes the delivery trigger in [ADR-0006](0006-hosted-demo-on-aws-with-cdk.md).
+- **Status:** Accepted. Supersedes the delivery trigger in [ADR-0006](0006-hosted-demo-on-aws-with-cdk.md). Superseded
+  in part by [ADR-0008](0008-two-environments-promoted-by-digest.md): a push to `main` now deploys to staging
+  automatically, and to production only after a person approves it.
 - **Date:** 2026-10-22
 
 ## Context
@@ -73,3 +75,19 @@ deployments queue* holds for the `deploy` job (group `deploy-aws`), and `ci` as 
 access"* holds unchanged, `ci.yml` never setting `BRANCHBOOK_ALERT_EMAIL`. The gaps that remain, among them that the
 checks are not strict and that a manual run from a `v*` tag would deploy it, are in
 [docs/delivery.md](../delivery.md#known-gaps).
+
+**2026-10-30, two environments.** [ADR-0008](0008-two-environments-promoted-by-digest.md) replaces the target of this
+decision, not its trigger: every push to `main` still starts delivery, once every `ci` check passes.
+
+- **Two environments and two roles.** The `aws-demo` environment and the role `branchbook-github-deploy` are replaced
+  by the GitHub environments `staging` and `production`, each admitting `main` only, and one role each,
+  `branchbook-github-deploy-staging` and `branchbook-github-deploy-production`, which trusts only its own environment.
+  `production` requires a person's approval.
+- **No build at deploy time.** The image is built once by `ci`'s `image` job and deployed by digest; the release
+  record now holds the digest too (`/<prefix>/release-image`), and a failed production deployment rolls back to it.
+- **Gaps closed** ([docs/delivery.md](../delivery.md#known-gaps)): a `v*` tag can no longer be deployed by a manual
+  run, since neither environment admits tags and every delivery job requires a push to `main`; and *"The pipeline
+  cannot change its own access"* is now also enforced by IAM, through each bootstrap's execution policy, the
+  permissions boundary and a deploy scope that keeps each role off the other environment's and the administrator's
+  stacks ([infra/README.md](../../infra/README.md#who-can-change-what-in-aws)).
+- **Still open:** the trust names no workflow, and the required checks are not strict.

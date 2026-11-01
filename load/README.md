@@ -59,9 +59,11 @@ afterwards, `curl -s http://127.0.0.1:18090/actuator/prometheus | grep -E '^(out
 
 Set `BASE_URL=https://stg.branchbook.click` and `SYNTHETIC_TOKEN` to the value of the staging secret
 `branchbook-staging/synthetic-traffic-token`. WAF's per-address rate limits still apply to the synthetic token, and
-they block: from one address, keep `BOOK_RATE` well under the booking limit (10 bookings per 5 minutes by default) or
-set it to `0`, and keep `READ_RATE` under the all-requests limit, or the run fails on 403s that are WAF doing its
-job.
+they block: from one address, keep the bookings under staging's booking limit (200 bookings and cancellations per 5
+minutes, `waf.bookingLimit` in [infra/config/staging.json](../infra/config/staging.json)), which a `BOOK_RATE` of 1
+already passes within four minutes, or set it to `0`, and keep every request together under the all-requests limit
+(5,000 per 5 minutes, about 16 a second, so below the default `READ_RATE`), or the run fails on 403s that are WAF
+doing its job.
 
 ## Observed results
 
@@ -80,4 +82,5 @@ a message, so a tick of 20 messages takes about 3 seconds and the dispatcher del
 after the heavier run, `outbox_pending` was 302 and `outbox_oldest_pending_age_seconds` 43.5; both were back at 0
 within two minutes, with the circuit breaker closed throughout. `branchbook.dispatcher.batch-size`
 (`BRANCHBOOK_DISPATCHER_BATCH_SIZE`) and `interval` set that rate, and an alarm on the oldest pending message's age
-should allow for the backlog a burst leaves.
+should allow for the backlog a burst leaves. [docs/resilience.md](../docs/resilience.md#load-test) puts these results
+beside the failure modes they bear on.

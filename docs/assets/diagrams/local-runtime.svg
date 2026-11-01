@@ -1,24 +1,26 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 800" width="960" height="800" role="img" aria-labelledby="title desc" font-family='-apple-system, "Segoe UI", Helvetica, Arial, sans-serif'>
   <title id="title">From source to a running stack</title>
-  <desc id="desc">How make up turns this repository into a running stack: the build on the left, the running stack on the right, and the image's other uses below. Build, from the Dockerfile. No tests run in the image build; CI runs them. The .dockerignore allow-list lets only api/.mvn/, api/mvnw, api/pom.xml, api/src/ and web/ into the build, and they feed two stages. Stage web runs on the builder's own platform ($BUILDPLATFORM) on Node.js 24 and Alpine: npm ci with a cache at /root/.npm, then npm run build into dist/. dist/ flows into stage api, also on $BUILDPLATFORM, on the Eclipse Temurin 25 JDK and Alpine: it copies dist/ into src/main/resources/static/, runs ./mvnw -DskipTests package with a cache at /root/.m2, and extracts the jar into layers with jarmode tools. The layers flow into stage runtime, on the Eclipse Temurin 25 JRE and Alpine, which stacks four layers from least to most often changed: dependencies, spring-boot-loader, snapshot-dependencies and application. It runs as USER 10001, with TZ=UTC and a HEALTHCHECK on /readyz. The main path leads from runtime to the image branchbook:local, the highlighted node. Step 1: make up builds branchbook:local. Run, with make up: the main path continues from the image into the Docker Compose project branchbook. Service db runs PostgreSQL 17 on Alpine, with port 5432 on the compose network only, the volume db-data, and a terse error log that keeps personal data out. Step 2: db starts. A health check runs pg_isready every 2 s. Step 3: pg_isready reports db healthy. A gate, depends_on with condition service_healthy, holds service app until then. Service app runs the image branchbook:local as user 10001, with stop_grace_period 30s. Step 4: app starts; Flyway applies V1 to V8 and Hibernate validates the schema. It serves the React app at / and /assets/*, with the SPA routes forwarded to index.html; the API at /api/v1/branches, /api/v1/branches/{code}, /api/v1/branches/{code}/availability, /api/v1/appointments, /api/v1/appointments/{reference}, /api/v1/appointments/{reference}/cancel, /api/v1/messages and /api/v1/messages/{id}/retry (the simulated inbox, which compose switches on), /v3/api-docs and /swagger-ui.html; and, through Spring Boot Actuator, the probes /readyz (readiness, which includes the database) and /livez, /actuator/health, /actuator/info, and /actuator/prometheus, which serves Spring Boot's meters and the app's two, appointments_booked_total and outbox_pending. A health check, the image's HEALTHCHECK, runs wget on /readyz every 5 s after a start period of 90 s. Step 5: /readyz answers UP and the container is healthy. The main path ends at app reaching db over JDBC at db:5432; if HikariCP finds no free connection within 3 s, the API answers 503 TRY_AGAIN. A browser reaches app only through the port 127.0.0.1:${APP_PORT:-8080}. Step 6: docker compose up --wait returns and make up prints the URL. The same image elsewhere: the stack job in ci.yml builds the same image from this Dockerfile, starts it with compose up --wait, runs smoke.sh and checks the logs for credentials. A flow, cdk deploy in the ci workflow's deploy job, leads to the hosted demo's two ECS Fargate tasks on ARM64, built by the pipeline. Developing without the image, built: make dev-api runs the API on port 8080 against a throwaway PostgreSQL 17 from Testcontainers, and make dev-web runs Vite on port 5173, proxying /api, /actuator, /readyz and /livez to port 8080. Legend: Built; Main path; Health check.</desc>
+  <desc id="desc">How make up turns this repository into a running stack: the build on the left, the running stack on the right, and the image's other uses below. Build, from the Dockerfile. No tests run in the image build; CI runs them. The .dockerignore allow-list lets only api/.mvn/, api/mvnw, api/pom.xml, api/src/ and web/ into the build, and they feed two stages. Stage web runs on the builder's own platform ($BUILDPLATFORM) on Node.js 24 and Alpine: npm ci with a cache at /root/.npm, then npm run build into dist/. dist/ flows into stage api, also on $BUILDPLATFORM, on the Eclipse Temurin 25 JDK and Alpine: it copies dist/ into src/main/resources/static/, runs ./mvnw -DskipTests package with a cache at /root/.m2, and extracts the jar into layers with jarmode tools. The layers flow into stage runtime, on the Eclipse Temurin 25 JRE and Alpine, whose packages apk upgrade brings up to date, with the Amazon RDS certificate bundle fetched and pinned by checksum, so staging and production can verify the database's certificate; it stacks four layers from least to most often changed: dependencies, spring-boot-loader, snapshot-dependencies and application. It runs as USER 10001, with TZ=UTC and a HEALTHCHECK on /readyz. The main path leads from runtime to the image branchbook:local, the highlighted node. Step 1: make up builds branchbook:local; before that, unless DB_PASSWORD is exported, it writes a random DB_PASSWORD once to the git-ignored .env, which both services need. Run, with make up: the main path continues from the image into the Docker Compose project branchbook. Service db runs PostgreSQL 17 on Alpine, with port 5432 on the compose network only, the volume db-data, and a terse error log that keeps personal data out. Step 2: db starts. A health check runs pg_isready every 2 s. Step 3: pg_isready reports db healthy. A gate, depends_on with condition service_healthy, holds service app until then. Service app runs the image branchbook:local as user 10001, with stop_grace_period 30s. Step 4: app starts; Flyway applies V1 to V9 and Hibernate validates the schema; locally the app connects as the database owner, so the runtime role from V9 goes unused. It serves the React app at / and /assets/*, with the SPA routes forwarded to index.html; the API at /api/v1/branches, /api/v1/branches/{code}, /api/v1/branches/{code}/availability, /api/v1/appointments, /api/v1/appointments/{reference}, /api/v1/appointments/{reference}/cancel, /api/v1/messages and /api/v1/messages/{id}/retry (the simulated inbox, which compose switches on), /api/v1/client-config, /v3/api-docs and /swagger-ui.html; and, through Spring Boot Actuator, the probes /readyz (readiness, which includes the database) and /livez, /actuator/health, /actuator/info, and /actuator/prometheus, which serves Spring Boot's meters and the app's own; locally the actuator shares port 8080. A health check, the image's HEALTHCHECK, runs wget on /readyz every 5 s after a start period of 90 s. Step 5: /readyz answers UP and the container is healthy. The main path ends at app reaching db over JDBC at db:5432; if HikariCP finds no free connection within 3 s, the API answers 503 TRY_AGAIN. A browser reaches app only through the port 127.0.0.1:${APP_PORT:-8080}. Step 6: docker compose up --wait returns and make up prints the URL. A file node, .env, git-ignored, holds the random DB_PASSWORD that make up writes, and feeds the compose project. The same Dockerfile elsewhere: the image job in ci.yml builds the ARM64 image once, and the stack job starts that build with compose up --no-build and runs the smoke, end-to-end, k6 and ZAP checks against it; a flow leads to ECS Fargate in staging and then production, which run that image by digest from ECR, with the migration task, the same image, run first. Developing without the image, built: make dev-api runs the API on port 8080 against a throwaway PostgreSQL 17 from Testcontainers, and make dev-web runs Vite on port 5173, proxying /api, /actuator, /readyz and /livez to port 8080. Legend: Built; Main path; Health check.</desc>
   <!--
     Diagram id: local-runtime
     Shown in: docs/architecture.md (10.1 Locally: the image and the stack)
     Sources: Dockerfile; .dockerignore; compose.yaml; Makefile (up, dev-api, dev-web);
-      api/src/main/resources/application.yml; api/src/main/resources/db/migration/ (V1 to V8);
+      api/src/main/resources/application.yml; api/src/main/resources/application-prod.yml (management port);
+      api/src/main/resources/db/migration/ (V1 to V9); .env.example;
       api/src/main/java/za/co/fynbos/branchbook/shared/web/SpaForwardingController.java;
       api/src/main/java/za/co/fynbos/branchbook/catalogue/api/BranchController.java;
       api/src/main/java/za/co/fynbos/branchbook/scheduling/api/AvailabilityController.java;
       api/src/main/java/za/co/fynbos/branchbook/booking/api/AppointmentController.java (cancel);
       api/src/main/java/za/co/fynbos/branchbook/notification/api/InboxController.java (retry);
+      api/src/main/java/za/co/fynbos/branchbook/shared/web/ClientConfigController.java;
       api/src/main/java/za/co/fynbos/branchbook/booking/api/BookingOutcomeMeter.java;
       api/src/main/java/za/co/fynbos/branchbook/notification/application/OutboxPendingGauge.java;
       api/src/main/java/za/co/fynbos/branchbook/shared/problem/ProblemCode.java (TRY_AGAIN);
       api/src/test/java/za/co/fynbos/branchbook/TestBranchBookApplication.java;
       api/src/test/java/za/co/fynbos/branchbook/support/TestcontainersConfiguration.java;
-      web/vite.config.ts; .github/workflows/ci.yml (jobs stack and deploy); scripts/smoke.sh;
-      infra/lib/app-stack.ts (the Fargate task)
-    Verified at 44b8d1c (2026-10-27)
+      web/vite.config.ts; .github/workflows/ci.yml (jobs image, stack, publish and the deploy jobs); scripts/smoke.sh;
+      infra/lib/app-stack.ts (the Fargate service and the migration task)
+    Verified at 90bf68b (2026-10-30)
     Conventions: docs/assets/diagrams/README.md
     Planned elements carry class="planned" data-milestone (this diagram has none: the Fargate task is built)
   -->
@@ -64,7 +66,7 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
   </defs>
   <rect class="card" x="0.5" y="0.5" width="959" height="799" rx="16"/>
   <g id="lane-build">
-    <rect class="box-soft" x="24.5" y="24.5" width="320" height="576" rx="12"/>
+    <rect class="box-soft" x="24.5" y="24.5" width="320" height="584" rx="12"/>
     <text class="g" x="40" y="46">Build · <tspan class="mono">Dockerfile</tspan></text>
     <text class="tp" x="40" y="64" font-size="12">No tests run in the image build; CI runs them.</text>
   </g>
@@ -96,25 +98,26 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <text class="s" x="52" y="391"><tspan class="s mono">extract --layers</tspan> (jarmode tools)</text>
   </g>
   <g id="stage-runtime">
-    <rect class="box" x="40.5" y="422.5" width="268" height="164" rx="8"/>
+    <rect class="box" x="40.5" y="422.5" width="268" height="174" rx="8"/>
     <text class="t" x="52" y="444">runtime</text>
     <rect class="box-soft" x="132.5" y="429.5" width="92" height="20" rx="10"/>
     <text class="s mono" x="178.5" y="444" text-anchor="middle">USER 10001</text>
     <rect class="box-soft" x="232.5" y="429.5" width="64" height="20" rx="10"/>
     <text class="s mono" x="264.5" y="444" text-anchor="middle">TZ=UTC</text>
-    <text class="s" x="52" y="465">Eclipse Temurin 25 JRE · Alpine</text>
-    <rect class="box-soft" x="52.5" y="476.5" width="244" height="16" rx="3"/>
-    <text class="s mono" x="60" y="489">application</text>
-    <text class="tp" x="288" y="489" font-size="12" text-anchor="end">most often changed</text>
-    <rect class="box-soft" x="52.5" y="494.5" width="244" height="16" rx="3"/>
-    <text class="s mono" x="60" y="507">snapshot-dependencies</text>
-    <rect class="box-soft" x="52.5" y="512.5" width="244" height="16" rx="3"/>
-    <text class="s mono" x="60" y="525">spring-boot-loader</text>
-    <rect class="box-soft" x="52.5" y="530.5" width="244" height="16" rx="3"/>
-    <text class="s mono" x="60" y="543">dependencies</text>
-    <text class="tp" x="288" y="543" font-size="12" text-anchor="end">least often changed</text>
-    <rect class="box-soft" x="52.5" y="554.5" width="154" height="20" rx="10"/>
-    <text class="s mono" x="129.5" y="569" text-anchor="middle">HEALTHCHECK /readyz</text>
+    <text class="s" x="52" y="463">Eclipse Temurin 25 JRE · Alpine</text>
+    <text class="s" x="52" y="481"><tspan class="s mono">apk upgrade</tspan> · RDS CA bundle</text>
+    <rect class="box-soft" x="52.5" y="490.5" width="244" height="16" rx="3"/>
+    <text class="s mono" x="60" y="503">application</text>
+    <text class="tp" x="288" y="503" font-size="12" text-anchor="end">most often changed</text>
+    <rect class="box-soft" x="52.5" y="508.5" width="244" height="16" rx="3"/>
+    <text class="s mono" x="60" y="521">snapshot-dependencies</text>
+    <rect class="box-soft" x="52.5" y="526.5" width="244" height="16" rx="3"/>
+    <text class="s mono" x="60" y="539">spring-boot-loader</text>
+    <rect class="box-soft" x="52.5" y="544.5" width="244" height="16" rx="3"/>
+    <text class="s mono" x="60" y="557">dependencies</text>
+    <text class="tp" x="288" y="557" font-size="12" text-anchor="end">least often changed</text>
+    <rect class="box-soft" x="52.5" y="566.5" width="154" height="20" rx="10"/>
+    <text class="s mono" x="129.5" y="581" text-anchor="middle">HEALTHCHECK /readyz</text>
   </g>
   <g id="edges-build">
     <path class="edge" d="M174,147 V166" marker-end="url(#ah)"/>
@@ -155,11 +158,11 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <text class="s mono" x="484" y="238">/api/v1/appointments, …/{reference}</text>
     <text class="s mono" x="484" y="254">/api/v1/appointments/{reference}/cancel</text>
     <text class="s mono" x="484" y="270">/api/v1/messages, …/{id}/retry</text>
-    <text class="s mono" x="484" y="286">/v3/api-docs, /swagger-ui.html</text>
+    <text class="s mono" x="484" y="286">/api/v1/client-config, /v3/api-docs, /swagger-ui.html</text>
     <rect class="box-soft" x="388.5" y="303.5" width="519" height="44" rx="4"/>
     <text class="g" x="400" y="322">Actuator</text>
     <text class="s" x="484" y="322"><tspan class="s mono">/readyz</tspan> (readiness + db), <tspan class="s mono">/livez</tspan>, <tspan class="s mono">/actuator/health</tspan></text>
-    <text class="s" x="484" y="338"><tspan class="s mono">/actuator/info, …/prometheus</tspan> (two app meters)</text>
+    <text class="s" x="484" y="338"><tspan class="s mono">/actuator/info, …/prometheus</tspan> (the app's meters)</text>
     <circle class="badge" cx="884" cy="325.5" r="10"/>
     <text class="badge-t" x="884" y="329.5" text-anchor="middle">5</text>
   </g>
@@ -204,25 +207,31 @@ text{font-family:-apple-system,"Segoe UI",Helvetica,Arial,sans-serif}
     <text class="badge-t" x="566" y="620" text-anchor="middle">1</text>
   </g>
   <g id="edges-image">
-    <path class="edge-acc" d="M174,587 V610 A6,6 0 0 0 180,616 H404" marker-end="url(#ah-acc)"/>
+    <path class="edge-acc" d="M174,597 V610 A6,6 0 0 0 180,616 H404" marker-end="url(#ah-acc)"/>
     <path class="edge-acc" d="M496,594 V565" marker-end="url(#ah-acc)"/>
     <text class="l mono halo" x="508" y="580">make up</text>
   </g>
-  <g id="lane-same-image-elsewhere">
-    <text class="g" x="512" y="662">The same image elsewhere</text>
+  <g id="file-env">
+    <path class="box" d="M612.5,588.5 H909.5 L919.5,598.5 V636.5 A8,8 0 0 1 911.5,644.5 H612.5 A8,8 0 0 1 604.5,636.5 V596.5 A8,8 0 0 1 612.5,588.5 Z"/>
+    <path class="box" d="M909.5,588.5 V598.5 H919.5 Z"/>
+    <text class="t" x="616" y="610"><tspan class="t mono">.env</tspan> · git-ignored</text>
+    <text class="s" x="616" y="630"><tspan class="s mono">make up</tspan> writes a random <tspan class="s mono">DB_PASSWORD</tspan></text>
+    <path class="edge" d="M762,588 V565" marker-end="url(#ah)"/>
+  </g>
+  <g id="lane-same-dockerfile-elsewhere">
+    <text class="g" x="512" y="662">The same Dockerfile in CI and AWS</text>
     <path class="edge" d="M496,638 V676" marker-end="url(#ah)"/>
     <rect class="box" x="376.5" y="676.5" width="239" height="72" rx="8"/>
-    <text class="t" x="388" y="698"><tspan class="t mono">stack</tspan> job in <tspan class="t mono">ci.yml</tspan></text>
-    <text class="s" x="388" y="717"><tspan class="s mono">compose up --wait</tspan>, <tspan class="s mono">smoke.sh</tspan>,</text>
-    <text class="s" x="388" y="735">logs checked for credentials</text>
+    <text class="t" x="388" y="698"><tspan class="t mono">image</tspan>, <tspan class="t mono">stack</tspan> in <tspan class="t mono">ci.yml</tspan></text>
+    <text class="s" x="388" y="717">ARM64, built once; <tspan class="s mono">stack</tspan> runs</text>
+    <text class="s" x="388" y="735">it: smoke, e2e, k6, ZAP</text>
   </g>
   <g id="ecs-fargate-task">
-    <path class="edge" d="M588,616 H770 A6,6 0 0 1 776,622 V676" marker-end="url(#ah)"/>
-    <text class="l halo" x="604" y="608"><tspan class="l mono">cdk deploy</tspan> in <tspan class="l mono">ci</tspan>'s <tspan class="l mono">deploy</tspan> job</text>
+    <path class="edge" d="M616,712.5 H632" marker-end="url(#ah)"/>
     <rect class="box" x="632.5" y="676.5" width="287" height="72" rx="8"/>
-    <text class="t" x="644" y="698">ECS Fargate task, ARM64</text>
-    <rect class="pill-built" x="644.5" y="710.5" width="110" height="20" rx="10"/>
-    <text class="pill-built-t" x="699.5" y="725" text-anchor="middle">built · pipeline</text>
+    <text class="t" x="644" y="698">ECS Fargate, ARM64</text>
+    <text class="s" x="644" y="717">staging, then production, by</text>
+    <text class="s" x="644" y="735">digest; migration task first</text>
   </g>
   <g id="lane-developing-without-the-image">
     <rect class="box-soft" x="24.5" y="632.5" width="320" height="116" rx="12"/>

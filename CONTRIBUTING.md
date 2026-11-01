@@ -15,23 +15,25 @@ Nothing installs the hooks for you: until you run `make hooks`, your commits are
 
 - **How changes land today.** This is a one-person repository: each change arrives on a short-lived branch and is
   merged through a pull request, with `make test` run first, and each push runs the workflows described in
-  [docs/delivery.md](docs/delivery.md). `main` refuses force-pushes and deletion, and requires the `api`, `web`,
-  `stack` and `infra` jobs of `ci` and the `gitleaks` job of `secret-scan` to pass before a push or merge, so a red
-  check keeps a change off `main`; the checks are not strict, and no review is required
-  ([docs/delivery.md](docs/delivery.md#known-gaps)).
-- **With a team.** `main` would also require one approving review, strict checks, linear history, and a CODEOWNERS
-  file covering `.github/` and `infra/`.
+  [docs/delivery.md](docs/delivery.md). `main` refuses force-pushes and deletion, and requires every check of `ci`,
+  `codeql`, `dependency-review` and `secret-scan` to pass before a push or merge, so a red check keeps a change off
+  `main`; the checks are not strict, and no second person's approval of a pull request is required
+  ([docs/delivery.md](docs/delivery.md#known-gaps)). A person's approval is required before each production
+  deployment ([ADR-0008](docs/adr/0008-two-environments-promoted-by-digest.md)).
+- **With a team.** `main` would also require a second person's approval of every pull request, strict checks, linear
+  history, and a CODEOWNERS file covering `.github/` and `infra/`.
   Work would arrive on `feat/<topic>`, `fix/<topic>`, `docs/<topic>` or `chore/<topic>` branches, merged through a
   pull request that uses [.github/pull_request_template.md](.github/pull_request_template.md): intent, proof, risk and
-  what to review closely.
+  where to look closest.
 - **Commits** follow [Conventional Commits](https://www.conventionalcommits.org/) with a module scope, for example
   `feat(booking): reserve the idempotency key before the seat lock`. No `commit-msg` hook enforces this; it is a
   convention. Keep every commit buildable on its own: CI builds only the head of each push, so run `make test` before
   pushing. History is never squashed into one commit, and never contains "wip" commits.
 - **Releases.** `v1.0.0`, tagged at the end of M7, is the first release ([Milestones](README.md#milestones)). No
-  workflow deploys on a tag push. `ci` can be started by hand from a `v*` tag, and because `aws-demo` admits `v*` tags
-  its `deploy` job would then deploy that tag, until the next push to `main`
-  ([docs/delivery.md](docs/delivery.md#known-gaps)).
+  workflow builds or deploys a tag: a manual run of `ci` from any ref runs its checks only, because every delivery job
+  needs a push to `main`, and the `staging` and `production` environments admit `main` alone
+  ([docs/delivery.md](docs/delivery.md#which-workflow-runs-when)). What production runs is the image digest recorded
+  in `/branchbook/release-image`, not a tag.
 
 ## Documentation standards
 
@@ -74,6 +76,11 @@ documentation is incomplete.
 ### Configuration, scripts and workflows
 
 - **Every property in `application*.yml` has a comment** explaining what it controls and why it has its value.
+- **Every tunable value reads a named environment variable with a safe default,** and
+  [docs/configuration.md](docs/configuration.md) lists it with its value in each environment;
+  `ConfigurationReferenceTest` fails the build if a property is missing there. Per-environment infrastructure values
+  live in `infra/config/<env>.json`, which `infra/lib/config.ts` validates before any stack is built
+  ([ADR-0009](docs/adr/0009-configuration-from-the-environment.md)).
 - **Every script, Makefile target and GitHub Actions workflow starts with a comment** giving its purpose and usage.
 
 ### Diagrams
@@ -99,6 +106,9 @@ that matter most.
 |---|---|
 | Add or change a business rule | [docs/domain-rules.md](docs/domain-rules.md) and the proving test |
 | Add or change an error code | [docs/errors.md](docs/errors.md) and `ProblemCode` |
+| Add or change a setting | [docs/configuration.md](docs/configuration.md), which `ConfigurationReferenceTest` holds to `application*.yml`; for a per-environment infrastructure value, `infra/config/` and its check in `infra/lib/config.ts` |
+| Add or change a security, delivery or operational control, or a threat it answers | [docs/production-readiness.md](docs/production-readiness.md), with the control's evidence, and [docs/threat-model.md](docs/threat-model.md); [SECURITY.md](SECURITY.md#known-risks) if a residual risk opens or closes |
+| Change a failure mode, an alarm or a drill | [docs/resilience.md](docs/resilience.md) and the alarm's entry in [docs/runbook.md](docs/runbook.md#alarms) |
 | Change the API: a path, parameter or response | Run `make contract`, and commit [docs/openapi.yaml](docs/openapi.yaml) and `web/src/api/schema.d.ts` with the change |
 | Make a decision with a rejected alternative | A new record in [docs/adr](docs/adr/README.md) |
 | Change how the system is built or connected | [docs/architecture.md](docs/architecture.md) |
@@ -159,7 +169,8 @@ corrected. Re-check it after every major commit and at the end of every mileston
 - **Never log personal data or a reference.** Log the correlation id and the appointment's id instead: a
   reference and the last four digits open an appointment, so a reference in a log is half a credential (BR-19).
   `MobileNumber`, `CustomerName` and `AppointmentReference` print a redacted form if logged by mistake, and
-  `LogRedactionIT` fails if a name, number or reference reaches the application's or the database's log.
+  `LogRedactionIT` fails if a name, number or reference reaches the application's or the database's log, and
+  `StructuredLogRedactionIT` if one reaches any field of the JSON log lines staging and production write.
 - **If a secret is ever committed,** follow [SECURITY.md](SECURITY.md): rotate first, then clean the history.
 
 ## Definition of done

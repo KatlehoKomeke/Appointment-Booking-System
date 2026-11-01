@@ -15,13 +15,18 @@ simulated inbox, built to the [UI design](../web/README.md#ui-design). M5 adds t
 through a simulated gateway, the simulated inbox's API and the concurrent proofs. M6 adds the Tier 2 API: cancelling
 an appointment with its cancellation SMS, retrying a failed message from the simulated inbox, demo data for a fresh
 compose stack, and two meters on `/actuator/prometheus`, with the web app's screens for them: cancelling from the
-appointment page and Retry in the simulated inbox. Each section opens with its status. Diagrams are Mermaid, or SVG
+appointment page and Retry in the simulated inbox. The production hardening that followed is built in code and not
+yet deployed: staging and production from validated configuration, the image promoted by digest, private subnets,
+IAM database authentication with a least-privilege role, migrations as a deployment step, a WAF CAPTCHA, the SMS
+circuit breaker, and the alarms and drills ([production-readiness.md](production-readiness.md)). Each section opens
+with its status. Diagrams are Mermaid, or SVG
 files in [assets/diagrams](assets/diagrams/README.md); solid parts are built and dashed parts are planned, with
 their milestone.
 
 **Contents:** [1. What it does](#1-what-the-system-does) ·
 [2. System and containers](#2-system-context-and-containers) ·
 [2.1 One request](#21-one-request-through-the-jar) ·
+[2.2 A booking through the firewall](#22-a-booking-through-the-firewall) ·
 [3. Modules](#3-modules-and-the-dependency-rule) ·
 [4. The booking transaction](#4-the-booking-transaction) ·
 [5. The confirmation](#5-the-confirmation-sms) ·
@@ -51,30 +56,35 @@ deletes the booking at once ([6](#6-appointment-lifecycle)).
 screens (M6), the branch, availability, booking and lookup API, the confirmation SMS with its dispatcher and
 simulated SMS gateway (M5), the cancel and retry API (M6), the real SMS gateway (after M6), and PostgreSQL 17.*
 
-![BranchBook at a glance, all built: one Spring Boot jar serves the React app and a REST API that books, looks up and cancels over PostgreSQL 17, texting through a simulated gateway or, on the hosted demo, AWS End User Messaging; code ships through GitHub Actions and OpenID Connect to AWS, where the pipeline deploys the demo on every push to main.](assets/diagrams/system-at-a-glance.svg)
+![BranchBook at a glance, all built: a customer's browser reaches one Spring Boot jar that serves the React app and a REST API under /api/v1, which books, looks up and cancels over PostgreSQL 17, with the catalogue, scheduling, booking and notification modules, the background jobs, and a dispatcher that texts through a simulated gateway or, in production, AWS End User Messaging. Below, how it ships: a pre-commit hook on the laptop, ci building the image once in GitHub, keyless sign-in through OpenID Connect, a deploy role per environment in us-east-1, and in Cape Town the image pushed once to ECR and deployed by digest to staging, then, after approval, to production.](assets/diagrams/system-at-a-glance.svg)
 
 - **One deployable, one database.** The jar serves the single-page app and the REST API under `/api/v1`, so there
-  is one origin and no CORS. Locally it is plain HTTP on `127.0.0.1`; in the hosted demo the load balancer ends
-  HTTPS ([10.3](#103-in-aws)).
+  is one origin and no CORS. Locally it is plain HTTP on `127.0.0.1`; in AWS the load balancer ends HTTPS
+  ([10.3](#103-in-aws)). `GET /api/v1/client-config` tells the web app whether the firewall will ask for a CAPTCHA,
+  and where AWS's CAPTCHA script is ([2.2](#22-a-booking-through-the-firewall)).
 - **Everything on the customer path is synchronous.** Background work runs in the same jar: `HolidayCoverageCheck`
   at start-up and daily at 06:00 SAST (M2), `IdempotencyKeyPurgeJob` every hour (M3), `RecipientSendLedgerPurgeJob`
   every hour from a minute after start-up, which deletes the daily cap's ledger rows once they are 24 hours old,
   `LookupAttemptPurgeJob` every hour from an hour after start-up, which deletes the lookup limit's closed windows, and
   the dispatcher (M5), which delivers the outbox rows the booking and cancel transactions write
   ([ADR-0003](adr/0003-transactional-outbox-for-confirmations.md)). `RetentionPurgeJob` runs every hour only where a
-  deployment switches it on, as the hosted demo does, and deletes each booking within the hour after its appointment
+  deployment switches it on, as staging and production do, and deletes each booking within the hour after its appointment
   ends ([runbook](runbook.md#did-the-retention-purge-run)). `DemoDataLoader` runs once after start-up where
   `branchbook.demo-data.enabled` is on, which only compose sets: on an empty database it books three demo
   appointments through the booking handler, and where `branchbook.booking.demo-numbers-only` is on it skips with one
   INFO line, because its numbers are not demo numbers (M6, [api/README.md](../api/README.md#demo-data)).
-- **Observable without personal data.** `/actuator/prometheus` serves Spring Boot's meters and two of BranchBook's
-  (M6): `appointments_booked_total{outcome}`, every booking request by how it ended, and `outbox_pending`, the
-  messages still PENDING after the dispatcher's last tick ([runbook](runbook.md#read-the-metrics)). It is open under
-  `make up`. The hosted demo's WAF blocks `/actuator`, and its task serves only health and info
-  (`MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE=health,info`).
+- **Observable without personal data.** `/actuator/prometheus` serves Spring Boot's meters and BranchBook's own:
+  `appointments_booked_total{outcome}`, every booking request by how it ended, and `outbox_pending`, the messages
+  still PENDING after the dispatcher's last tick (M6); the outbox's oldest pending age, its FAILED count and the time
+  since the dispatcher's last tick, and the SMS circuit breaker's state ([runbook](runbook.md#read-the-metrics)). It
+  is open under `make up`. Under the `prod` profile the actuator moves to port 8081, which no load balancer rule
+  reaches, and the service exports the outbox and breaker meters to CloudWatch for the alarms
+  ([infra/README.md](../infra/README.md#observability-and-fault-injection)). The logs are one JSON object a line in
+  Elastic Common Schema there, each with the request's correlation id.
 - **The real gateway sits behind a port.** The dispatcher sends through a `MessageGateway` port: the simulated SMS
   gateway by default, or, where `branchbook.sms.gateway` is `aws`, a router that keeps the published demo block
-  simulated and sends every other number a real SMS through AWS End User Messaging SMS ([5](#5-the-confirmation-sms)).
+  simulated and sends every other number a real SMS through AWS End User Messaging SMS, behind a circuit breaker
+  ([5](#5-the-confirmation-sms)).
 
 ### 2.1 One request through the jar
 
@@ -125,6 +135,43 @@ A refused branch, service or date becomes an RFC 9457 `application/problem+json`
 branch, then the service, then the booking window, so each request fails with at most one code; on a closed day it
 returns no slots without reading the appointments.
 
+### 2.2 A booking through the firewall
+
+*Status: Built in code after M7; not yet deployed. Only staging and production put the CAPTCHA in front of a booking;
+locally, and wherever no CAPTCHA is configured, step 3 never happens and nothing changes.*
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant B as Browser<br/>(web app)
+    participant W as AWS WAF
+    participant J as The jar
+    B->>W: GET /api/v1/client-config (once a session)
+    W->>J: allowed
+    J-->>B: CAPTCHA script URL and API key, or none
+    B->>W: POST /api/v1/appointments (Idempotency-Key)
+    W-->>B: 405, x-amzn-waf-action: captcha
+    Note over B: load AWS's script,<br/>show the puzzle in a dialog
+    B->>W: puzzle solved
+    W-->>B: aws-waf-token cookie
+    B->>W: the same POST again, same key, with the token
+    W->>J: allowed
+    J-->>B: 201 Created
+```
+
+- **1 to 3.** `ClientConfigController` publishes `branchbook.captcha.script-url` and `api-key`, both public by design
+  ([configuration.md](configuration.md#edge-and-web)). Where they are set, the Content-Security-Policy adds AWS WAF's
+  domain to scripts and connections, and nothing else.
+- **4 and 5.** WAF asks for a CAPTCHA on every booking and cancellation `POST` that carries no valid token, after its
+  per-address limits ([ADR-0011](adr/0011-waf-captcha-instead-of-a-one-time-pin.md)). A `POST` is not a page load, so
+  WAF answers `405` with `x-amzn-waf-action: captcha`, which the same-origin app can read.
+- **6 to 8.** The `CaptchaProvider` loads AWS's script and shows the puzzle in an accessible dialog; once it is
+  solved, WAF sets its token cookie, which counts for 5 minutes.
+- **9 to 11.** `withCaptcha` in [web/src/api/captcha.ts](../web/src/api/captcha.ts) sends the very same request once
+  more, body and `Idempotency-Key` included, so a booking can never be made twice. A second challenge, a closed
+  dialog, a failed puzzle or a script that never loads is an ordinary failure, with its own message
+  ([errors.md](errors.md#when-the-firewall-asks-for-a-captcha)).
+
 ## 3. Modules and the dependency rule
 
 *Status: Built. `catalogue`, `scheduling`, `booking` (cancellation from M6) and `shared` are built; `notification`
@@ -154,8 +201,8 @@ Every module may use `shared` (config, correlation, problem, security, time, web
 | `catalogue` | Built (M1, M2) | Branches, services, weekday trading hours, capacities and public holidays. Read-only at runtime; seeded by Flyway. |
 | `scheduling` | Built (M2) | `SlotCalendar`, a pure function that computes and validates slots in the branch's time zone, and the availability query. It learns which seats are taken through the `BookedIntervalsPort`, which `booking` implements, so it never reads the appointments table itself. |
 | `booking` | Built (M3, M6) | The `Appointment` aggregate, the booking transaction, idempotency, lookup, cancellation, which deletes the appointment (M6), the retention purge of ended appointments, the demo data (M6) and the `appointments_booked_total` counter (M6). |
-| `notification` | Built (M3, M5, M6) | The outbox writer, the confirmation and cancellation templates, the read of an appointment's messages, the dispatcher with the `MessageGateway` port and its simulated SMS gateway, the simulated inbox, the retry of a FAILED message (M6), the `outbox_pending` gauge (M6), and the daily cap's ledger, `sms_recipient_sends`, with its hourly purge. It reads nothing from `catalogue`: the booking hands it the branch's and the service's short names with the appointment. |
-| `shared` | Built | Problem responses, correlation ids, security headers, the clock and configuration. |
+| `notification` | Built (M3, M5, M6) | The outbox writer, the confirmation and cancellation templates, the read of an appointment's messages, the dispatcher with the `MessageGateway` port and its simulated SMS gateway, the simulated inbox, the retry of a FAILED message (M6), the `outbox_pending` gauge (M6), the daily cap's ledger, `sms_recipient_sends`, with its hourly purge, and, after M7, the SMS circuit breaker (`DeliveryCircuit`), the backoff with jitter (`RetryBackoff`) and the outbox's health gauges. It reads nothing from `catalogue`: the booking hands it the branch's and the service's short names with the appointment. |
+| `shared` | Built | Problem responses, correlation ids, security headers, the clock and configuration; after M7 also the `prod` profile's `ProductionProfileGuard`, the migrate-only mode, the CloudWatch metrics export and `GET /api/v1/client-config`. |
 
 Inside every module the layers are `api` (HTTP only), `application` (use cases; the only layer that opens
 transactions), `domain` (plain Java with no Spring imports; `Appointment` carries JPA mapping annotations, a
@@ -259,10 +306,10 @@ implemented by `JdbcLookupAttemptStore`, which locks the reference's row with `S
   deletes closed windows hourly and logs `lookup_attempts.purged count=N`, so the table holds about an hour of
   wrongly looked-up references.
 - **Each instance uses its own clock.** Two instances disagree only by their clocks' difference: milliseconds on the
-  hosted demo's tasks.
+  tasks in AWS.
 
-A per-address limit on lookups at the edge is still open: the hosted demo's web application firewall limits only
-booking and cancel `POST`s per address today.
+In AWS the web application firewall also limits each address's lookups, 100 in 5 minutes in production, beside its
+limit on bookings and cancellations ([ADR-0011](adr/0011-waf-captcha-instead-of-a-one-time-pin.md)).
 
 Because the window is per reference, someone who knows a reference can block its lookup for an hour. A reference
 is printed only in the customer's own SMS and pages, and production would bind appointments to a verified identity
@@ -278,14 +325,15 @@ appointment (V6, [BR-24](domain-rules.md#br-24), proven). Built in M3: every boo
 row in the booking transaction ([BR-16](domain-rules.md#br-16)). Built in M1: `notification_messages` and its named
 constraints, 11 then and 12 since V6, proven by `SchemaConstraintIT`. Built in M6: the cancellation SMS, written in
 the cancel's transaction ([BR-16](domain-rules.md#br-16)), and the retry of a FAILED message from the simulated inbox
-([BR-17](domain-rules.md#br-17), proven).*
+([BR-17](domain-rules.md#br-17), proven). Built after M7: the circuit breaker, the backoff's jitter, and the batch
+size, attempt limit and backoff as settings ([BR-17](domain-rules.md#br-17), proven).*
 
 ```mermaid
 stateDiagram-v2
     [*] --> PENDING: written with the booking or the cancel
     [*] --> FAILED: a confirmation written past the daily cap, never sent
     PENDING --> SENT: gateway accepts
-    PENDING --> PENDING: refused but may pass next time, retry in 2, 4, 8, 16 s
+    PENDING --> PENDING: refused but may pass next time, retry after about 2, 4, 8, 16 s
     PENDING --> FAILED: fifth failure, a refusal for good, a failed mark, or superseded
     PENDING --> [*]: a cancellation, deleted once sent or failed for good
     FAILED --> PENDING: retry from the inbox (M6)
@@ -294,7 +342,16 @@ stateDiagram-v2
 The dispatcher runs every two seconds on its own single thread, `outbox-1`, kept apart from Spring's default
 scheduler so the hourly and daily jobs never share it. It claims up to 20 due rows per tick, each in its own
 transaction with `FOR UPDATE SKIP LOCKED`, so a crash re-sends at most one message and two instances never send the
-same message. The simulated gateway takes 150 ms and refuses every number ending in `0000`, such as the demo number
+same message. A retry waits 2, 4, 8 and then 16 seconds, each wait shortened at random by up to a fifth, so messages
+refused together are not all due again at once; the batch size, the attempt limit and the backoff are settings
+([configuration.md](configuration.md#notifications)).
+
+Before each claim the dispatcher asks the SMS circuit breaker, `DeliveryCircuit` (Resilience4j), for a permission.
+The breaker opens when half of the last 10 calls failed or all of them were slow; while it is open the dispatcher
+claims nothing, so every message stays PENDING and **no attempt is spent** on a provider that is down. After 30
+seconds it lets two messages through as probes and closes if they pass. A permanent refusal says nothing about the
+provider and never opens it. Every transition is one `outbox.circuit` log line, and its state is a meter the
+`SmsCircuitOpen` alarm reads ([resilience.md](resilience.md#sms-provider-outage)). The simulated gateway takes 150 ms and refuses every number ending in `0000`, such as the demo number
 082 555 0000, so a failed delivery can be shown: about 30 seconds of backoff later it is FAILED. A FAILED row
 records why: `DELIVERY_FAILED` after the fifth failed attempt, or on the attempt the gateway refused for good,
 `SUPERSEDED_BY_CANCELLATION` when the dispatcher finds a confirmation's appointment still kept as CANCELLED, which
@@ -316,7 +373,7 @@ guarded SQL in the [runbook](runbook.md#replay-a-failed-message) replays a messa
 
 **Which gateway sends.** `branchbook.sms.gateway` decides, and one INFO line at start-up names the gateway, the
 region and whether a protect configuration and a daily cap are set. `simulated`, the default and what compose,
-`make dev-api` and the tests run, sends nothing. Where it is `aws` (`BRANCHBOOK_SMS_GATEWAY=aws`, the hosted demo),
+`make dev-api`, the tests and staging run, sends nothing. Where it is `aws` (`BRANCHBOOK_SMS_GATEWAY=aws`, production),
 `RoutingSmsGateway` hands every number in the published demo block, 082 555 0000 to 0199, to the simulated gateway,
 because anyone may type those numbers and one may belong to a real stranger, and every other number to
 `AwsSmsGateway`. That calls `SendTextMessage` of AWS End User Messaging SMS (`pinpoint-sms-voice-v2`) in
@@ -336,7 +393,8 @@ the clock, in the cap's ledger, `sms_recipient_sends`, through `ix_sms_recipient
 the instant the SMS was written and HMAC-SHA256 of the number's E.164 form, keyed with
 `branchbook.sms.recipient-cap-key` (`BRANCHBOOK_SMS_RECIPIENT_CAP_KEY`, at least 32 characters, or start-up stops);
 where the key is blank, a random one is made at start-up, one WARN says so, and every count starts again at each
-restart. The hosted demo's key is the `branchbook/sms-cap-key` secret in Secrets Manager. Each SMS written below the
+restart. In AWS the key is the `<prefix>/sms-cap-key` secret in Secrets Manager, and the `prod` profile refuses to
+start with the cap on and no key. Each SMS written below the
 cap adds a row in the same transaction, and the row outlives its message, so a confirmation a cancel deleted, or a
 cancellation the dispatcher deleted, still counts for its 24 hours; `RecipientSendLedgerPurgeJob` deletes the rows
 once they are 24 hours old and logs `cap_ledger.purged count=N`. At or above the cap the new message is FAILED with
@@ -378,9 +436,9 @@ transitions are modelled and tested so the next feature, branch check-in, has a 
 
 ## 7. Data model
 
-*Status: Built in M1; V6, V7 and V8 change it after M6.*
+*Status: Built in M1; V6, V7 and V8 change it after M6. V9, after M7, adds a database role, not a table.*
 
-![The ten tables grouped by owning module: catalogue owns branches, hours, services, branch_services and public_holidays; booking owns appointments, idempotency_keys and lookup_attempts, the lookup limit's counts; notification owns notification_messages and sms_recipient_sends, the daily cap's ledger. Appointments reference branch_services by a composite key, and two exclusion constraints reject an overlapping seat or an overlapping booking by one mobile.](assets/diagrams/data-model.svg)
+![The ten tables grouped by owning module: catalogue owns branches, hours, services, branch_services and public_holidays; booking owns appointments, idempotency_keys and lookup_attempts, the lookup limit's counts; notification owns notification_messages and sms_recipient_sends, the daily cap's ledger. Appointments reference branch_services by a composite key, and two exclusion constraints reject an overlapping seat or an overlapping booking by one mobile. V9 adds the runtime role branchbook_app, not a table.](assets/diagrams/data-model.svg)
 
 Each table belongs to one module. The one read across a module boundary is `booking`'s `SELECT ... FOR UPDATE`
 on the `branch_services` row (step 6 of [the booking transaction](#4-the-booking-transaction)); `scheduling`
@@ -413,7 +471,8 @@ hourly purge), `ix_notification_messages_due`, `_appointment` and `_created` (th
 appointment's messages and the simulated inbox), `ix_sms_recipient_sends_fingerprint` and `_written` (the daily
 cap's count and the ledger's hourly purge), and `ix_lookup_attempts_closes` (the lookup limit's hourly purge).
 
-The schema is created by eight Flyway migrations, never edited once committed:
+The schema is created by nine Flyway migrations, never edited once committed. V9 creates a role and its grants, not
+a table, so the tables and constraints above are unchanged by it:
 
 | Migration | Contents |
 |---|---|
@@ -425,6 +484,7 @@ The schema is created by eight Flyway migrations, never edited once committed:
 | [`V6__cancel_deletes_the_booking.sql`](../api/src/main/resources/db/migration/V6__cancel_deletes_the_booking.sql) | A cancel deletes the appointment: the two foreign keys to it set null on delete, and only a cancellation may have no appointment |
 | [`V7__sms_recipient_sends.sql`](../api/src/main/resources/db/migration/V7__sms_recipient_sends.sql) | The daily cap's ledger, `sms_recipient_sends`, and its two indexes |
 | [`V8__lookup_attempts.sql`](../api/src/main/resources/db/migration/V8__lookup_attempts.sql) | The lookup limit's counts, `lookup_attempts`, shared by every instance, and its purge index |
+| [`V9__runtime_role.sql`](../api/src/main/resources/db/migration/V9__runtime_role.sql) | No table: the runtime role `branchbook_app`, which may read and write the application's rows but change no schema and not touch Flyway's history; default privileges give it the same on tables later migrations add ([ADR-0010](adr/0010-private-network-and-iam-database-auth.md), `RuntimeRoleIT`) |
 
 Every constraint is named, because the application maps a violation to an API error by its name.
 [`SchemaConstraintIT`](../api/src/test/java/za/co/fynbos/branchbook/SchemaConstraintIT.java) proves each one fires,
@@ -462,8 +522,9 @@ API and the UI show it only masked: a caller who has just proved the last four d
 everyone else, including the simulated inbox, sees `082 *** ****`. Where `branchbook.inbox.redact-references` is
 on (`BRANCHBOOK_INBOX_REDACT_REFERENCES`, off by default and in compose, `make dev-api` and every test but
 `InboxReferencesHiddenIT`), the inbox and its retry also show every reference as `APT-****-****`, in the reference
-field, the body, the subject and the last error, so the hosted demo could switch its inbox back on without handing
-visitors each other's references.
+field, the body, the subject and the last error, so a deployment could switch its inbox back on without handing
+visitors each other's references. The `prod` profile turns it on, and `ProductionProfileGuard` refuses to start with
+the inbox on and it off.
 
 Logs, metrics and error bodies carry no personal data. Error bodies never quote the request, and unexpected
 exceptions are logged with their types and stack frames but not their messages, which can quote a name or a
@@ -471,18 +532,21 @@ number. Log lines name an appointment by its id, never by its reference. Meter t
 booking's outcome or a URI template, never a value a customer typed (`MetricsIT.scrapeHoldsNoPersonalData`).
 [`LogRedactionIT`](../api/src/test/java/za/co/fynbos/branchbook/LogRedactionIT.java) takes one customer through
 every outcome of a booking and a lookup, and through a cancellation and a retry, and checks both the application's
-log and PostgreSQL's for their name, number and reference. How the data is protected, and what is planned, is in
+log and PostgreSQL's for their name, number and reference; `StructuredLogRedactionIT` does the same for the `prod`
+profile's JSON log lines. How the data is protected, and what is planned, is in
 [SECURITY.md](../SECURITY.md#personal-information-popia).
 
 ## 10. Deployment
 
-*Status: Built. The image and the local stack are built, every push to `main` deploys the hosted demo and the release
-record to AWS once every check passes, and the demo runs in Cape Town (af-south-1), first deployed by hand on
-2026-10-26, texting real SMS since 2026-10-27.*
+*Status: Built. The image and the local stack are built, and the hosted demo has run in Cape Town (af-south-1) since
+2026-10-26, deployed by the pipeline on every push to `main` and texting real SMS since 2026-10-27. Built in code and
+not yet deployed: staging and production, which replace the single hosted demo when the administrator's steps in
+[infra/README.md](../infra/README.md#hardening-the-account-that-already-runs-production) run. Sections 10.2 and 10.3
+describe them.*
 
 ### 10.1 Locally: the image and the stack
 
-![From source to a running stack: a three-stage Dockerfile builds the React app and the jar into branchbook:local (user 10001, /readyz health check). make up runs it with PostgreSQL 17 in Docker Compose on 127.0.0.1 and waits until both are healthy. CI's stack job builds and smoke-tests the same image, which the hosted demo runs as two Fargate tasks.](assets/diagrams/local-runtime.svg)
+![From source to a running stack, all built: a three-stage Dockerfile builds the React app and the jar into branchbook:local, with the RDS certificate bundle pinned and user 10001. make up writes a random database password to the git-ignored .env, then runs the image with PostgreSQL 17 in Docker Compose on 127.0.0.1 and waits until both are healthy; Flyway applies V1 to V9. CI's image job builds the ARM64 image once and the stack job tests that build, which staging and then production run by digest, after the migration task.](assets/diagrams/local-runtime.svg)
 
 `make up` runs `docker compose up --build --detach --wait --wait-timeout 300`, and the numbers in the picture
 follow its start-up order:
@@ -491,75 +555,97 @@ follow its start-up order:
    on the Temurin 25 JDK, then a Temurin 25 JRE runtime that runs as user 10001.
 2. The `db` service starts PostgreSQL 17.
 3. `pg_isready` succeeds and `db` is healthy; [`compose.yaml`](../compose.yaml) starts `app` only then.
-4. The app starts: Flyway applies V1 to V8, and Hibernate validates the schema against the entities.
+4. The app starts: Flyway applies V1 to V9, and Hibernate validates the schema against the entities. Locally the app
+   migrates at start-up as the database's owner; in AWS a separate migration task does it ([10.3](#103-in-aws)).
 5. `/readyz` answers UP, and Docker marks the container healthy.
 6. `--wait` returns, and `make up` prints the URL.
 
 - **Tests never run in the image.** The image build packages the jar with `-DskipTests`; `make test` and CI run the
   tests.
-- **One recipe, two places.** CI's `stack` job builds and starts the image from the same `Dockerfile` and
-  `compose.yaml` with the same command, then runs `scripts/smoke.sh` and checks the logs for credentials.
+- **One recipe, two places.** CI's `image` job builds the image once, and its `stack` job starts that build with the
+  same `compose.yaml` and command, then runs `scripts/smoke.sh`, the end-to-end tests, k6 and a ZAP scan, and checks
+  the logs for credentials. That build is the one staging and production run.
+- **No committed password.** `compose.yaml` requires `DB_PASSWORD`; `make up` writes a random one to the git-ignored
+  `.env` the first time.
 - **Development runs without it.** `make dev-api` starts the API with a throwaway PostgreSQL in Docker, and
   `make dev-web` serves the web app with hot reload on port 5173.
 
 ### 10.2 From a commit to AWS
 
-![From a commit to Cape Town: an opt-in pre-commit hook refuses secret files and runs gitleaks, push protection checks the push, and main, which requires every check, runs ci's api, web, stack and infra jobs side by side. Once all four pass, deploy, on an ARM runner, passes the aws-demo gate, signs in at STS, builds the image and deploys BranchbookData and BranchbookApp through the bootstrap roles, smoke-tests the live address, then records and verifies the commit in BranchbookRelease; an administrator deploys BranchbookAccount by hand.](assets/diagrams/delivery-pipeline.svg)
+![From a commit to Cape Town, all built: an opt-in pre-commit hook runs gitleaks (1), main's ruleset requires every check (2), ci builds the ARM64 image once and tests that build (3), publish pushes it to ECR and attests it (4), deploy-staging deploys its digest to staging and tests it (5), and, after a person's approval, deploy-production verifies its provenance and deploys the same digest to production (6), with rollback-production if it fails; every delivery job signs in through OpenID Connect, and the administrator deploys BranchbookAccount and BranchbookGuardrails by hand (A).](assets/diagrams/delivery-pipeline.svg)
 
-Every push to `main` starts `ci` and `secret-scan`. `ci`'s `api`, `web`, `stack` and `infra` jobs run side by side
-with no AWS access; once all four pass, its `deploy` job signs in to AWS through OpenID Connect on an ARM runner,
-builds the image, deploys the hosted demo's two stacks, smoke-tests https://branchbook.click, then deploys
-`BranchbookRelease` and reads the recorded commit back. `main` requires those four checks and `gitleaks` before a
-push or merge, so a red check means no deployment; [delivery.md](delivery.md) walks through each numbered step, what
-each workflow proves and the gaps that remain.
+Every push to `main` starts `ci`, `codeql` and `secret-scan`. `ci`'s checks run with no AWS access: `api`, `web`,
+`infra` and `workflow-lint`, and `image`, which builds the ARM64 image once, scans it and writes its SBOM, then
+`stack`, which runs that exact build under Docker Compose. Once every check passes, `publish` pushes it to ECR as
+`branchbook:<commit>` and attests its provenance; `deploy-staging` deploys that digest to staging, smoke- and
+end-to-end-tests it and records it; `deploy-production`, once a person approves, verifies the provenance, deploys the
+same digest to production, smoke-tests it and records it; and `rollback-production` redeploys the last recorded release
+if production's deployment or smoke test fails ([ADR-0008](adr/0008-two-environments-promoted-by-digest.md)). Each
+delivery job signs in through OpenID Connect as its environment's own role. `main` requires every check before a push
+or merge, so a red check means no deployment; [delivery.md](delivery.md) walks through each job, what each workflow
+proves and the gaps that remain.
 
 ### 10.3 In AWS
 
-![BranchBook in AWS, all built: the administrator's account stack in us-east-1 (OIDC provider, narrow deploy role, $110 budget), and in Cape Town the three stacks the pipeline deploys on every push to main: the release record and the demo, where Route 53, WAF and a load balancer front two Fargate tasks in two availability zones that use RDS and texts only South African numbers through AWS End User Messaging.](assets/diagrams/aws-footprint.svg)
+![BranchBook in AWS, all built: staging and production in one account, each with WAF (a CAPTCHA and per-address limits), a load balancer, autoscaled Fargate tasks in private subnets, a migration task, a VPC with a NAT gateway per zone, Secrets Manager and an RDS database the tasks sign in to as branchbook_app with IAM, alarms, a canary, fault-injection experiments and a release record; shared, the ECR registry, AWS End User Messaging SMS for production, BranchbookGuardrails and the CDK bootstraps; in us-east-1, BranchbookAccount with a deploy role per environment. The administrator deploys the account-level stacks by hand (A); a delivery job signs in through OpenID Connect (1); the image is pushed once (2); staging is deployed, then production after approval (3).](assets/diagrams/aws-footprint.svg)
 
 The letter and numbers in the picture:
 
-- **A.** An administrator deploys `BranchbookAccount` to us-east-1 by hand with `cdk deploy`. The pipeline never
-  deploys this stack.
-- **1.** On every push to `main`, once its four checks pass, the `deploy` job in `ci.yml` enters the `aws-demo`
-  environment and signs in through OpenID Connect and AWS STS as `branchbook-github-deploy`. No access key is stored.
-- **2.** That role assumes the CDK bootstrap roles (`cdk-hnb659fds-*`) in af-south-1, which publish the ARM64 image
-  built on the runner and the templates.
-- **3.** CloudFormation updates `BranchbookData`, then `BranchbookApp`, and the job smoke-tests
-  https://branchbook.click.
-- **4.** CloudFormation updates `BranchbookRelease`, which records `GITHUB_SHA`.
-- **5.** The job reads `/branchbook/release` back and fails unless it equals `GITHUB_SHA`.
+- **A.** The administrator deploys `BranchbookAccount` (us-east-1), `BranchbookGuardrails` and the CDK bootstraps by
+  hand. The pipeline never deploys them.
+- **1.** Each delivery job signs in through OpenID Connect as its GitHub environment's deploy role, with no stored
+  keys.
+- **2.** `publish` pushes the image once to the ECR repository in `BranchbookRegistry`; both environments run it by
+  digest.
+- **3.** The pipeline deploys staging, then, after a person approves, production, each through its own CDK bootstrap.
 
-Four stacks are built: `BranchbookAccount` in us-east-1 (the GitHub OIDC provider, the deploy role and the
-budget), and in Cape Town (`af-south-1`) `BranchbookRelease`, the release record, and the hosted demo's
-`BranchbookData` and `BranchbookApp` ([ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md)). The pipeline deploys the
-three Cape Town stacks on every push to `main`, with no stored keys
-([ADR-0007](adr/0007-continuous-deployment-from-main.md)); the administrator deploys `BranchbookAccount` by hand, and
-deployed the demo by hand first, on 2026-10-26. There is no DNS stack: the hosted zone came with the domain's Route 53
-registration.
+Each environment is three stacks in Cape Town, `<Prefix>Data`, `<Prefix>App` and `<Prefix>Release`, built from its own
+file in [infra/config/](../infra/config), which `config.ts` checks before any stack is built
+([ADR-0009](adr/0009-configuration-from-the-environment.md)). Production keeps the stack IDs the hosted demo was
+deployed with; staging's start `BranchbookStaging`. `BranchbookRegistry` holds the one image repository both pull
+from, by digest. The administrator deploys `BranchbookAccount` (the GitHub OIDC trust, a deploy role per environment
+and the budget) and `BranchbookGuardrails` (CloudTrail, GuardDuty, AWS Config, Security Hub, IAM Access Analyzer, the
+permissions boundary and each environment's execution policy) by hand
+([infra/README.md](../infra/README.md#who-can-change-what-in-aws)).
 
-A reviewer's request to https://branchbook.click: Route 53 resolves the name to the load balancer; AWS WAF, attached
-to the load balancer, blocks `/actuator`, comparing the decoded, lowercased path, and allows 10 booking and cancel
-`POST`s per address in 5 minutes, with no sign-in; the load balancer redirects plain HTTP to HTTPS, ends HTTPS and
-forwards to one of two ARM64 Fargate tasks on port 8080, which serve only the health and info endpoints; and each task
-reaches RDS for PostgreSQL 17 over TLS, directly. The simulated inbox is off there, so no visitor sees another's
-booking, and each booking is deleted within the hour after its appointment ends, or at once when it is cancelled
-([ADR-0006, Notes](adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). The picture draws Route 53, then WAF, then the
-load balancer for readability; Route 53 only resolves the name.
+A request to https://branchbook.click: Route 53 resolves the name to the load balancer, and is not in the data path;
+AWS WAF blocks `/actuator`, comparing the decoded, lowercased path, limits each address's bookings and cancellations,
+lookups and requests, and asks for a CAPTCHA on every booking and cancellation `POST`
+([2.2](#22-a-booking-through-the-firewall)), then applies AWS's managed rules; the load balancer redirects plain HTTP
+to HTTPS, ends HTTPS and forwards to a task on port 8080. The actuator listens on 8081, which no target group or rule
+names.
 
-The two tasks run in the two availability zones, so one can fail or be replaced while the other serves. Nothing
-depends on one task: the lookup counts (V8), the dispatcher's `FOR UPDATE SKIP LOCKED` claims, the idempotency keys,
-the seat locks and the daily cap's ledger all live in PostgreSQL, and the hourly jobs delete only what is due, so
-both tasks run them harmlessly. The demo costs about $102 a month before VAT; the budget in `BranchbookAccount` is
-$110, with e-mails at $55, $88 and $110.
+- **Network** ([ADR-0010](adr/0010-private-network-and-iam-database-auth.md)). Three subnets in each of two zones:
+  `public` for the load balancer and the NAT gateways, `app` for the tasks, and `data` for the database, with no
+  route to the internet. The tasks have no public address; they reach AWS's APIs on 443 through a NAT gateway, one per
+  zone in production so losing a zone does not cut the other's way out, and the database on 5432. Rejected traffic is
+  logged.
+- **Database.** RDS for PostgreSQL 17, encrypted, TLS only. Production runs Multi-AZ with deletion protection and 14
+  days of backups; staging Single-AZ with 3. The service signs in as `branchbook_app` with an IAM token through the AWS
+  Advanced JDBC Wrapper, checking the server's certificate (`sslmode=verify-full`, the RDS CA bundle in the image), and
+  has no database password.
+- **Migrations are a deployment step.** For each new image a custom resource runs the same image once as a migration
+  task (`BRANCHBOOK_MIGRATE_ONLY=true`), with the master secret, and waits; a non-zero exit fails the deployment
+  before the service is touched, and the running tasks keep serving. The service itself never migrates.
+- **Service.** ARM64 Fargate tasks, two to four in production over both zones and one to two in staging, scaling on
+  CPU and on requests per task, each with a read-only root file system and no Linux capabilities. A new task must pass
+  `/readyz` before an old one stops; ECS's circuit breaker rolls back a deployment that never becomes healthy, and its
+  deployment alarm one that raises the 5xx alarm. Nothing depends on one task: the lookup counts (V8), the
+  dispatcher's `FOR UPDATE SKIP LOCKED` claims, the idempotency keys, the seat locks and the daily cap's ledger all
+  live in PostgreSQL ([resilience.md](resilience.md)).
+- **SMS.** Production sends through AWS End User Messaging SMS in Cape Town, through a protect configuration that
+  allows South Africa alone and no voice or MMS, at most five SMS a day to one number; the published demo numbers stay
+  on the simulated gateway. Staging sends nothing and takes the demo numbers only. No delivery events are logged,
+  because they carry the number.
+- **Observability.** The outbox and breaker meters go to CloudWatch, alarms watch them and the load balancer, the
+  database and the service, a canary checks `/readyz` and the availability API every 5 minutes, and AWS FIS templates
+  stop a task or fail the database over ([infra/README.md](../infra/README.md#observability-and-fault-injection),
+  [runbook.md](runbook.md#alarms)).
 
-Since 2026-10-27 the hosted demo texts real SMS, and any South African mobile number may book. The task sends
-through AWS End User Messaging SMS in Cape Town, through a protect configuration that allows South Africa alone and
-no voice or MMS, at most five SMS a day to one number; the published demo numbers, 082 555 0000 to 082 555 0199,
-stay on the simulated gateway. No delivery events are logged, because they carry the number. While the AWS account
-is in the SMS sandbox, only verified numbers receive a text, and any other ends `FAILED` on its first attempt with the
-booking standing, or, for a cancellation, is deleted.
-Resources, the request path step by step, the SMS controls, deploying, teardown, trust and access are in
-[infra/README.md](../infra/README.md#the-hosted-demo).
+The simulated inbox is off in both, so no visitor sees another's booking, and each booking is deleted within the hour
+after its appointment ends, or at once when it is cancelled. The two environments, the guardrails and the
+observability are estimated, not measured, at about US$380 to 450 a month
+([production-readiness.md](production-readiness.md#operations)). Resources, the request path, the SMS controls,
+deploying, teardown, trust and access are in [infra/README.md](../infra/README.md#environments-staging-and-production).
 
 Next: [domain-rules.md](domain-rules.md) for the proofs; [delivery.md](delivery.md) for how it ships.
