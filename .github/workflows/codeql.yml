@@ -1,0 +1,54 @@
+# .github/workflows/codeql.yml
+#
+# Static security analysis with GitHub CodeQL: the Java API, the TypeScript of the web app, the CDK app and the
+# end-to-end tests, and the GitHub Actions workflows themselves. It runs on every pull request, on every push to main,
+# and weekly, so a new CodeQL query also reaches code that has not changed. Findings appear as code-scanning alerts
+# on the pull request and in the Security tab, with the security-extended query suite.
+#
+# No language is compiled: build-mode none reads the source directly, so the analysis needs neither a JDK build nor
+# npm dependencies.
+
+name: codeql
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Mondays at 03:17 UTC, away from the top of the hour when scheduled runs queue.
+    - cron: '17 3 * * 1'
+
+permissions: {}
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write   # uploads the results as code-scanning alerts
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [java-kotlin, javascript-typescript, actions]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Initialise CodeQL for ${{ matrix.language }}
+        uses: github/codeql-action/init@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+
+      - name: Analyse ${{ matrix.language }}
+        uses: github/codeql-action/analyze@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
+        with:
+          category: /language:${{ matrix.language }}

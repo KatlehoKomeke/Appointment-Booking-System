@@ -1,0 +1,129 @@
+{
+  "name": "staging",
+  "stackIdPrefix": "BranchbookStaging",
+  "resourcePrefix": "branchbook-staging",
+  "region": "af-south-1",
+  "availabilityZones": ["af-south-1a", "af-south-1b"],
+  "domain": {
+    "name": "stg.branchbook.click",
+    "hostedZoneName": "branchbook.click",
+    "hostedZoneId": "Z08340112LPW7WEQZV0IM"
+  },
+  "network": {
+    "cidr": "10.41.0.0/16",
+    "subnetCidrMask": 24,
+    "natGateways": 1
+  },
+  "database": {
+    "instanceClass": "t4g.micro",
+    "multiAz": false,
+    "allocatedStorageGiB": 20,
+    "maxAllocatedStorageGiB": 30,
+    "backupRetentionDays": 3,
+    "deletionProtection": false,
+    "connectionBudget": 75,
+    "connectionHeadroom": 10,
+    "appUser": "branchbook_app"
+  },
+  "service": {
+    "cpu": 512,
+    "memoryMiB": 1024,
+    "minTasks": 1,
+    "maxTasks": 2,
+    "minHealthyPercent": 100,
+    "maxHealthyPercent": 200,
+    "dbPoolSize": 5,
+    "cpuTargetPercent": 60,
+    "requestsPerTargetPerMinute": 600,
+    "scaleOutCooldownSeconds": 60,
+    "scaleInCooldownSeconds": 300,
+    "containerInsights": false,
+    "stopTimeoutSeconds": 30,
+    "deregistrationDelaySeconds": 30,
+    "healthCheckGracePeriodSeconds": 180
+  },
+  "healthCheck": {
+    "intervalSeconds": 15,
+    "healthyThreshold": 2,
+    "unhealthyThreshold": 3,
+    "containerIntervalSeconds": 10,
+    "containerTimeoutSeconds": 3,
+    "containerRetries": 3,
+    "containerStartPeriodSeconds": 90
+  },
+  "migration": {
+    "cpu": 512,
+    "memoryMiB": 1024,
+    "dbPoolSize": 2,
+    "timeoutMinutes": 15
+  },
+  "logs": {
+    "appRetentionDays": 7,
+    "wafRetentionDays": 7,
+    "flowLogRetentionDays": 7
+  },
+  "waf": {
+    "bookingLimit": 200,
+    "bookingWindowSeconds": 300,
+    "lookupLimit": 500,
+    "lookupWindowSeconds": 300,
+    "requestLimit": 5000,
+    "requestWindowSeconds": 300,
+    "captchaImmunitySeconds": 300,
+    "syntheticTrafficBypass": true
+  },
+  "sms": {
+    "gateway": "simulated",
+    "recipientDailyCap": 5,
+    "allowedCountry": "ZA"
+  },
+  "alarms": {
+    "serverErrorThreshold": 5,
+    "serverErrorPeriodMinutes": 5,
+    "noHealthyTaskMinutes": 3,
+    "databaseFreeStorageGiB": 2
+  },
+  "monitoring": {
+    "metricsNamespace": "BranchBook/staging",
+    "metricsStepSeconds": 60,
+    "outboxOldestPendingSeconds": 300,
+    "outboxFailedIncrease": 1,
+    "outboxFailedPeriodMinutes": 5,
+    "dispatcherStalledSeconds": 60,
+    "dispatcherStalledPeriods": 2,
+    "responseTimeP99Milliseconds": 1500,
+    "responseTimePeriodMinutes": 5,
+    "responseTimePeriods": 3,
+    "databaseCpuPercent": 80,
+    "databaseConnectionsPercent": 80,
+    "databaseFreeableMemoryMiB": 128,
+    "serviceCpuPercent": 85,
+    "serviceMemoryPercent": 85,
+    "resourcePeriodMinutes": 5,
+    "resourcePeriods": 3
+  },
+  "canary": {
+    "enabled": true,
+    "scheduleMinutes": 5,
+    "timeoutSeconds": 60,
+    "successPercentThreshold": 90,
+    "failingPeriods": 2,
+    "artifactRetentionDays": 7,
+    "autoDeleteArtifacts": true,
+    "branchCode": "SAN",
+    "serviceCode": "FICA"
+  },
+  "faultInjection": {
+    "enabled": true
+  },
+  "appEnvironment": {
+    "SPRING_PROFILES_ACTIVE": "prod",
+    "BRANCHBOOK_MIGRATE_ON_START": "false",
+    "BRANCHBOOK_INBOX_ENABLED": "false",
+    "BRANCHBOOK_INBOX_REDACT_REFERENCES": "true",
+    "BRANCHBOOK_RETENTION_ENABLED": "true",
+    "BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY": "true",
+    "MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE": "health,info",
+    "SERVER_FORWARD_HEADERS_STRATEGY": "native"
+  }
+}

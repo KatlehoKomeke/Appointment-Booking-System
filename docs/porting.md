@@ -67,5 +67,5 @@ The Content Security Policy still holds the port to account. Vue's full build co
 with `new Function`, which `default-src 'self'` refuses; single-file components compiled by Vite need no compiler at
 runtime ([web/README.md, Security](../web/README.md#security)).
 
-Next: [architecture.md](architecture.md) for the design being ported; [production-notes.md](production-notes.md) for
-what a bank deployment would add.
+Next: [architecture.md](architecture.md) for the design being ported; [production-readiness.md](production-readiness.md)
+for the production controls a port must keep, each with its evidence.

@@ -3,6 +3,9 @@
 *.js
 !jest.config.js
 *.d.ts
+# Custom resource handlers are plain JavaScript that Lambda runs as written, with types for the tests beside them.
+!lambda/**/*.js
+!lambda/**/*.d.ts
 node_modules
 
 # CDK synthesis output and asset staging (also ignored at the repository root).

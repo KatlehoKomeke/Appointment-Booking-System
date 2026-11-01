@@ -1,0 +1,72 @@
+# .github/tools/compose.yaml
+#
+# The command-line tools the workflows run in containers, each pinned by version and digest. They live in one compose
+# file, rather than as `docker run` lines inside the workflows, because Dependabot reads compose files
+# (.github/dependabot.yml, the docker-compose ecosystem): a new release arrives as a pull request that CI checks, and
+# the digest moves with the tag. Nothing here is a long-running service; each tool runs once and exits:
+#
+#   docker compose --file .github/tools/compose.yaml run --rm <tool> <arguments>
+#
+# Run it from the repository root. Paths below are relative to this file, so ../.. is the repository root.
+
+name: branchbook-ci-tools
+
+services:
+  # Scans the application image for known vulnerabilities and writes its software bill of materials (ci.yml, job
+  # image). The image arrives as a `docker save` archive under the repository root, so no Docker socket is mounted.
+  # The vulnerability databases are kept in a volume, so the scan and the SBOM download them once per job.
+  trivy:
+    image: aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa
+    working_dir: /work
+    volumes:
+      - ../..:/work
+      - trivy-cache:/root/.cache/trivy
+
+  # Runs load/booking.js against the stack that ci.yml's job stack starts on the runner's loopback address.
+  k6:
+    image: grafana/k6:1.8.1@sha256:23f2279054c3e01535455c4d92914a625df12aeb631ea0e3ea7a43f96bcbc843
+    network_mode: host
+    volumes:
+      - ../../load:/load:ro
+
+  # The OWASP ZAP baseline scan of the same stack. ZAP reads its rules from, and writes its reports to, zap-work/ in
+  # the repository root, which the workflow creates and makes writable for ZAP's own user.
+  zap:
+    image: ghcr.io/zaproxy/zaproxy:2.17.0@sha256:030d3df57735dacbb83464854758e674dd9ad01d79d12a129a8e58b1fd384238
+    network_mode: host
+    volumes:
+      - ../../zap-work:/zap/wrk
+
+  # Lints every workflow, including the shell in each run step (it bundles shellcheck).
+  actionlint:
+    image: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
+    working_dir: /repo
+    volumes:
+      - ../..:/repo:ro
+    command: ['-color']
+
+  # Audits the workflows and dependabot.yml for security problems. With GH_TOKEN set it also runs its online audits,
+  # which check that every pinned SHA belongs to the action it claims and has no known advisory.
+  zizmor:
+    image: ghcr.io/zizmorcore/zizmor:1.30.1@sha256:a2eb396d886c053073405c7a980f2139ba2248ec172243cfa3841e57196e8101
+    working_dir: /repo
+    volumes:
+      - ../..:/repo:ro
+    environment:
+      - GH_TOKEN
+    command: ['--format', 'github', '.']
+
+  # Scans the full git history for secrets (secret-scan.yml). The Makefile and .githooks/pre-commit pin the same
+  # version by tag, and are updated by hand when Dependabot moves this one.
+  gitleaks:
+    image: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+    volumes:
+      - ../..:/repo:ro
+    # Lets the containerised git trust the mounted repository, which a different user ID owns.
+    environment:
+      GIT_CONFIG_COUNT: '1'
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: '*'
+
+volumes:
+  trivy-cache:

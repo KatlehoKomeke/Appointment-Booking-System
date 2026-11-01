@@ -1,0 +1,35 @@
+# .github/zap/rules.tsv
+#
+# The rules for the OWASP ZAP baseline scan that ci.yml's job stack runs against the running application. The
+# format is ZAP's: one rule per line, tab-separated: the rule's id, then IGNORE, INFO, WARN or FAIL, then a note.
+#
+# Every rule not listed here is WARN, and the job runs the scan without -I, so any warning or failure fails the
+# build: a new finding must be fixed, or listed here with the reason it does not apply. INFO reports an alert in the
+# log and the report without failing; IGNORE drops it. To list every rule ZAP knows, run the scan with -g gen.conf.
+#
+# Reported but never failing (INFO): alerts whose risk ZAP itself rates informational, about choices made on purpose.
+#
+# 10027 Information Disclosure - Suspicious Comments. The match is a word such as "query" inside the minified code
+#   of a library in the JavaScript bundle; the build strips the source's own comments.
+# 10049 Content Cacheability (Non-Storable Content). Spring Security's default Cache-Control: no-store applies to
+#   every response. It is right for a lookup, which returns personal data, and costs only a re-download of the
+#   small, hashed static assets.
+# 10109 Modern Web Application. A statement that the app is a single-page application, which only suggests ZAP's
+#   browser-driven spider; the Playwright end-to-end tests drive the app's pages instead.
+#
+# Ignored (IGNORE):
+#
+# 10116 ZAP is Out of Date. The image is pinned by digest in .github/tools/compose.yaml and Dependabot proposes each
+#   new release, so a ZAP release must not turn an unchanged commit red.
+# 90004 Insufficient Site Isolation Against Spectre Vulnerability (the Cross-Origin-Embedder-, -Opener- and
+#   -Resource-Policy headers). Cross-origin isolation protects responses that another site could make the browser
+#   load with the visitor's credentials. BranchBook has no session or login cookie, and the one response that holds
+#   personal data, an appointment lookup, needs the X-Mobile-Last4 header, which a cross-origin page cannot attach to
+#   an image or script load, so there is nothing for a side channel to read. Cross-Origin-Embedder-Policy would also
+#   make the booking page depend on AWS sending an embedding opt-in with the WAF CAPTCHA script and puzzle, which it
+#   serves from its own origin and this project does not control.
+10027	INFO	(Information Disclosure - Suspicious Comments) a word in minified library code
+10049	INFO	(Content Cacheability) no-store suits personal data
+10109	INFO	(Modern Web Application) a statement, not a finding
+10116	IGNORE	(ZAP is Out of Date) the image is pinned; Dependabot proposes new releases
+90004	IGNORE	(Insufficient Site Isolation Against Spectre Vulnerability) no credentialed cross-origin data to read

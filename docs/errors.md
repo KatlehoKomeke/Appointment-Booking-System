@@ -139,7 +139,7 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 | `SLOT_OFF_GRID` | 422 | The start time is not on the service's slot grid. | The slot is not offered. |
 | `SLOT_WITHIN_LEAD_TIME` | 422 | The slot starts less than two hours from now; usually a page left open too long. | "That time is too soon. Please choose a later slot." |
 | `MOBILE_NUMBER_REQUIRED` | 422 | The number is missing or not a South African mobile number (for example a landline or a VoIP number). `errors[]` names `customer.mobile`. | "We need a cellphone number to SMS your confirmation." |
-| `DEMO_NUMBER_REQUIRED` | 422 | Only where the deployment takes only the published demo numbers (`branchbook.booking.demo-numbers-only`, off by default, and off on the hosted demo since it sends real SMS): the number is a South African mobile outside 082 555 0000 to 0199. Decided with `MOBILE_NUMBER_REQUIRED`, before anything is written, so a real person's number is never stored or sent an SMS ([ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md)). `errors[]` names `customer.mobile`; the body never repeats the number. | "Use a demo number. This demo accepts only the numbers 082 555 0000 to 082 555 0199. Try 082 555 0101." On the cellphone field: "This demo accepts only 082 555 0000 to 082 555 0199, for example 082 555 0101." |
+| `DEMO_NUMBER_REQUIRED` | 422 | Only where the deployment takes only the published demo numbers (`branchbook.booking.demo-numbers-only`, off by default and in production, which sends real SMS, and on in staging): the number is a South African mobile outside 082 555 0000 to 0199. Decided with `MOBILE_NUMBER_REQUIRED`, before anything is written, so a real person's number is never stored or sent an SMS ([ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md)). `errors[]` names `customer.mobile`; the body never repeats the number. | "Use a demo number. This demo accepts only the numbers 082 555 0000 to 082 555 0199. Try 082 555 0101." On the cellphone field: "This demo accepts only 082 555 0000 to 082 555 0199, for example 082 555 0101." |
 | `IDEMPOTENCY_KEY_REUSED` | 422 | The same `Idempotency-Key` was sent with a different request body, **or** with the same body after the booking it made was cancelled; then the fixed detail says that booking has been cancelled and a new key is needed, and nothing is booked. | Nothing; the web app mints a new key when the details change, and for each new booking. |
 | `DUPLICATE_APPOINTMENT` | 409 | This mobile already has an upcoming appointment for this service. The body names no reference, branch or time. | "You already have an upcoming appointment for this service." |
 | `CUSTOMER_OVERLAP` | 409 | This mobile already has an appointment at an overlapping time, at any branch. | "You already have an appointment at that time." |
@@ -151,3 +151,20 @@ A field problem's `message` is a short English hint, such as "must be 4 digits";
 
 Not in v1: `413 PAYLOAD_TOO_LARGE`. Request-body size limits belong to the gateway or WAF in front of the
 application, and the request-body filter was cut from the plan.
+
+## When the firewall asks for a CAPTCHA
+
+In staging and production, AWS WAF asks for a CAPTCHA on every booking and cancel `POST`
+([ADR-0011](adr/0011-waf-captcha-instead-of-a-one-time-pin.md)). A request without a valid token never reaches the
+API: WAF answers `405` with the header `x-amzn-waf-action: captcha` and no problem body, so there is no code. The web
+app shows AWS's puzzle and, once it is solved, sends the same request once more with the same `Idempotency-Key`
+([web/README.md](../web/README.md#when-the-firewall-asks-for-a-captcha)). When the check does not end in a solved
+puzzle, nothing was sent, and the customer sees one of these. The copy is `CAPTCHA_COPY` in
+[web/src/api/problemCopy.ts](../web/src/api/problemCopy.ts), chosen by the reason `web/src/api/captcha.ts` gives.
+
+| Reason | When it happens | What the customer sees |
+|---|---|---|
+| `cancelled` | The customer closed the check, with Escape or Close, before solving it. | "The check was closed before it was finished" / "Nothing was sent. Try again, and solve the puzzle when it appears." |
+| `failed` | AWS's puzzle reported a failure. | "We couldn't complete the check" / "Nothing was sent. Please try again." |
+| `unavailable` | AWS's CAPTCHA script did not load within 15 seconds, or failed to. | "We couldn't load the check" / "Nothing was sent. Check your internet connection, then try again." |
+| (none) | A `405` where no CAPTCHA is configured, as locally, or a second challenge of the resent request. | The generic "Something went wrong on our side", as for a `5xx` with no code. |
