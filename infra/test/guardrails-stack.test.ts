@@ -159,7 +159,7 @@ describe('GuardrailsStack', () => {
   test('enables Security Hub with only the AWS Foundational Security Best Practices standard, after AWS Config', () => {
     template.hasResource('AWS::SecurityHub::Hub', {
       Properties: { EnableDefaultStandards: false, ControlFindingGenerator: 'SECURITY_CONTROL', AutoEnableControls: true },
-      DependsOn: Match.arrayWith([Match.stringLikeRegexp('^ConfigDeliveryChannel')]),
+      DependsOn: Match.arrayWith([Match.stringLikeRegexp('^ConfigDeliveryChannel'), Match.stringLikeRegexp('^ConfigRecorder')]),
     });
     template.resourceCountIs('AWS::SecurityHub::Standard', 1);
     template.hasResource('AWS::SecurityHub::Standard', {

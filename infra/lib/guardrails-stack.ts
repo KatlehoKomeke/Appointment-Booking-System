@@ -272,8 +272,9 @@ export class GuardrailsStack extends Stack {
       controlFindingGenerator: 'SECURITY_CONTROL',
       autoEnableControls: true,
     });
-    // Security Hub's controls evaluate through AWS Config, so Config records before Security Hub starts.
-    hub.node.addDependency(deliveryChannel);
+    // Security Hub's controls evaluate through AWS Config, so Config records before Security Hub starts: the recorder
+    // reports created only once it is recording, which needs the channel.
+    hub.node.addDependency(recorder, deliveryChannel);
     const standard = new securityhub.CfnStandard(this, 'FoundationalBestPractices', {
       standardsArn: `arn:${partition}:securityhub:${region}::standards/${FOUNDATIONAL_BEST_PRACTICES}`,
     });
