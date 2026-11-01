@@ -59,9 +59,9 @@ files live in `.github/workflows/`.
 | local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; `.env.example`; the `Makefile` up, db-password and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box); `ci.yml` (jobs `image` and `stack`) | when a route, a management endpoint, the image or the compose stack changes | `90bf68b` |
 | delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/lib/app.ts`; `infra/lib/account-stack.ts`; `infra/lib/registry-stack.ts`; the `main` ruleset and the `staging` and `production` environments | when a workflow, a job, a hook, a stack the pipeline deploys or a GitHub setting changes | `90bf68b` |
 | push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured after the first run of the pipeline with `deploy` inside `ci` | `85cd726` (measured at `c5feafe`, before the `deploy` job joined `ci`) |
-| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/config/`; `infra/cdk.json` | when a stack, an environment, or who deploys it, changes | `90bf68b` |
+| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/config/`; `infra/cdk.json` | when a stack, an environment, or who deploys it, changes | `b64bbff` |
 | keyless-deploy | `ci.yml` (job `deploy`); `infra/lib/account-stack.ts` | on hardening; when the `deploy` job's steps change | `21798b6` |
-| access-boundary | `infra/lib/account-stack.ts`; `infra/lib/guardrails-stack.ts`; `infra/lib/app.ts`; `infra/lib/app-stack.ts` (ports, WAF, the task's database user); `infra/cdk.json` (the permissions boundary); `V9__runtime_role.sql`; `ci.yml` (the delivery jobs); `aws-connection-check.yml`; the `staging` and `production` environments; the `main` ruleset; the bootstrap commands in infra/README.md | when a guard changes | `90bf68b` |
+| access-boundary | `infra/lib/account-stack.ts`; `infra/lib/guardrails-stack.ts`; `infra/lib/app.ts`; `infra/lib/app-stack.ts` (ports, WAF, the task's database user); `infra/cdk.json` (the permissions boundary); `V9__runtime_role.sql`; `ci.yml` (the delivery jobs); `aws-connection-check.yml`; the `staging` and `production` environments; the `main` ruleset; the bootstrap commands in infra/README.md | when a guard changes | `b64bbff` |
 | secret-layers | `.gitignore`; `.githooks/pre-commit`; `.gitleaks.toml`; `secret-scan.yml`; `ci.yml` (job `stack` and the delivery jobs); `compose.yaml` and the `Makefile` (the local password); `infra/lib/data-stack.ts`, `infra/lib/app-stack.ts` and `infra/lib/captcha-api-key.ts` (the generated secrets, the task's secrets and IAM database authentication); the environments' secrets; the repository's security settings | when a layer is added or changes | `90bf68b` |
 | diagram key | the rules on this page | only with the visual language | `85cd726` |
 
@@ -269,7 +269,7 @@ lines; a diagram's legend is usually one.
 - AWS STS sits outside both Region groups: IAM is global, and the delivery jobs call the af-south-1 endpoint. IAM
   resources sit inside the `BranchbookAccount` stack frame, because that stack defines them.
 - Account-specific names are written `-<account>-<region>`, and an ARN, if one is needed at all, as
-  `arn:aws:iam::<account>:role/cdk-hnb659fds-*`.
+  `arn:aws:iam::<account>:role/cdk-bbprod-*`.
 - GitHub is a neutral group titled `GitHub`, with the slug `KatlehoKomeke/Appointment-Booking-System` in mono.
   Workflows are file shapes named by their `.yml` file, with job ids as small pills or nodes. A GitHub environment is
   a gate or a node labelled with its name, such as `environment production`.

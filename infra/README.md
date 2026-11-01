@@ -2,7 +2,7 @@
 
 Every resource the pipeline and the application use is defined here with the
 [AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) in TypeScript. The account, its administrator, the
-Cape Town opt-in, the CDK bootstrap and the GitHub environment are one-time manual steps, listed under
+Cape Town opt-in, the CDK bootstraps and the GitHub environments are one-time manual steps, listed under
 [First-time setup](#first-time-setup). The reasoning is in [ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md)
 and [ADR-0007](../docs/adr/0007-continuous-deployment-from-main.md).
 
@@ -22,10 +22,12 @@ Every control here, with the test or cdk-nag rule that proves it, is listed in
 
 ## What exists today
 
-*Status: The picture is built in code and not yet deployed: two environments, `staging` and `production`, selected
-with `BRANCHBOOK_ENV`, the ECR repository `BranchbookRegistry` and the account's guardrails, `BranchbookGuardrails`.
-The table below is what is deployed today: four stacks, which the single-environment pipeline deployed on every push
-to `main` until this change, first by hand on 2026-10-26.*
+*Status: The picture is built in code. The administrator's part was deployed on 2026-11-01: `BranchbookAccount`
+with one deploy role per environment, the account's guardrails, `BranchbookGuardrails`, and each environment's CDK
+bootstrap. The two environments, `staging` and `production`, selected with `BRANCHBOOK_ENV`, and the ECR repository
+`BranchbookRegistry` are not yet deployed: the pipeline creates them on its first run from `main`. Until then
+production is the hosted demo's three stacks, which the single-environment pipeline deployed on every push to `main`,
+first by hand on 2026-10-26.*
 
 ![BranchBook in AWS, all built: two environments, staging and production, in one account. Along the top, a customer's browser with no sign-in, GitHub's staging and production environments (production needs an approval), and the administrator. In us-east-1, BranchbookAccount holds the GitHub OIDC provider, one deploy role per environment and the budget. In Cape Town, staging and production are built from the same three stacks: WAF with a CAPTCHA and per-address limits, a load balancer, autoscaled Fargate tasks in private subnets, a migration task, alarms, a canary and fault-injection experiments; a VPC over two zones with a NAT gateway per zone, Secrets Manager and a Multi-AZ RDS database the tasks sign in to as branchbook_app with IAM; and the release record. Shared: the ECR registry, AWS End User Messaging SMS (production only), BranchbookGuardrails and the CDK bootstraps. The administrator deploys the account-level stacks by hand (A); a delivery job signs in through OpenID Connect (1); the image is pushed once (2); staging is deployed, then production after approval (3).](../docs/assets/diagrams/aws-footprint.svg)
 
@@ -38,7 +40,7 @@ hand, from their own machine. The pipeline never deploys them ([Who can change w
 2. **The image is pushed once.** `publish` pushes the image the checks tested to the `branchbook` repository of
    `BranchbookRegistry`, with immutable tags; both environments run it by digest.
 3. **Staging, then production.** `deploy-staging` deploys staging's three stacks through its own bootstrap, `bbstg`;
-   once a person approves, `deploy-production` deploys production's through `hnb659fds`
+   once a person approves, `deploy-production` deploys production's through `bbprod`
    ([Automatic deployment](#automatic-deployment)).
 
 Until this change, the pipeline signed in through the single GitHub environment `aws-demo` as
@@ -49,15 +51,16 @@ definition.
 
 | Stack and Region | Deployed by | What it creates |
 |---|---|---|
-| [`BranchbookAccount`](lib/account-stack.ts)<br>`us-east-1` | Administrator, by hand | The GitHub OIDC provider, the deploy roles, the budget `branchbook-monthly` and the role ARNs as outputs. Deployed today with the single role `branchbook-github-deploy`; in code, one role per environment, `branchbook-github-deploy-staging` and `branchbook-github-deploy-production` |
-| [`BranchbookGuardrails`](lib/guardrails-stack.ts)<br>`af-south-1` | Not yet deployed (administrator, by hand) | CloudTrail, GuardDuty, AWS Config, Security Hub, IAM Access Analyzer, the permissions boundary and each environment's execution policy |
+| [`BranchbookAccount`](lib/account-stack.ts)<br>`us-east-1` | Administrator, by hand (2026-11-01) | The GitHub OIDC provider, one deploy role per environment, `branchbook-github-deploy-staging` and `branchbook-github-deploy-production`, a deploy scope on each bootstrap's deploy role, the budget `branchbook-monthly` and the role ARNs as outputs |
+| [`BranchbookGuardrails`](lib/guardrails-stack.ts)<br>`af-south-1` | Administrator, by hand (2026-11-01) | CloudTrail, GuardDuty, AWS Config, Security Hub, IAM Access Analyzer, the permissions boundary and each environment's execution policy |
 | [`BranchbookRelease`](lib/release-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` | The SSM parameters `/branchbook/release` and, in code, `/branchbook/release-image`: the last commit and digest the pipeline deployed |
 | [`BranchbookData`](lib/data-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` (first by hand, 2026-10-26) | Production's VPC, its RDS for PostgreSQL 17 database and the SMS daily cap's key ([Environments](#environments-staging-and-production)) |
 | [`BranchbookApp`](lib/app-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` (first by hand, 2026-10-26) | Production's certificate, WAF, load balancer, Fargate service, schema migration, SMS protect configuration, logs, alarms and DNS record |
 | [`BranchbookRegistry`](lib/registry-stack.ts)<br>`af-south-1` | Not yet deployed | The ECR repository `branchbook`: immutable tags, scan on push, the newest 50 images kept |
 | `BranchbookStagingData`, `BranchbookStagingApp`, `BranchbookStagingRelease`<br>`af-south-1` | Not yet deployed | Staging's copies of the three stacks, at https://stg.branchbook.click |
-| `CDKToolkit`<br>both Regions | Administrator, once per Region | The `cdk bootstrap` stack, qualifier `hnb659fds`: the deploy, file-publishing, image-publishing, lookup and cfn-exec roles, an assets bucket and an ECR repository. In `af-south-1` it becomes production's bootstrap |
-| `CDKToolkitStaging`<br>`af-south-1` | Not yet created (administrator, once) | Staging's own bootstrap, qualifier `bbstg` ([First-time setup](#first-time-setup)) |
+| `CDKToolkit`<br>both Regions | Administrator, once per Region | CDK's default bootstrap, qualifier `hnb659fds`: the deploy, file-publishing, image-publishing, lookup and cfn-exec roles, an assets bucket and an ECR repository. The administrator's stacks deploy through it, and so did production's until the cutover. Other CDK apps in the account share it, so BranchBook never changes it |
+| `CDKToolkitProduction`<br>`af-south-1` | Administrator, once (2026-11-01) | Production's own bootstrap, qualifier `bbprod`. Created with CDK's default execution policy, which is narrowed to `branchbook-cdk-cfn-exec-production` after production's first deployment through it ([Hardening the account that already runs production](#hardening-the-account-that-already-runs-production)) |
+| `CDKToolkitStaging`<br>`af-south-1` | Administrator, once (2026-11-01) | Staging's own bootstrap, qualifier `bbstg`, with the execution policy `branchbook-cdk-cfn-exec-staging` ([First-time setup](#first-time-setup)) |
 
 - **Cost.** `BranchbookAccount` and `BranchbookRelease` cost nothing to run; the bootstrap storage costs cents. The
   hosted demo costs about $102 a month while it runs. Both environments, the guardrails and the observability are
@@ -103,8 +106,8 @@ record proves and what it does not, and how runs queue are in
 
 ## How GitHub reaches AWS without keys
 
-*Status: Built in code; not yet deployed. The live account still has the single role `branchbook-github-deploy`,
-trusted by the environment `aws-demo`, until the administrator deploys `BranchbookAccount`
+*Status: Deployed on 2026-11-01. The two roles replaced the single role `branchbook-github-deploy`, which the
+environment `aws-demo` trusted; the pipeline first signs in with them on its first run from `main` after this change
 ([Hardening the account that already runs production](#hardening-the-account-that-already-runs-production)).*
 
 ```mermaid
@@ -185,7 +188,7 @@ The pipeline, on a push to `main`, in a staging lane and a production lane:
 3. **Each environment's deploy role**, `branchbook-github-deploy-staging` or `-production`. AWS STS accepts GitHub's
    OIDC token only on an exact match (`StringEquals`): `aud` is `sts.amazonaws.com`, and `sub` names this repository
    by ID and that environment alone. Sessions last at most 1 hour. The role may assume only its own bootstrap's roles
-   in `af-south-1` (`cdk-bbstg-*` for staging, `cdk-hnb659fds-*` for production), never the `us-east-1` ones, and
+   in `af-south-1` (`cdk-bbstg-*` for staging, `cdk-bbprod-*` for production), never the `us-east-1` ones, and
    otherwise only read its own release records, push to and pull from the image repository and, on staging, read the
    synthetic-traffic token ([account-stack.test.ts](test/account-stack.test.ts)). IAM enforces this.
 4. **Each environment's CDK bootstrap.** Its deploy role carries the deploy scope `branchbook-cdk-deploy-scope-<env>`,

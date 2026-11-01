@@ -27,8 +27,8 @@ staging environment first, with a person's approval before production and a way 
   `/<prefix>/release-image`) is written only after its smoke test passes, and in staging its end-to-end tests too.
 - **Automatic rollback.** If production's deployment or smoke test fails, `rollback-production` redeploys the last
   recorded release: its commit's CDK app and its digest.
-- **In-account separation.** Each environment has its own CDK bootstrap qualifier (production `hnb659fds`, staging
-  `bbstg`), its own CloudFormation execution policy, a deploy-scope deny on the other environment's stacks, and its
+- **In-account separation.** Each environment has its own CDK bootstrap qualifier (production `bbprod`, staging
+  `bbstg`; never CDK's default, which other CDK apps in the account share), its own CloudFormation execution policy, a deploy-scope deny on the other environment's stacks, and its
   own deploy role, which trusts only its own GitHub environment (`branchbook-github-deploy-staging`,
   `branchbook-github-deploy-production`). Every role the application stacks create carries a permissions boundary.
 
