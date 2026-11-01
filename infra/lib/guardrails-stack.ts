@@ -258,8 +258,11 @@ export class GuardrailsStack extends Stack {
       s3KeyPrefix: CONFIG_KEY_PREFIX,
       configSnapshotDeliveryProperties: { deliveryFrequency: settings.config.snapshotDeliveryFrequency },
     });
-    // AWS Config requires the recorder before the channel, and the channel needs the bucket policy to write.
-    deliveryChannel.node.addDependency(recorder);
+    // The channel needs the bucket policy to write. It must not wait for the recorder: CloudFormation's recorder handler
+    // starts recording once it has created the recorder, and keeps retrying until a delivery channel exists, so a
+    // channel that waited for it would never come (the deployment fails with "did not stabilize"). The recorder has no
+    // dependency and the channel waits for the bucket and its policy, so the recorder still exists first, as
+    // PutDeliveryChannel requires.
     deliveryChannel.node.addDependency(bucketPolicy);
 
     // Exactly one standard: Security Hub's defaults would also enable the older CIS 1.2.0 benchmark. One finding per

@@ -17,6 +17,12 @@ import { environmentStackIds } from './environment';
 import { REGISTRY_STACK_ID } from './registry-stack';
 import { releaseImageParameterName, releaseParameterName } from './release-stack';
 
+/**
+ * CDK's default bootstrap qualifier. Any CDK app in the account that names no qualifier deploys through it, so no
+ * BranchBook environment may use it (see {@link parseAccountConfig}).
+ */
+export const CDK_DEFAULT_QUALIFIER = 'hnb659fds';
+
 /** The issuer of the OpenID Connect tokens that GitHub Actions presents to AWS. */
 export const GITHUB_OIDC_URL = 'https://token.actions.githubusercontent.com';
 
@@ -86,7 +92,9 @@ export interface DeployEnvironmentConfig {
   /**
    * The qualifier of the CDK bootstrap this environment deploys through. Each environment has its own, so its deploy
    * role can assume only its own bootstrap roles, whose execution policy changes only its own stacks' IAM roles.
-   * Production keeps `hnb659fds`, CDK's default, which its live stacks were deployed with.
+   * Neither may be `hnb659fds`, CDK's default: every other CDK app in the account deploys through the default
+   * bootstrap, so narrowing its execution policy for BranchBook would break them, and BranchBook's roles must not
+   * reach them either.
    */
   readonly cdkBootstrapQualifier: string;
 }
@@ -231,6 +239,14 @@ export function parseAccountConfig(raw: unknown, source = 'infra/config/account.
     const values = ENVIRONMENT_NAMES.map((name) => environments[name][key]);
     if (new Set(values).size !== values.length) {
       fail(`deploy.environments.*.${key}`, 'must differ between environments');
+    }
+  }
+  for (const name of ENVIRONMENT_NAMES) {
+    if (environments[name].cdkBootstrapQualifier === CDK_DEFAULT_QUALIFIER) {
+      fail(
+        `deploy.environments.${name}.cdkBootstrapQualifier`,
+        `must not be ${CDK_DEFAULT_QUALIFIER}, CDK's default: other CDK apps in the account deploy through that bootstrap`,
+      );
     }
   }
 
