@@ -112,12 +112,13 @@ branchbook:
     idempotency-key-ttl: ${BRANCHBOOK_BOOKING_IDEMPOTENCY_KEY_TTL:PT24H}
     # The most later slots a 409 SLOT_FULL offers instead (BR-7).
     max-alternatives: ${BRANCHBOOK_BOOKING_MAX_ALTERNATIVES:3}
-    # A public demo must never be given a real person's number (ADR-0006). Switched on, a booking whose number is a
-    # South African mobile outside the published demo block, 082 555 0000 to 0199, is refused with
+    # A public demo, such as staging, must never be given a real person's number (ADR-0006). Switched on, a booking
+    # whose number is a South African mobile outside the published demo block, 082 555 0000 to 0199, is refused with
     # 422 DEMO_NUMBER_REQUIRED before anything is written. Off by default; docker compose and make dev-api leave it off,
-    # and the shared test configuration sets it off (DemoNumbersOnlyIT alone switches it on). The hosted demo's task
-    # definition is to switch it on with BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true; the start-up log says which numbers
-    # bookings take, and EXPECT_DEMO_NUMBERS_ONLY=1 scripts/smoke.sh fails while it is off.
+    # and the shared test configuration sets it off (DemoNumbersOnlyIT alone switches it on). Staging switches it on
+    # (BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true in infra/config/staging.json); production leaves it off, because it
+    # texts real numbers. The start-up log says which numbers bookings take, and EXPECT_DEMO_NUMBERS_ONLY=1
+    # scripts/smoke.sh fails while it is off.
     demo-numbers-only: ${BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY:false}
     # The published demo numbers, both ends included, in E.164 form: 082 555 0000 to 0199, printed in the README for
     # anyone to try. They are what demo-numbers-only takes, they are always simulated whichever SMS gateway is chosen,
@@ -178,11 +179,12 @@ branchbook:
     # Which gateway sends each SMS. simulated, the default, sends nothing, as in docker compose, make dev-api and the
     # tests. aws sends a real SMS through AWS End User Messaging SMS to every number outside the published demo block,
     # 082 555 0000 to 0199, which stays simulated because anyone may type it and it may belong to a real stranger.
-    # The hosted demo's task definition is to set BRANCHBOOK_SMS_GATEWAY=aws; the start-up log names the gateway.
+    # Production sets BRANCHBOOK_SMS_GATEWAY=aws and staging keeps simulated, each from the sms block of its
+    # infra/config file; the start-up log names the gateway.
     gateway: ${BRANCHBOOK_SMS_GATEWAY:simulated}
     # The most SMS one number outside the demo block may be written in any 24 hours, confirmations and cancellations
     # together; one more is written FAILED with RECIPIENT_DAILY_CAP and never sent, while the booking or the cancel
-    # still succeeds (BR-17). 0 switches the cap off, as locally and in the tests; the hosted demo is to set it with
+    # still succeeds (BR-17). 0 switches the cap off, as locally and in the tests; staging and production set it with
     # BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP, so nobody can make the app text one number without end.
     recipient-daily-cap: ${BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP:0}
     # The secret that keys each number's fingerprint in the cap's ledger, sms_recipient_sends, which holds a keyed
@@ -192,11 +194,11 @@ branchbook:
     recipient-cap-key: ${BRANCHBOOK_SMS_RECIPIENT_CAP_KEY:}
     aws:
       # Read only when the gateway is aws. Credentials never appear here: the SDK's default chain finds them, which in
-      # the hosted demo is the ECS task role. The region to send from, such as af-south-1 (BRANCHBOOK_SMS_AWS_REGION);
+      # production is the ECS task role. The region to send from, such as af-south-1 (BRANCHBOOK_SMS_AWS_REGION);
       # empty leaves it to the SDK's default region chain, and start-up fails if that finds none.
       region: ${BRANCHBOOK_SMS_AWS_REGION:}
-      # The protect configuration that limits the countries a message may go to; the hosted demo's allows South
-      # Africa only (BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID). Empty sends none.
+      # The protect configuration that limits the countries a message may go to; production's allows South Africa
+      # only (BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID). Empty sends none.
       protect-configuration-id: ${BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID:}
       # The configuration set whose event destinations record each message (BRANCHBOOK_SMS_AWS_CONFIGURATION_SET).
       # Empty sends none.
@@ -221,18 +223,19 @@ branchbook:
     # docker compose, make dev-api and the tests switch it on; off, the path is a plain 404.
     enabled: ${BRANCHBOOK_INBOX_ENABLED:false}
     # Shows every appointment reference in the inbox, and in its retry's answer, as APT-****-****: in the reference
-    # field and in each message's text. The hosted demo has no sign-in, and a public inbox listing references beside
-    # demo numbers, whose last four digits are easily guessed, would let anyone open or cancel another visitor's
+    # field and in each message's text. Staging and production have no sign-in, and a public inbox listing references
+    # beside demo numbers, whose last four digits are easily guessed, would let anyone open or cancel another visitor's
     # booking (BR-19). Off by default, as in docker compose, make dev-api and the tests (InboxReferencesHiddenIT alone
-    # switches it on); the hosted demo's task definition is to switch it on with BRANCHBOOK_INBOX_REDACT_REFERENCES=true.
+    # switches it on); application-prod.yml switches it on, and staging and production also set
+    # BRANCHBOOK_INBOX_REDACT_REFERENCES=true.
     redact-references: ${BRANCHBOOK_INBOX_REDACT_REFERENCES:false}
   retention:
     # Deletes every booking whose appointment is over, with its messages and idempotency keys, every hour from a minute
-    # after start-up, which keeps the hosted demo's promise to keep a booking, with the name and number, until its
-    # appointment is over and delete it within the hour after it ends (SECURITY.md, ADR-0006). A booking for a future
-    # date is never touched. Off by default, and so off in docker compose, make dev-api and the tests: a copy run
-    # locally keeps its bookings until you delete them. Only the hosted demo's task definition switches it on
-    # (BRANCHBOOK_RETENTION_ENABLED=true).
+    # after start-up, which keeps the promise staging and production make: to keep a booking, with the name and number,
+    # until its appointment is over and delete it within the hour after it ends (SECURITY.md, ADR-0006). A booking for
+    # a future date is never touched. Off by default, and so off in docker compose, make dev-api and the tests: a copy
+    # run locally keeps its bookings until you delete them. Only staging and production switch it on
+    # (BRANCHBOOK_RETENTION_ENABLED=true in infra/config/staging.json and production.json).
     enabled: ${BRANCHBOOK_RETENTION_ENABLED:false}
     # How long after its appointment ends a booking is kept before it is deleted (BRANCHBOOK_RETENTION_AFTER_END), as
     # an ISO-8601 duration. Zero by default; a negative value stops start-up.

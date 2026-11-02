@@ -6,9 +6,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * Settings of the simulated inbox (FR-17, FR-18), under {@code branchbook.inbox} in
  * application.yml.
  *
- * <p>A deployment with no sign-in, such as the hosted demo, hides references: a public inbox that
- * listed them, beside demo numbers whose last four digits are easily guessed, would let anyone open
- * or cancel another visitor's booking (BR-19).
+ * <p>A deployment with no sign-in, such as staging or production, hides references: a public inbox
+ * that listed them, beside demo numbers whose last four digits are easily guessed, would let anyone
+ * open or cancel another visitor's booking (BR-19).
  *
  * @param enabled whether the inbox and its retry exist; off by default, so their paths are a 404
  * @param redactReferences whether the inbox shows every appointment reference, in its own field and

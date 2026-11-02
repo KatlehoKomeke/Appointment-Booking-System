@@ -33,9 +33,9 @@ import za.co.fynbos.branchbook.support.DatabaseReset;
 import za.co.fynbos.branchbook.support.IntegrationTest;
 
 /**
- * ADR-0006: with {@code branchbook.booking.demo-numbers-only} on, as the hosted demo runs, a
- * booking takes only the published demo numbers, 082 555 0000 to 0199. Any other South African
- * mobile is {@code 422 DEMO_NUMBER_REQUIRED} on {@code customer.mobile}, decided where {@code
+ * ADR-0006: with {@code branchbook.booking.demo-numbers-only} on, as staging runs, a booking takes
+ * only the published demo numbers, 082 555 0000 to 0199. Any other South African mobile is {@code
+ * 422 DEMO_NUMBER_REQUIRED} on {@code customer.mobile}, decided where {@code
  * MOBILE_NUMBER_REQUIRED} is, so nothing is written and the number is repeated nowhere.
  *
  * <p>This test builds an application context of its own, and with it a database container of its
@@ -165,8 +165,8 @@ class DemoNumbersOnlyIT {
 
   /**
    * FR-30: a refusal for the number is counted once, as the {@code validation} outcome that {@code
-   * MOBILE_NUMBER_REQUIRED} is counted as, so on the hosted demo a visitor who types another number
-   * shows on the booking counter as a refused request rather than not at all.
+   * MOBILE_NUMBER_REQUIRED} is counted as, so on staging a visitor who types another number shows
+   * on the booking counter as a refused request rather than not at all.
    */
   @Test
   void aRefusalForTheNumberIsCountedAsAValidationOutcome() {

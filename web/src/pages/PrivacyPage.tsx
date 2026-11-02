@@ -14,12 +14,12 @@ const SECTIONS = [
   {
     id: 'privacy-responsible',
     heading: 'Who is responsible',
-    body: 'Fynbos Bank (fictional demo). Its information officer answers questions at privacy@fynbosbank.example.',
+    body: 'Fynbos Bank (fictional demo). Because it is fictional, it has no information officer to write to; Your rights, below, says what you can do yourself.',
   },
   {
     id: 'privacy-collect',
     heading: 'What we collect',
-    body: 'Your first name, last name and cellphone number. All three are needed to book, so none is optional. We never ask for your ID number. Use only your own cellphone number: the hosted demo texts it. The demo numbers 082 555 0000 to 082 555 0199 are never texted, and other visitors cannot see your booking.',
+    body: "Your first name, last name and cellphone number. All three are needed to book, so none is optional. We never ask for your ID number. branchbook.click and stg.branchbook.click also log each request's IP address and browser in their firewall's log, to find and stop abuse, for 30 days and 7 days respectively; a copy run locally logs neither. Use only your own cellphone number: branchbook.click texts it. The demo numbers 082 555 0000 to 082 555 0199 are never texted, the test copy at stg.branchbook.click accepts only those, and other visitors cannot see your booking.",
   },
   {
     id: 'privacy-why',
@@ -29,17 +29,17 @@ const SECTIONS = [
   {
     id: 'privacy-operator',
     heading: 'Who sends the SMS',
-    body: 'On the hosted demo, AWS End User Messaging, in Cape Town, sends each SMS for us as our operator. It receives only your number and the message, and keeps its own record of each message under its service terms. At most five messages a day go to one number. To count them, the hosted demo keeps a keyed fingerprint of the number, never the number itself, for about a day after each message.',
+    body: 'On branchbook.click, AWS End User Messaging, in Cape Town, sends each SMS for us as our operator. It receives only your number and the message, and keeps its own record of each message under its service terms. At most five messages a day go to one number. To count them, the site keeps a keyed fingerprint of the number, never the number itself, for about a day after each message.',
   },
   {
     id: 'privacy-retention',
     heading: 'How long we keep it',
-    body: "The hosted demo keeps a booking, with your name and number, until its appointment is over, and deletes it within the hour after it ends. The database's backups, which could still hold it, expire after 7 days. A copy run locally keeps them on that machine until you delete them. A booking you cancel is deleted at once; only the cancellation SMS is kept, until it has been sent or has failed for good. For about a day after you book, a one-way fingerprint of the booking's details is kept, never the details themselves, so that the same booking sent twice is booked once.",
+    body: "branchbook.click, and its test copy at stg.branchbook.click, keep a booking, with your name and number, until its appointment is over, and delete it within the hour after it ends. The database's backups, which could still hold it, expire after at most 14 days; if either site's database is ever deleted, a final copy of it is kept until we delete that too. A copy run locally keeps them on that machine until you delete them. A booking you cancel is deleted at once; only the cancellation SMS is kept, until it has been sent or has failed for good. For about a day after you book, a one-way fingerprint of the booking's details is kept, never the details themselves, so that the same booking sent twice is booked once.",
   },
   {
     id: 'privacy-rights',
     heading: 'Your rights',
-    body: 'You may ask to see your details or to have them corrected. If you are unhappy with how they are handled, you may complain to the Information Regulator at inforegulator.org.za.',
+    body: 'You may see your booking by opening it on Find your appointment with its reference and the last four digits of your number. Until it starts, you may cancel it, which deletes it at once; to correct a detail, cancel and book again. If you are unhappy with how your details are handled, you may complain to the Information Regulator at inforegulator.org.za.',
   },
 ] as const;
 

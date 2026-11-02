@@ -1,8 +1,9 @@
 /**
  * The countries AWS End User Messaging reports for a protect configuration in af-south-1, as returned by
  * `aws pinpoint-sms-voice-v2 get-protect-configuration-country-rule-set` on 2026-10-27. A protect configuration
- * allows every one of them by default, so the hosted demo blocks them by name; listing only codes AWS reports keeps
- * a deploy from failing on a code it does not know. Refresh the lists from the same call if AWS adds a country.
+ * allows every one of them by default, so production (branchbook.click), the one environment that sends real SMS,
+ * blocks them by name; staging simulates its SMS and has no protect configuration. Listing only codes AWS reports
+ * keeps a deploy from failing on a code it does not know. Refresh the lists from the same call if AWS adds a country.
  *
  * @packageDocumentation
  */

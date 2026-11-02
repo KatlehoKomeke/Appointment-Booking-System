@@ -9,7 +9,7 @@ import za.co.fynbos.branchbook.booking.application.NotificationEraser;
 
 /**
  * Deletes the messages of appointments that booking's retention purge is deleting, implementing
- * booking's {@code NotificationEraser} port, so the hosted demo keeps no customer's number or
+ * booking's {@code NotificationEraser} port, so staging and production keep no customer's number or
  * reference in a message after their booking has gone (SECURITY.md).
  *
  * <p>It refuses to run outside a transaction, like {@link NotificationOutbox}: a message is deleted

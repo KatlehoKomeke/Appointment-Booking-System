@@ -15,7 +15,7 @@
  * appointment itself, keeping only that SMS until it is final ({@code
  * application.CancelAppointmentHandler}, Tier 2; V6), the read that tells scheduling which seats
  * active appointments hold ({@code infrastructure}, implementing scheduling's port), and the
- * retention purge that deletes bookings once their appointment has ended for the hosted demo
+ * retention purge that deletes bookings once their appointment has ended, in staging and production
  * ({@code application.RetentionPurge}, run hourly by {@code infrastructure.RetentionPurgeJob} only
  * while {@code branchbook.retention.enabled} is true).
  *

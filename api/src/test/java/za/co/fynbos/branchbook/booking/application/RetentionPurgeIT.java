@@ -34,12 +34,12 @@ import za.co.fynbos.branchbook.support.IntegrationTest;
 import za.co.fynbos.branchbook.support.TestClockConfiguration;
 
 /**
- * The hosted demo's promise (SECURITY.md, ADR-0006): the retention purge keeps every booking until
- * its appointment is over, then deletes it, with its messages and its idempotency keys, and nothing
- * else. A booking for a future date is never touched, however long ago it was made. Appointments
- * are booked through the API, and the purge is called with the instant to purge as of, so no test
- * waits for its schedule. One test waits for real: a key row held by another connection makes a
- * batch wait out the 2-second {@code lock_timeout}.
+ * The promise staging and production make (SECURITY.md, ADR-0006): the retention purge keeps every
+ * booking until its appointment is over, then deletes it, with its messages and its idempotency
+ * keys, and nothing else. A booking for a future date is never touched, however long ago it was
+ * made. Appointments are booked through the API, and the purge is called with the instant to purge
+ * as of, so no test waits for its schedule. One test waits for real: a key row held by another
+ * connection makes a batch wait out the 2-second {@code lock_timeout}.
  */
 @IntegrationTest
 @ExtendWith({DatabaseReset.class, OutputCaptureExtension.class})

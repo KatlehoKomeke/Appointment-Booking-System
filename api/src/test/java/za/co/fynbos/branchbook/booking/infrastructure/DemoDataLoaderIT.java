@@ -139,9 +139,9 @@ class DemoDataLoaderIT {
   }
 
   /**
-   * ADR-0006: where only the published demo numbers book, as on the hosted demo, the fixtures,
-   * whose numbers are outside them on purpose, are not booked. The load says why in one INFO line
-   * that holds no number, rather than storing numbers the deployment promises it never takes. The
+   * ADR-0006: where only the published demo numbers book, as on staging, the fixtures, whose
+   * numbers are outside them on purpose, are not booked. The load says why in one INFO line that
+   * holds no number, rather than storing numbers the deployment promises it never takes. The
    * setting is the only difference from the loader the context holds.
    */
   @Test

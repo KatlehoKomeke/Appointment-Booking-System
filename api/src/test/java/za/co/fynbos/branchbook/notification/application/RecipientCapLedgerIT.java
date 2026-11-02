@@ -29,10 +29,10 @@ import za.co.fynbos.branchbook.support.MutableClock;
 
 /**
  * BR-17, V7: the daily cap counts every SMS of the last 24 hours in its ledger, so the messages a
- * cancel or the dispatcher deletes still count. With the cap at 5, as on the hosted demo, booking
- * and cancelling one number in turn reaches the cap although no message row is left. The ledger
- * holds only the number's keyed fingerprint and when its SMS was written, commits or rolls back
- * with the booking, and never hears of the demo block.
+ * cancel or the dispatcher deletes still count. With the cap at 5, as in staging and production,
+ * booking and cancelling one number in turn reaches the cap although no message row is left. The
+ * ledger holds only the number's keyed fingerprint and when its SMS was written, commits or rolls
+ * back with the booking, and never hears of the demo block.
  *
  * <p>This test builds an application context of its own, with a database container of its own, and
  * a key it knows, so it can compute the fingerprint the ledger must hold. The clock stands at 08:00

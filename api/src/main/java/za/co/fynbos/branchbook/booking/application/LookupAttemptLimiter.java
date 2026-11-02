@@ -26,8 +26,8 @@ import za.co.fynbos.branchbook.shared.config.BookingProperties;
  * {@code 429} until the window closes. The window never slides, so waiting it out always works. It
  * is measured on the instants the caller passes, which come from the application's clock, so tests
  * control it. The window is opened, measured and closed on each instance's own clock, so two
- * instances disagree only by their clocks' difference: milliseconds on the hosted demo's tasks,
- * which the platform keeps in step.
+ * instances disagree only by their clocks' difference: milliseconds on the ECS tasks of staging and
+ * production, which the platform keeps in step.
  *
  * <p>A lookup is admitted and counted in one atomic step, before the database is read: {@link
  * #begin} counts it as in flight, and {@link #end} turns it into a failure if the digits were wrong

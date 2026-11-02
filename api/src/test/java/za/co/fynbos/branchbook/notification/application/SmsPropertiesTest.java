@@ -15,10 +15,10 @@ import org.springframework.core.env.SystemEnvironmentPropertySource;
 
 /**
  * The SMS settings: simulated with no daily cap unless a deployment says otherwise, bound from the
- * environment variables the hosted demo's task definition sets, and refused at start-up when a
- * value AWS would refuse anyway, such as a malformed MaxPrice, or a negative cap is given. No
- * database is needed: the settings are bound in a context of their own, whose environment holds
- * only what each test gives it.
+ * environment variables docs/configuration.md lists, and refused at start-up when a value AWS would
+ * refuse anyway, such as a malformed MaxPrice, or a negative cap is given. No database is needed:
+ * the settings are bound in a context of their own, whose environment holds only what each test
+ * gives it.
  */
 class SmsPropertiesTest {
 
@@ -46,7 +46,10 @@ class SmsPropertiesTest {
             });
   }
 
-  /** The names the hosted demo's task definition uses, as documented in api/README.md. */
+  /**
+   * Every setting's environment variable, as docs/configuration.md lists them. Production's task
+   * definition sets the AWS ones it needs; staging's sets only the gateway, the cap and its key.
+   */
   @Test
   void bindsEverySettingFromItsEnvironmentVariable() {
     withEnvironment(

@@ -131,8 +131,7 @@ class ApplicationStartsIT {
 
   /**
    * ADR-0006: once the application is ready, the log says which numbers bookings take. Everywhere
-   * but the hosted demo that is any South African mobile; DemoNumbersOnlyIT proves the hosted
-   * demo's line.
+   * but staging that is any South African mobile; DemoNumbersOnlyIT proves staging's line.
    */
   @Test
   void theLogSaysBookingsTakeAnyMobile(CapturedOutput output) {

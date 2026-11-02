@@ -58,7 +58,10 @@ class RetentionPropertiesTest {
             });
   }
 
-  /** The names the hosted demo's task definition uses bind to the settings. */
+  /**
+   * Both environment names bind to the settings; staging and production set only
+   * BRANCHBOOK_RETENTION_ENABLED.
+   */
   @Test
   void bindsFromTheEnvironmentNames() {
     withEnvironment(

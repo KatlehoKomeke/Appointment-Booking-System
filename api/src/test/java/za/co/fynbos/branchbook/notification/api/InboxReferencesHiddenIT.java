@@ -24,10 +24,10 @@ import za.co.fynbos.branchbook.support.IntegrationTest;
 import za.co.fynbos.branchbook.support.MutableClock;
 
 /**
- * FR-17, FR-18, BR-19: with {@code branchbook.inbox.redact-references} true, as on the hosted demo,
- * which has no sign-in, the inbox and the retry show every appointment reference as {@code
- * APT-****-****}: in the reference field and in the text of each message. Each message keeps its
- * id, so it can still be retried. {@link InboxApiIT} proves the references are shown while the
+ * FR-17, FR-18, BR-19: with {@code branchbook.inbox.redact-references} true, as in staging and
+ * production, which have no sign-in, the inbox and the retry show every appointment reference as
+ * {@code APT-****-****}: in the reference field and in the text of each message. Each message keeps
+ * its id, so it can still be retried. {@link InboxApiIT} proves the references are shown while the
  * setting is off, the default. This test builds an application context of its own. The numbers are
  * synthetic.
  */
