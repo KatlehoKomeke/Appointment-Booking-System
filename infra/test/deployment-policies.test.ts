@@ -1,8 +1,8 @@
 /**
  * Checks the deployment policies against the stacks they must deploy, built exactly as `cdk synth` builds them: the
  * CloudFormation execution policy must allow every service those stacks' resources belong to, or a deployment under
- * the hardened bootstrap fails half-way, and every role those stacks create must carry the permissions boundary, or
- * the execution policy refuses to create it.
+ * the hardened bootstrap fails half-way; it must let CloudFormation read the outputs one stack takes from another; and
+ * every role those stacks create must carry the permissions boundary, or the execution policy refuses to create it.
  */
 import { Stack } from 'aws-cdk-lib/core';
 import { Template } from 'aws-cdk-lib/assertions';
@@ -58,6 +58,24 @@ interface RoleResource {
 interface Statement {
   Sid?: string;
   Action: string | string[];
+  Resource?: unknown;
+}
+
+/**
+ * The stacks whose outputs a template reads with `Fn::GetStackOutput`, which CloudFormation resolves with the
+ * execution role's own permissions.
+ *
+ * @param node - a synthesised template, or any part of one
+ */
+function stackOutputSources(node: unknown): string[] {
+  if (Array.isArray(node)) {
+    return node.flatMap(stackOutputSources);
+  }
+  if (node === null || typeof node !== 'object') {
+    return [];
+  }
+  const own = (node as { 'Fn::GetStackOutput'?: { StackName?: unknown } })['Fn::GetStackOutput']?.StackName;
+  return [...(typeof own === 'string' ? [own] : []), ...Object.values(node).flatMap(stackOutputSources)];
 }
 
 /**
@@ -65,7 +83,7 @@ interface Statement {
  *
  * @param name - the environment
  */
-function build(name: EnvironmentName): { appStacks: Stack[]; adminStacks: Stack[]; execServices: string[] } {
+function build(name: EnvironmentName): { appStacks: Stack[]; adminStacks: Stack[]; execServices: string[]; execStatements: Statement[] } {
   const stacks = buildApp(newApp(), {
     BRANCHBOOK_ENV: name,
     BRANCHBOOK_IMAGE_DIGEST: DIGEST,
@@ -90,11 +108,12 @@ function build(name: EnvironmentName): { appStacks: Stack[]; adminStacks: Stack[
     appStacks: [stacks.registry, data, app, release],
     adminStacks: [stacks.account, stacks.guardrails],
     execServices: ([] as string[]).concat(services.Action),
+    execStatements: exec?.Properties.PolicyDocument.Statement ?? [],
   };
 }
 
 describe.each(ENVIRONMENT_NAMES)('the %s deployment', (name) => {
-  const { appStacks, adminStacks, execServices } = build(name);
+  const { appStacks, adminStacks, execServices, execStatements } = build(name);
 
   test('the execution policy allows the service of every resource type the stacks it deploys contain', () => {
     const types = new Set(appStacks.flatMap((stack) => Object.values(Template.fromStack(stack).toJSON().Resources as Record<string, { Type: string }>).map((resource) => resource.Type)));
@@ -112,6 +131,22 @@ describe.each(ENVIRONMENT_NAMES)('the %s deployment', (name) => {
       }
     }
     expect(problems).toEqual([]);
+  });
+
+  test('the execution policy may read the outputs of every stack the stacks it deploys reference, and no other stack', () => {
+    const sources = [...new Set(appStacks.flatMap((stack) => stackOutputSources(Template.fromStack(stack).toJSON())))].sort();
+    // The App stack reads the Data stack's outputs; were there none, this test would prove nothing.
+    expect(sources.length).toBeGreaterThan(0);
+    const read = execStatements.find((statement) => statement.Sid === 'ReadOwnStackOutputs');
+    expect(read?.Action).toBe('cloudformation:DescribeStacks');
+    const resources = JSON.stringify(read?.Resource);
+    for (const source of sources) {
+      expect([source, resources]).toEqual([source, expect.stringContaining(`:cloudformation:af-south-1:${ACCOUNT}:stack/${source}/*`)]);
+    }
+    const ownStacks = appStacks.map((stack) => stack.stackName);
+    for (const stackName of resources.match(/stack\/[^/]+\/\*/g) ?? []) {
+      expect(ownStacks).toContain(stackName.split('/')[1]);
+    }
   });
 
   test('every stack it deploys, the registry included where it owns it, goes through its own bootstrap', () => {

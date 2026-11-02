@@ -355,11 +355,12 @@ export class GuardrailsStack extends Stack {
     boundaryArn: string,
     protectedStatements: iam.PolicyStatement[],
   ): iam.ManagedPolicy {
-    const { partition, account } = this;
+    const { partition, region, account } = this;
     // CloudFormation names a role `<stack>-<logical id>-<suffix>`, and a managed policy likewise, so these patterns
     // cover this environment's stacks' roles and nothing else: not the other environment's, whose stack IDs differ.
     const roleArns = target.stackNames.map((name) => `arn:${partition}:iam::${account}:role/${name}-*`);
     const managedPolicyArns = target.stackNames.map((name) => `arn:${partition}:iam::${account}:policy/${name}-*`);
+    const stackArns = target.stackNames.map((name) => `arn:${partition}:cloudformation:${region}:${account}:stack/${name}/*`);
     return new iam.ManagedPolicy(this, id, {
       managedPolicyName: cfnExecPolicyName(config, target.name),
       description: `What CloudFormation may do when the pipeline deploys ${target.name}: the application services, and IAM only for ${target.name}'s roles, which must carry the permissions boundary.`,
@@ -369,6 +370,9 @@ export class GuardrailsStack extends Stack {
           actions: CFN_EXEC_SERVICES.map((service) => `${service}:*`),
           resources: ['*'],
         }),
+        // A stack reads another's outputs with Fn::GetStackOutput (cdk.json's weak cross-stack references), which
+        // CloudFormation resolves with this role's own permissions: the App stack reads the Data stack's.
+        new iam.PolicyStatement({ sid: 'ReadOwnStackOutputs', actions: ['cloudformation:DescribeStacks'], resources: stackArns }),
         new iam.PolicyStatement({ sid: 'ReadIam', actions: ['iam:Get*', 'iam:List*'], resources: ['*'] }),
         new iam.PolicyStatement({
           sid: 'CreateServiceLinkedRoles',
