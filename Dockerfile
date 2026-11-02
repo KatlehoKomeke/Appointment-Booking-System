@@ -58,6 +58,12 @@ COPY --from=api /extracted/dependencies/ ./
 COPY --from=api /extracted/spring-boot-loader/ ./
 COPY --from=api /extracted/snapshot-dependencies/ ./
 COPY --from=api /extracted/application/ ./
+# /tmp is the one writable path: staging and production run the container on a read-only file system and mount the
+# task's scratch volume there (infra/lib/app-stack.ts), where Tomcat and the JVM write their temporary files. Fargate
+# creates that volume owned by root with mode 755, which the unprivileged user cannot write, unless the image declares
+# the path a VOLUME: Fargate then copies the image's /tmp, mode 1777, into it.
+RUN chmod 1777 /tmp
+VOLUME ["/tmp"]
 USER 10001:10001
 # Times are stored and logged in UTC; the app converts to South African time itself (docs/architecture.md, section 8).
 ENV TZ=UTC
