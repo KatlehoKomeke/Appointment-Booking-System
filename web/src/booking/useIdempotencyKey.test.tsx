@@ -52,7 +52,9 @@ describe('useIdempotencyKey', () => {
     const key = result.current;
     const stored = sessionStorage.getItem('branchbook.idempotency') ?? '';
     expect(stored).toContain(key ?? 'no key');
-    expect(stored).not.toMatch(/Nomvula|Dlamini|555/);
+    // The whole number in each shape it could take (082 555 0101, 0825550101, +27825550101): the stored key and
+    // fingerprint are random characters, which a shorter pattern such as 555 matches about once in 150 runs.
+    expect(stored).not.toMatch(/Nomvula|Dlamini|82 ?555 ?0101/);
     unmount();
 
     clearBooking();
