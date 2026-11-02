@@ -28,13 +28,14 @@ import org.springframework.context.annotation.Import;
  * is off with no gateway latency: tests that deliver call {@code NotificationDispatcher.runOnce}
  * with the clock's instant, so no test sleeps. Bookings take any South African mobile, the inbox
  * shows references, every SMS goes through the simulated gateway and no daily cap applies, with no
- * key for its ledger, as everywhere but the hosted demo; all are set here rather than left to the
- * default, so a {@code BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY}, {@code
- * BRANCHBOOK_INBOX_REDACT_REFERENCES}, {@code BRANCHBOOK_SMS_GATEWAY}, {@code
- * BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP} or {@code BRANCHBOOK_SMS_RECIPIENT_CAP_KEY} exported in the
- * developer's shell cannot change what the tests prove, nor make a test send a real SMS. References
- * come from a {@link ScriptedReferenceGenerator}, which hands out random ones unless a test scripts
- * them. Classes that book through the API add {@link DatabaseReset}.
+ * key for its ledger, as on a copy run locally (staging and production each change some of them);
+ * all are set here rather than left to the default, so a {@code
+ * BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY}, {@code BRANCHBOOK_INBOX_REDACT_REFERENCES}, {@code
+ * BRANCHBOOK_SMS_GATEWAY}, {@code BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP} or {@code
+ * BRANCHBOOK_SMS_RECIPIENT_CAP_KEY} exported in the developer's shell cannot change what the tests
+ * prove, nor make a test send a real SMS. References come from a {@link
+ * ScriptedReferenceGenerator}, which hands out random ones unless a test scripts them. Classes that
+ * book through the API add {@link DatabaseReset}.
  *
  * <p>Metrics are exported as the application exports them, so {@code /actuator/prometheus} answers:
  * Spring Boot switches export off in tests unless {@link AutoConfigureMetrics} asks for it. Every

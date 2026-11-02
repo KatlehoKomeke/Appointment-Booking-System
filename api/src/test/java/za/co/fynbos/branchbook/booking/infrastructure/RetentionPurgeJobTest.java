@@ -28,8 +28,8 @@ import za.co.fynbos.branchbook.booking.application.RetentionPurge.Purged;
 
 /**
  * The retention job exists only where {@code branchbook.retention.enabled} is true, which only the
- * hosted demo sets; it runs every hour from a minute after start-up; and each run purges as of the
- * clock and logs one line of three counts.
+ * staging and production environments set; it runs every hour from a minute after start-up; and
+ * each run purges as of the clock and logs one line of three counts.
  *
  * <p>The job is found the way the application finds it, by scanning from {@link
  * BranchBookApplication}'s package with the default filters, and scheduled the way the application

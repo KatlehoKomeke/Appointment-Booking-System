@@ -30,12 +30,12 @@ import za.co.fynbos.branchbook.notification.application.SmsProperties;
  * demo block, which {@link RoutingSmsGateway} keeps simulated.
  *
  * <p>One client is built at start-up and closed on shutdown. Its credentials come from the SDK's
- * default provider chain, which in the hosted demo is the ECS task role, so no key is ever
- * configured. It does not retry: a refusal goes back to the dispatcher, and a call that hangs gives
- * up after {@code branchbook.sms.aws.call-timeout}, so the dispatcher's thread and its row lock are
- * never held for long. A refusal that sending again cannot cure, such as a number the SMS sandbox
- * has not verified, is permanent, so the dispatcher marks the message FAILED at once; any other
- * gets the dispatcher's backoff and fifth failed attempt, as the simulated gateway's refusal does.
+ * default provider chain, which in production is the ECS task role, so no key is ever configured.
+ * It does not retry: a refusal goes back to the dispatcher, and a call that hangs gives up after
+ * {@code branchbook.sms.aws.call-timeout}, so the dispatcher's thread and its row lock are never
+ * held for long. A refusal that sending again cannot cure, such as a number the SMS sandbox has not
+ * verified, is permanent, so the dispatcher marks the message FAILED at once; any other gets the
+ * dispatcher's backoff and fifth failed attempt, as the simulated gateway's refusal does.
  *
  * <p>A refusal is recorded as a fixed code built from the exception's type and, where AWS gives
  * one, its typed reason, such as {@code AWS_CONFLICT_DESTINATION_PHONE_NUMBER_NOT_VERIFIED}. An

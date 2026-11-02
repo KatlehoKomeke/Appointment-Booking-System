@@ -10,12 +10,14 @@
 #
 # Usage: scripts/smoke.sh [base-url]        default: http://localhost:8080
 #
-# `make smoke` runs it after `make up`, and CI runs it against the stack that docker compose starts. It needs only
-# bash, curl and grep. It prints one line per check and exits non-zero if any check fails.
+# `make smoke` runs it after `make up`, and CI runs it against the stack that docker compose starts, then against
+# staging and production after each deploy, with the switches below. It needs only bash, curl and grep. It prints
+# one line per check and exits non-zero if any check fails.
 #
-# EXPECT_DEMO_NUMBERS_ONLY=1 adds a check that the instance takes only the published demo numbers, as the hosted demo
-# must (ADR-0006, BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true), so a deployment that left the setting off fails its smoke
-# test instead of taking real numbers unnoticed.
+# EXPECT_DEMO_NUMBERS_ONLY=1 adds a check that the instance takes only the published demo numbers, as staging must
+# (ADR-0006, BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY=true in infra/config/staging.json), so a deployment that left the
+# setting off fails its smoke test instead of taking real numbers unnoticed. The pipeline sets it for staging only:
+# production takes real South African numbers.
 #
 # EXPECT_PROD_PROFILE=1 checks a deployment running the prod profile (staging, production): the OpenAPI document and
 # Swagger UI are 404s, no /actuator path is served on the public port (404, or 403 from the edge firewall), and the
@@ -61,7 +63,8 @@ status_is() {
 }
 
 # Succeeds if GET <path> answers 404 from the application or 403 from an edge firewall in front of it, such as the
-# hosted demo's WAF, which blocks every /actuator path before the app sees it. Either way the endpoint is closed.
+# WAF in front of staging and production, which blocks every /actuator path before the app sees it. Either way the
+# endpoint is closed.
 is_closed() {
   local actual
   actual="$(curl --silent --output /dev/null --write-out '%{http_code}' "$base_url$1")"
@@ -160,8 +163,8 @@ lookup_answers() {
 
 # Succeeds if /actuator/prometheus serves the application's two meters in Prometheus's text format. The scrape is read
 # whole before it is searched, so a search that stops at the first match cannot cut curl off mid-body. A 403 also
-# passes: an edge firewall in front of the app, such as the hosted demo's WAF, blocks every /actuator path on purpose,
-# and the metrics are then read from inside the network instead.
+# passes: an edge firewall in front of the app, such as the WAF in front of staging and production, blocks every
+# /actuator path on purpose, and the metrics are then read from inside the network instead.
 metrics_are_served() {
   local scrape status
   status="$(curl --silent --output /dev/null --write-out '%{http_code}' "$base_url/actuator/prometheus")"

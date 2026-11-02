@@ -56,16 +56,16 @@ import za.co.fynbos.branchbook.shared.problem.ProblemException;
  *
  * <p>It runs only when {@code appointments} is empty, so a restart never adds to a database that
  * holds bookings. It books nothing where {@code branchbook.booking.demo-numbers-only} is on, as on
- * the hosted demo (ADR-0006): the fixtures' numbers are outside the published demo numbers on
- * purpose, so the README's walkthrough never meets them, and the handler, which does not check that
- * rule, would otherwise store numbers that deployment promises it never takes. It also books
- * nothing where {@code branchbook.sms.gateway} is {@code aws}: fixtures booked at start-up must
- * never send a real SMS, whatever their numbers, and only the published demo block is kept
- * simulated there. In either case it says so in one line at INFO instead. It runs on a thread of
- * its own, after the application is ready, so it never delays readiness, and under one correlation
- * id, {@code sys-<uuid>}, which its log lines and the three confirmations carry. A fixture that
- * cannot be booked is logged as a warning, by its branch and service only, and the others carry on;
- * nothing it does can stop the application.
+ * staging (ADR-0006): the fixtures' numbers are outside the published demo numbers on purpose, so
+ * the README's walkthrough never meets them, and the handler, which does not check that rule, would
+ * otherwise store numbers that deployment promises it never takes. It also books nothing where
+ * {@code branchbook.sms.gateway} is {@code aws}: fixtures booked at start-up must never send a real
+ * SMS, whatever their numbers, and only the published demo block is kept simulated there. In either
+ * case it says so in one line at INFO instead. It runs on a thread of its own, after the
+ * application is ready, so it never delays readiness, and under one correlation id, {@code
+ * sys-<uuid>}, which its log lines and the three confirmations carry. A fixture that cannot be
+ * booked is logged as a warning, by its branch and service only, and the others carry on; nothing
+ * it does can stop the application.
  */
 @Component
 class DemoDataLoader {

@@ -7,9 +7,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 import org.springframework.validation.annotation.Validated;
 
 /**
- * How long a booking is kept, under {@code branchbook.retention}: the hosted demo keeps each
- * booking, with the customer's name and number, until its appointment is over, and deletes it
- * within the hour after it ends (SECURITY.md, ADR-0006).
+ * How long a booking is kept, under {@code branchbook.retention}: staging and production keep each
+ * booking, with the customer's name and number, until its appointment is over, and delete it within
+ * the hour after it ends (SECURITY.md, ADR-0006).
  *
  * <p>A booking is never deleted before its appointment ends, so a customer who books days ahead
  * keeps it until the day. {@code after-end} can keep it for longer; it is zero by default, and the
@@ -22,7 +22,8 @@ import org.springframework.validation.annotation.Validated;
  * refused (BR-12, BR-21).
  *
  * @param enabled whether the hourly purge runs; {@code false} by default and locally, {@code true}
- *     only in the hosted demo's task definition
+ *     only in staging and production, whose infra/config files set {@code
+ *     BRANCHBOOK_RETENTION_ENABLED}
  * @param afterEnd how long after its appointment ends a booking is deleted, with its messages and
  *     its idempotency keys; {@code PT0S} by default, and never negative
  * @param batchSize the most appointments one of the purge's transactions deletes, so none holds

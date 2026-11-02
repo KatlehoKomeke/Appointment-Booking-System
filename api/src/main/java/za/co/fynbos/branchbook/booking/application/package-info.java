@@ -23,7 +23,7 @@
  * <p>{@link za.co.fynbos.branchbook.booking.application.RetentionPurge} deletes appointments once
  * they have ended, plus {@link
  * za.co.fynbos.branchbook.booking.application.RetentionProperties#afterEnd()}, with their messages
- * and keys, in small transactions, so the hosted demo keeps a booking until it is over.
+ * and keys, in small transactions, so staging and production keep a booking until it is over.
  *
  * <p>{@link za.co.fynbos.branchbook.booking.application.BookingOutcome} is the one place that
  * decides how a booking request ended, for the {@code appointments_booked_total} metric (FR-30).

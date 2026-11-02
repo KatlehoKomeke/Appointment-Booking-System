@@ -13,12 +13,12 @@ import org.springframework.validation.annotation.Validated;
 /**
  * How SMS leave the application, under {@code branchbook.sms} in application.yml.
  *
- * <p>The simulated gateway is the default, so a copy run locally or in the tests sends nothing.
- * Where a deployment sets {@code gateway} to {@code aws}, as the hosted demo does, every number
- * outside the published demo block, 082 555 0000 to 0199, is sent a real SMS through AWS End User
- * Messaging SMS; the block itself stays simulated, because it is published for anyone to type and
- * may belong to a real stranger. The per-recipient daily cap limits how many SMS one number can be
- * made to receive, whichever gateway sends them (BR-17).
+ * <p>The simulated gateway is the default, so a copy run locally or in the tests sends nothing, and
+ * staging keeps it. Where a deployment sets {@code gateway} to {@code aws}, as production does,
+ * every number outside the published demo block, 082 555 0000 to 0199, is sent a real SMS through
+ * AWS End User Messaging SMS; the block itself stays simulated, because it is published for anyone
+ * to type and may belong to a real stranger. The per-recipient daily cap limits how many SMS one
+ * number can be made to receive, whichever gateway sends them (BR-17).
  *
  * <p>The cap's key is a secret, so {@link #toString()} masks it, and nothing here validates it:
  * Spring Boot would print a rejected value in its start-up failure. {@code RecipientFingerprints}
@@ -71,8 +71,8 @@ public record SmsProperties(
 
   /**
    * The settings of AWS End User Messaging SMS (the {@code pinpoint-sms-voice-v2} API). Credentials
-   * are never set here: they come from the SDK's default provider chain, which in the hosted demo
-   * is the ECS task role. A blank optional value is left out of every request.
+   * are never set here: they come from the SDK's default provider chain, which in production is the
+   * ECS task role. A blank optional value is left out of every request.
    *
    * @param region the AWS region to send from, such as {@code af-south-1}; blank leaves it to the
    *     SDK's default region chain, and start-up fails if that finds none

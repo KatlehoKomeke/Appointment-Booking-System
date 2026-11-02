@@ -14,7 +14,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 /**
  * Deletes every appointment that has ended, {@code branchbook.retention.after-end} ago or earlier
- * (zero by default), with its messages and its idempotency keys, so the hosted demo keeps a
+ * (zero by default), with its messages and its idempotency keys, so staging and production keep a
  * booking, and the customer's name and number, until its appointment is over and no longer
  * (SECURITY.md, ADR-0006). A booking for a future date is never touched, however long ago it was
  * made; a cancelled appointment goes by the same rule, once its original end time has passed.

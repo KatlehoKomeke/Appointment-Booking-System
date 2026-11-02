@@ -83,9 +83,10 @@ class AppointmentController {
 
   /**
    * Says, once the application is ready, which numbers bookings take, so a deployment's start-up
-   * log shows whether {@code branchbook.booking.demo-numbers-only} is on. A hosted demo whose log
-   * says any mobile was started without {@code BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY}, and would
-   * store a real person's number (ADR-0006). The line names the setting, never a number.
+   * log shows whether {@code branchbook.booking.demo-numbers-only} is on. Production takes any
+   * mobile on purpose; a staging task whose log says any mobile was started without {@code
+   * BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY}, and would store a real person's number (ADR-0006). The
+   * line names the setting, never a number.
    */
   @EventListener(ApplicationReadyEvent.class)
   void reportWhichNumbersBookingsTake() {
