@@ -134,7 +134,7 @@ app creates the protect configuration, the task role's permission and the settin
 2. **To text any South African number, open a Support case for production access.** In the same console, request
    production access (a case with AWS Support) for af-south-1, naming the use (transactional appointment
    confirmations), the expected volume and South Africa as the only destination. In the same case, or another, ask
-   for the monthly SMS spend limit the demo needs; the account's own limit can then be set up to it. Until AWS
+   for the monthly SMS spend limit production needs; the account's own limit can then be set up to it. Until AWS
    answers, the sandbox's limits stand.
 3. **Check the start-up log** after the next deployment: `SMS gateway: AWS End User Messaging SMS in af-south-1 ...`,
    with a protect configuration and a daily cap set.
@@ -254,7 +254,7 @@ the cap is on or not. Each run writes one INFO line with how many rows it delete
 cap_ledger.purged count=12
 ```
 
-`count=0` is normal while the cap is off or the demo is quiet. No such line at all means the job is not running. Right
+`count=0` is normal while the cap is off or the environment is quiet. No such line at all means the job is not running. Right
 after a run this is 0:
 
 ```sql
@@ -486,8 +486,8 @@ replacement, and the other tasks keep serving. The PENDING messages are sent onc
 
 ## Run a fault-injection experiment
 
-Each environment has two AWS FIS experiment templates: `<prefix>-stop-one-task`, and in production
-`<prefix>-database-failover`. What each does, what to expect and the commands to start one are in
+Each environment has the AWS FIS experiment template `<prefix>-stop-one-task`, and production also has
+`<prefix>-database-failover` (it needs a Multi-AZ database). What each does, what to expect and the commands to start one are in
 [infra/README.md](../infra/README.md#observability-and-fault-injection); what each rehearses is in
 [resilience.md](resilience.md).
 

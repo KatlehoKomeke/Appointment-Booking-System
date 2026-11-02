@@ -2,12 +2,12 @@
 
 BranchBook's documentation uses two kinds of diagram, chosen by how often the picture changes. Eight hand-written
 SVG files in this folder hold the stable big pictures: the system, the local stack, the schema, delivery, one measured
-push, the AWS footprint, the access boundary and the secret layers. Six Mermaid blocks, written inline in
+push, the AWS footprint, the access boundary and the secret layers. Seven Mermaid blocks, written inline in
 [docs/architecture.md](../../architecture.md) and [infra/README.md](../../../infra/README.md), hold the code-shaped
-pictures that change at milestones: one request, the modules, the booking transaction, the confirmation states, the
-appointment lifecycle and the keyless deploy. Grids of facts stay in tables.
+pictures that change at milestones: one request, a booking through the firewall, the modules, the booking
+transaction, the confirmation states, the appointment lifecycle and the keyless deploy. Grids of facts stay in tables.
 
-This page is the index and the rulebook for all fourteen. Every SVG starts as a copy of
+This page is the index and the rulebook for all fifteen. Every SVG starts as a copy of
 [`_template.svg`](_template.svg), which holds the shared style and the key below.
 
 - [Index](#index)
@@ -26,6 +26,7 @@ The rows run in reading order: the system, the application, the local stack, del
 | --- | --- | --- | --- |
 | [system-at-a-glance](system-at-a-glance.svg) | SVG | What BranchBook is, what runs inside it, which parts exist today, and how code reaches AWS | [README.md](../../../README.md) (hero); [architecture.md, section 2](../../architecture.md#2-system-context-and-containers) |
 | request-flow | Mermaid | What code runs, in what order, for a real request today | [architecture.md, section 2.1](../../architecture.md#21-one-request-through-the-jar) |
+| captcha-retry | Mermaid | What happens when the firewall asks for a CAPTCHA, and how the same booking is resent once | [architecture.md, section 2.2](../../architecture.md#22-a-booking-through-the-firewall) |
 | module-map | Mermaid | Which modules exist, and which depend on which | [architecture.md, section 3](../../architecture.md#3-modules-and-the-dependency-rule) |
 | booking-transaction | Mermaid | In what order a booking takes its locks and writes its rows | [architecture.md, section 4](../../architecture.md#4-the-booking-transaction) |
 | confirmation-states | Mermaid | Which states a confirmation or cancellation SMS can be in, and how it moves between them | [architecture.md, section 5](../../architecture.md#5-the-confirmation-sms) |
@@ -35,7 +36,7 @@ The rows run in reading order: the system, the application, the local stack, del
 | [delivery-pipeline](delivery-pipeline.svg) | SVG | What happens between `git commit` and AWS: which checks run where, which of them block, what deploys, and where the gaps are | [README.md](../../../README.md#how-it-is-tested-and-delivered); [delivery.md](../../delivery.md#at-a-glance); [architecture.md, section 10.2](../../architecture.md#102-from-a-commit-to-aws) |
 | [push-timeline](push-timeline.svg) | SVG | What one push to `main` runs, how long each job takes, and whether the deploy waits for the tests | [delivery.md](../../delivery.md#one-push-measured) |
 | [aws-footprint](aws-footprint.svg) | SVG | What exists in AWS, in which Region, what staging and production share, who deploys each part, how a customer's request reaches the app, and how production's SMS leave it | [infra/README.md](../../../infra/README.md#what-exists-today); [architecture.md, section 10.3](../../architecture.md#103-in-aws) |
-| keyless-deploy | Mermaid | How the deploy job gets short-lived credentials, what is checked, and how it proves the deploy landed | [infra/README.md](../../../infra/README.md#how-github-reaches-aws-without-keys) |
+| keyless-deploy | Mermaid | How a delivery job gets short-lived credentials, what is checked, and how it proves the deploy landed | [infra/README.md](../../../infra/README.md#how-github-reaches-aws-without-keys) |
 | [access-boundary](access-boundary.svg) | SVG | Who can reach the app, whether either environment's pipeline can reach the other's stacks or widen its own access, and what enforces each guard | [infra/README.md](../../../infra/README.md#who-can-change-what-in-aws) |
 | [secret-layers](secret-layers.svg) | SVG | Which layer stops a secret at each stage, which layers can be skipped, which act only after the code is public, and what holds each secret at run time | [SECURITY.md](../../../SECURITY.md#secrets) |
 | [diagram key](_template.svg) | SVG | What each colour, stroke, shape and pill means | [this page](#key) |
@@ -49,20 +50,21 @@ files live in `.github/workflows/`.
 
 | Diagram | Watch paths | Expected to change at | Verified at |
 | --- | --- | --- | --- |
-| system-at-a-glance | the module packages, their controllers and their scheduled jobs; `web/src/`; `api/src/main/resources/application.yml`; `compose.yaml`; `infra/bin/branchbook.ts`; `infra/lib/app.ts`; `infra/lib/app-stack.ts` (the task's settings); `infra/config/`; `infra/cdk.json` | when a module, a background job, the SMS gateway or the path to AWS changes | `90bf68b` |
+| system-at-a-glance | the module packages, their controllers and their scheduled jobs; `web/src/`; `api/src/main/resources/application.yml`; `compose.yaml`; `infra/bin/branchbook.ts`; `infra/lib/app.ts`; `infra/lib/app-stack.ts` (the task's settings); `infra/config/`; `infra/cdk.json`; `api/pom.xml` (the Spring Boot and Java versions); `api/src/main/resources/db/migration/` (the table count); `.githooks/pre-commit`; `ci.yml` (the image job and the delivery jobs); `secret-scan.yml`; `infra/lib/account-stack.ts`; `infra/lib/registry-stack.ts` | when a module, a background job, the SMS gateway or the path to AWS changes | `90bf68b` |
 | request-flow | `scheduling/`; `catalogue/application/BranchCalendarProvider.java`; `catalogue/infrastructure/`; `booking/infrastructure/JdbcBookedIntervals.java`; `shared/correlation/`; `shared/security/`; `shared/problem/` | when the availability path changes | `85cd726` |
+| captcha-retry | `shared/web/ClientConfigController.java`; `shared/security/` (the Content-Security-Policy); `web/src/api/captcha.ts`; `web/src/captcha/`; `infra/lib/app-stack.ts` (the web ACL's `booking-captcha` rule) | when the CAPTCHA flow, or the requests it guards, changes | `ab9aa7f` |
 | module-map | the top-level packages; `ArchitectureTest.java` in `api/src/test/` | when a module or a dependency between modules changes | `85cd726` |
 | booking-transaction | `booking/application/`; `V2__schema.sql` | when the booking transaction's steps change | `85cd726` |
 | confirmation-states | `notification/`; the `notification_messages` table in `V2__schema.sql` and `V6__cancel_deletes_the_booking.sql` | when the outbox, the dispatcher or the daily cap changes | `4d4ba68` |
 | appointment-lifecycle | `booking/domain/AppointmentStatus.java`; `booking/application/CancelAppointmentHandler.java` | when a status or a transition changes | `85cd726` |
 | data-model | `api/src/main/resources/db/migration/`; the writers in `booking/application/` and `notification/application/` | With a new migration | `90bf68b` |
-| local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; `.env.example`; the `Makefile` up, db-password and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box); `ci.yml` (jobs `image` and `stack`) | when a route, a management endpoint, the image or the compose stack changes | `90bf68b` |
-| delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/lib/app.ts`; `infra/lib/account-stack.ts`; `infra/lib/registry-stack.ts`; the `main` ruleset and the `staging` and `production` environments | when a workflow, a job, a hook, a stack the pipeline deploys or a GitHub setting changes | `90bf68b` |
-| push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured after the first run of the pipeline with `deploy` inside `ci` | `85cd726` (measured at `c5feafe`, before the `deploy` job joined `ci`) |
-| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/config/`; `infra/cdk.json` | when a stack, an environment, or who deploys it, changes | `b64bbff` |
-| keyless-deploy | `ci.yml` (job `deploy`); `infra/lib/account-stack.ts` | on hardening; when the `deploy` job's steps change | `21798b6` |
-| access-boundary | `infra/lib/account-stack.ts`; `infra/lib/guardrails-stack.ts`; `infra/lib/app.ts`; `infra/lib/app-stack.ts` (ports, WAF, the task's database user); `infra/cdk.json` (the permissions boundary); `V9__runtime_role.sql`; `ci.yml` (the delivery jobs); `aws-connection-check.yml`; the `staging` and `production` environments; the `main` ruleset; the bootstrap commands in infra/README.md | when a guard changes | `b64bbff` |
-| secret-layers | `.gitignore`; `.githooks/pre-commit`; `.gitleaks.toml`; `secret-scan.yml`; `ci.yml` (job `stack` and the delivery jobs); `compose.yaml` and the `Makefile` (the local password); `infra/lib/data-stack.ts`, `infra/lib/app-stack.ts` and `infra/lib/captcha-api-key.ts` (the generated secrets, the task's secrets and IAM database authentication); the environments' secrets; the repository's security settings | when a layer is added or changes | `90bf68b` |
+| local-runtime | `Dockerfile`; `.dockerignore`; `compose.yaml`; `.env.example`; the `Makefile` up, db-password and dev targets; `web/vite.config.ts`; `application.yml` (probes, management endpoints, connection pool); the controllers (the routes in the API box); `api/src/main/resources/db/migration/` (the migrations Flyway applies); `application-prod.yml` (the management port); `infra/lib/app-stack.ts` (the Fargate service and the migration task); `ci.yml` (jobs `image`, `stack`, `publish` and the deploy jobs) | when a route, a management endpoint, the image or the compose stack changes | `90bf68b` |
+| delivery-pipeline | every workflow; `.githooks/`; `.github/dependabot.yml`; `infra/lib/app.ts`; `infra/lib/environment.ts` (the stack IDs); `infra/lib/account-stack.ts`; `infra/lib/registry-stack.ts`; `infra/lib/release-stack.ts`; `infra/lib/guardrails-stack.ts`; `infra/config/` (each environment's stack-ID prefix and address); the `main` ruleset and the `staging` and `production` environments | when a workflow, a job, a hook, a stack the pipeline deploys or a GitHub setting changes | `ab9aa7f` |
+| push-timeline | the job structure of every workflow; a dated measurement, not a picture of the current code | re-measured after the pipeline's first complete run (`publish`, `deploy-staging`, `deploy-production`) | `21798b6` (measured at `c5feafe`, before delivery joined `ci`) |
+| aws-footprint | `infra/bin/`; `infra/lib/`; `infra/config/`; `infra/cdk.json` | when a stack, an environment, or who deploys it, changes | `ab9aa7f` |
+| keyless-deploy | `ci.yml` (the delivery jobs); `infra/lib/account-stack.ts`; `infra/lib/release-stack.ts` | when a delivery job's sign-in, deployment or release-record steps change | `ab9aa7f` |
+| access-boundary | `infra/lib/account-stack.ts`; `infra/lib/guardrails-stack.ts`; `infra/lib/app.ts`; `infra/lib/app-stack.ts` (ports, WAF, the task's database user); `infra/cdk.json` (the permissions boundary); `V9__runtime_role.sql`; `ci.yml` (the delivery jobs); `aws-connection-check.yml`; the `staging` and `production` environments; the `main` ruleset; the bootstrap commands in infra/README.md | when a guard changes | `ab9aa7f` |
+| secret-layers | `.gitignore`; `.githooks/pre-commit`; `.gitleaks.toml`; `secret-scan.yml`; `ci.yml` (job `stack` and the delivery jobs); `compose.yaml` and the `Makefile` (the local password); `infra/lib/data-stack.ts`, `infra/lib/app-stack.ts` and `infra/lib/captcha-api-key.ts` (the generated secrets, the task's secrets and IAM database authentication); the environments' secrets; the repository's security settings | when a layer is added or changes | `ab9aa7f` |
 | diagram key | the rules on this page | only with the visual language | `85cd726` |
 
 The post-commit hook (`make hooks`) prints a reminder after a major commit, as `scripts/major-commits.sh` defines it:
@@ -70,8 +72,8 @@ any `feat`; a `fix` that changes code under `api/src/main/`, `web/src/`, `infra/
 commit that touches a migration, an `api` package, `infra/lib/`, `infra/bin/`, the `Dockerfile`, `compose.yaml`, a
 workflow or an ADR. That reminder covers the matching rows above. Any other change to a watch path is checked by
 hand, notably to `.githooks/`, `.github/dependabot.yml`, `.gitleaks.toml`, `.gitignore`, `.dockerignore`, the
-`Makefile`, `application.yml`, `web/vite.config.ts` and `infra/cdk.json`, and to any GitHub setting, which produces
-no commit at all.
+`Makefile`, `api/pom.xml`, `application.yml`, `application-prod.yml`, `web/vite.config.ts` and `infra/cdk.json`, and to
+any GitHub setting, which produces no commit at all.
 
 ## Key
 

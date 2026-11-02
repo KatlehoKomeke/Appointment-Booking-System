@@ -3,8 +3,9 @@
 Every resource the pipeline and the application use is defined here with the
 [AWS CDK](https://docs.aws.amazon.com/cdk/v2/guide/home.html) in TypeScript. The account, its administrator, the
 Cape Town opt-in, the CDK bootstraps and the GitHub environments are one-time manual steps, listed under
-[First-time setup](#first-time-setup). The reasoning is in [ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md)
-and [ADR-0007](../docs/adr/0007-continuous-deployment-from-main.md).
+[First-time setup](#first-time-setup). The reasoning is in [ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md),
+[ADR-0007](../docs/adr/0007-continuous-deployment-from-main.md) and
+[ADR-0008](../docs/adr/0008-two-environments-promoted-by-digest.md).
 
 - [What exists today](#what-exists-today)
 - [Automatic deployment](#automatic-deployment)
@@ -13,7 +14,7 @@ and [ADR-0007](../docs/adr/0007-continuous-deployment-from-main.md).
 - [Environments: staging and production](#environments-staging-and-production)
 - [Configuration](#configuration)
 - [Observability and fault injection](#observability-and-fault-injection)
-- [The hosted demo](#the-hosted-demo)
+- [Production](#production)
 - [Commands](#commands), [First-time setup](#first-time-setup) and [Removing it](#removing-it)
 
 Every control here, with the test or cdk-nag rule that proves it, is listed in
@@ -22,14 +23,15 @@ Every control here, with the test or cdk-nag rule that proves it, is listed in
 
 ## What exists today
 
-*Status: The picture is built in code. The administrator's part was deployed on 2026-11-01: `BranchbookAccount`
-with one deploy role per environment, the account's guardrails, `BranchbookGuardrails`, and each environment's CDK
-bootstrap. The two environments, `staging` and `production`, selected with `BRANCHBOOK_ENV`, and the ECR repository
-`BranchbookRegistry` are not yet deployed: the pipeline creates them on its first run from `main`. Until then
-production is the hosted demo's three stacks, which the single-environment pipeline deployed on every push to `main`,
-first by hand on 2026-10-26.*
+*Status: Built as drawn; partly deployed. The administrator's part was deployed on 2026-11-01: `BranchbookAccount` with
+one deploy role per environment, the account's guardrails, `BranchbookGuardrails`, and each environment's CDK bootstrap.
+The pipeline's first run, on 2026-11-01, deployed the ECR repository `BranchbookRegistry` and `BranchbookStagingData`,
+then stopped when `BranchbookStagingApp` failed. The two environments, `staging` and `production`, selected with
+`BRANCHBOOK_ENV`, are first deployed from `main` by the run after one administrator step, production after a person's
+approval; until then production's three stacks hold the hosted demo ([deployment
+status](../docs/production-readiness.md#deployment-status)).*
 
-![BranchBook in AWS, all built: two environments, staging and production, in one account. Along the top, a customer's browser with no sign-in, GitHub's staging and production environments (production needs an approval), and the administrator. In us-east-1, BranchbookAccount holds the GitHub OIDC provider, one deploy role per environment and the budget. In Cape Town, staging and production are built from the same three stacks: WAF with a CAPTCHA and per-address limits, a load balancer, autoscaled Fargate tasks in private subnets, a migration task, alarms, a canary and fault-injection experiments; a VPC over two zones with a NAT gateway per zone, Secrets Manager and a Multi-AZ RDS database the tasks sign in to as branchbook_app with IAM; and the release record. Shared: the ECR registry, AWS End User Messaging SMS (production only), BranchbookGuardrails and the CDK bootstraps. The administrator deploys the account-level stacks by hand (A); a delivery job signs in through OpenID Connect (1); the image is pushed once (2); staging is deployed, then production after approval (3).](../docs/assets/diagrams/aws-footprint.svg)
+![BranchBook in AWS, all built: two environments, staging and production, in one account. Along the top, a customer's browser with no sign-in, GitHub's staging and production environments (production needs an approval), and the administrator. In us-east-1, BranchbookAccount holds the GitHub OIDC provider, one deploy role per environment and the budget. In Cape Town, staging and production are built from the same three stacks: WAF with a CAPTCHA and per-address limits, a load balancer, autoscaled Fargate tasks in private subnets, a migration task, alarms, a canary and fault-injection experiments; a VPC over two zones with a NAT gateway per zone, Secrets Manager and a Multi-AZ RDS database the tasks sign in to as branchbook_app with IAM (in production; staging has one NAT gateway, a Single-AZ database and only the stop-a-task experiment); and the release record. Shared: the ECR registry, AWS End User Messaging SMS (production only), BranchbookGuardrails and the CDK bootstraps. The administrator deploys the account-level stacks by hand (A); a delivery job signs in through OpenID Connect (1); the image is pushed once (2); staging is deployed, then production after approval (3).](../docs/assets/diagrams/aws-footprint.svg)
 
 **A.** The administrator deploys `BranchbookAccount` (in `us-east-1`), `BranchbookGuardrails` and the CDK bootstraps by
 hand, from their own machine. The pipeline never deploys them ([Who can change what in AWS](#who-can-change-what-in-aws)).
@@ -43,34 +45,34 @@ hand, from their own machine. The pipeline never deploys them ([Who can change w
    once a person approves, `deploy-production` deploys production's through `bbprod`
    ([Automatic deployment](#automatic-deployment)).
 
-Until this change, the pipeline signed in through the single GitHub environment `aws-demo` as
+Until 2026-11-01, a single-environment pipeline signed in through the GitHub environment `aws-demo` as
 `branchbook-github-deploy`, built the image on the runner, deployed `BranchbookData` and `BranchbookApp`,
-smoke-tested https://branchbook.click and recorded the commit in `BranchbookRelease`. Production keeps the stack IDs
-and physical names deployed on 2026-10-26, and its first deployment replaces no live resource but the ECS task
-definition.
+smoke-tested https://branchbook.click and recorded the commit in `BranchbookRelease`: the hosted demo. The role and
+the environment are deleted. Its last deployment, on 2026-10-31 from `bab2d81`, is what https://branchbook.click still
+serves. Production keeps the stack IDs and physical names deployed on 2026-10-26.
 
 | Stack and Region | Deployed by | What it creates |
 |---|---|---|
 | [`BranchbookAccount`](lib/account-stack.ts)<br>`us-east-1` | Administrator, by hand (2026-11-01) | The GitHub OIDC provider, one deploy role per environment, `branchbook-github-deploy-staging` and `branchbook-github-deploy-production`, a deploy scope on each bootstrap's deploy role, the budget `branchbook-monthly` and the role ARNs as outputs |
 | [`BranchbookGuardrails`](lib/guardrails-stack.ts)<br>`af-south-1` | Administrator, by hand (2026-11-01) | CloudTrail, GuardDuty, AWS Config, Security Hub, IAM Access Analyzer, the permissions boundary and each environment's execution policy |
-| [`BranchbookRelease`](lib/release-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` | The SSM parameters `/branchbook/release` and, in code, `/branchbook/release-image`: the last commit and digest the pipeline deployed |
-| [`BranchbookData`](lib/data-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` (first by hand, 2026-10-26) | Production's VPC, its RDS for PostgreSQL 17 database and the SMS daily cap's key ([Environments](#environments-staging-and-production)) |
-| [`BranchbookApp`](lib/app-stack.ts)<br>`af-south-1` | Pipeline, every push to `main` (first by hand, 2026-10-26) | Production's certificate, WAF, load balancer, Fargate service, schema migration, SMS protect configuration, logs, alarms and DNS record |
-| [`BranchbookRegistry`](lib/registry-stack.ts)<br>`af-south-1` | Not yet deployed | The ECR repository `branchbook`: immutable tags, scan on push, the newest 50 images kept |
-| `BranchbookStagingData`, `BranchbookStagingApp`, `BranchbookStagingRelease`<br>`af-south-1` | Not yet deployed | Staging's copies of the three stacks, at https://stg.branchbook.click |
-| `CDKToolkit`<br>both Regions | Administrator, once per Region | CDK's default bootstrap, qualifier `hnb659fds`: the deploy, file-publishing, image-publishing, lookup and cfn-exec roles, an assets bucket and an ECR repository. The administrator's stacks deploy through it, and so did production's until the cutover. Other CDK apps in the account share it, so BranchBook never changes it |
-| `CDKToolkitProduction`<br>`af-south-1` | Administrator, once (2026-11-01) | Production's own bootstrap, qualifier `bbprod`. Created with CDK's default execution policy, which is narrowed to `branchbook-cdk-cfn-exec-production` after production's first deployment through it ([Hardening the account that already runs production](#hardening-the-account-that-already-runs-production)) |
+| [`BranchbookRelease`](lib/release-stack.ts)<br>`af-south-1` | Pipeline, each approved push to `main` | The SSM parameters `/branchbook/release` and `/branchbook/release-image`: the last commit and digest that passed production's smoke test |
+| [`BranchbookData`](lib/data-stack.ts)<br>`af-south-1` | Pipeline, each approved push to `main` (first by hand, 2026-10-26; last by the previous pipeline, 2026-10-31) | Production's VPC, its RDS for PostgreSQL 17 database and the SMS daily cap's key ([Environments](#environments-staging-and-production)) |
+| [`BranchbookApp`](lib/app-stack.ts)<br>`af-south-1` | Pipeline, each approved push to `main` (first by hand, 2026-10-26; last by the previous pipeline, 2026-10-31) | Production's certificate, WAF, load balancer, Fargate service, schema migration, SMS protect configuration, logs, alarms, dashboard, canary, fault-injection templates and DNS record |
+| [`BranchbookRegistry`](lib/registry-stack.ts)<br>`af-south-1` | Pipeline (`publish`), every push to `main`; first on 2026-11-01 | The ECR repository `branchbook`: immutable tags, scan on push, the newest 50 images kept |
+| `BranchbookStagingData`, `BranchbookStagingApp`, `BranchbookStagingRelease`<br>`af-south-1` | Pipeline, every push to `main`. Not yet deployed: the first run created `BranchbookStagingData`, and `BranchbookStagingApp` failed and rolled back ([deployment status](../docs/production-readiness.md#deployment-status)) | Staging's copies of the three stacks, at https://stg.branchbook.click |
+| `CDKToolkit`<br>both Regions | Administrator, once per Region | CDK's default bootstrap, qualifier `hnb659fds`: the deploy, file-publishing, image-publishing, lookup and cfn-exec roles, an assets bucket and an ECR repository. `BranchbookAccount` deploys through it, and so do production's stacks until their first deployment through `bbprod`. Other CDK apps in the account share it, so BranchBook never changes it |
+| `CDKToolkitProduction`<br>`af-south-1` | Administrator, once (2026-11-01) | Production's own bootstrap, qualifier `bbprod`, through which the pipeline deploys production. It has CDK's default execution policy, which production's first deployment through it needs; narrowing it to `branchbook-cdk-cfn-exec-production` follows that deployment ([Hardening the account that already runs production](#hardening-the-account-that-already-runs-production)) |
 | `CDKToolkitStaging`<br>`af-south-1` | Administrator, once (2026-11-01) | Staging's own bootstrap, qualifier `bbstg`, with the execution policy `branchbook-cdk-cfn-exec-staging` ([First-time setup](#first-time-setup)) |
 
-- **Cost.** `BranchbookAccount` and `BranchbookRelease` cost nothing to run; the bootstrap storage costs cents. The
-  hosted demo costs about $102 a month while it runs. Both environments, the guardrails and the observability are
-  estimated, not measured, at about $380 to $450 a month. The budget e-mails at 50, 80 and 100 percent of the
-  monthly limit in [config/account.json](config/account.json).
+- **Cost.** `BranchbookAccount` and `BranchbookRelease` cost nothing to run; the bootstrap storage costs cents. Both
+  environments, the guardrails and the observability are estimated, not measured, at about $380 to $450 a month. The
+  budget, US$450 a month, e-mails at 50, 80 and 100 percent of the monthly limit in
+  [config/account.json](config/account.json).
 - **Why `us-east-1`.** IAM is global, AWS Budgets lives in `us-east-1`, and the stack holds no customer data.
   Everything that holds customer data is in Cape Town.
 - **The GitHub side.** The environments `staging` and `production` each admit only the branch `main`, and
   `production` requires a person's approval. Each holds the secret `AWS_DEPLOY_ROLE_ARN`, its own role's ARN, and
-  may hold `ALERT_EMAIL` ([docs/delivery.md](../docs/delivery.md#github-settings-this-relies-on)). The `infra` job of
+  `ALERT_EMAIL`, the alarms' address ([docs/delivery.md](../docs/delivery.md#github-settings-this-relies-on)). The `infra` job of
   [ci.yml](../.github/workflows/ci.yml) tests and synthesises this app, both environments and every stack included,
   on every push to `main` and every pull request, with placeholder inputs and no AWS access.
 
@@ -106,8 +108,8 @@ record proves and what it does not, and how runs queue are in
 
 ## How GitHub reaches AWS without keys
 
-*Status: Deployed on 2026-11-01. The two roles replaced the single role `branchbook-github-deploy`, which the
-environment `aws-demo` trusted; the pipeline first signs in with them on its first run from `main` after this change
+*Status: Deployed on 2026-11-01, and every delivery job signs in through it. The two roles replaced the single role
+`branchbook-github-deploy`, which the environment `aws-demo` trusted; both are deleted
 ([Hardening the account that already runs production](#hardening-the-account-that-already-runs-production)).*
 
 ```mermaid
@@ -133,7 +135,9 @@ sequenceDiagram
     Note over Job: fail unless they match
 ```
 
-Everything in this diagram is built in code. Solid arrows are calls; dashed arrows are their replies.
+Everything in this diagram is built, and the sign-in is deployed; no run has yet gone all the way through it
+([deployment status](../docs/production-readiness.md#deployment-status)). Solid arrows are calls; dashed arrows are
+their replies.
 
 - **No access key exists anywhere.** Each job takes its role's ARN from its environment's secret
   `AWS_DEPLOY_ROLE_ARN`. GitHub proves the job's identity with a short-lived token, and AWS answers with credentials
@@ -153,17 +157,21 @@ Everything in this diagram is built in code. Solid arrows are calls; dashed arro
   [aws-connection-check.yml](../.github/workflows/aws-connection-check.yml).
 - **Each role can do little itself.** It may assume only its own environment's bootstrap roles in `af-south-1`
   (`AssumeOwnCdkBootstrapRoles`), read its own release records (`ReadOwnReleaseRecords`), log in to ECR and push and
-  pull the one image repository, and, for staging alone, read the synthetic-traffic token. A deny
-  (`OnlyThisEnvironmentsStacks`) keeps it off the other environment's stacks and the administrator's.
+  pull the one image repository, and, for staging alone, read the synthetic-traffic token. It holds no CloudFormation
+  permission of its own. It deploys through its bootstrap's deploy role, whose deploy scope
+  `branchbook-cdk-deploy-scope-<env>` denies CloudFormation (`OnlyThisEnvironmentsStacks`) on the other environment's
+  stacks and the administrator's ([guard 4](#who-can-change-what-in-aws)).
   [account-stack.test.ts](test/account-stack.test.ts) checks each statement.
 - **No account ID is ever committed.** The account comes from the credentials in use, the role ARNs live only in the
   environment secrets, and the workflows mask the account ID in their public logs.
 
 ## Who can change what in AWS
 
-*Status: Built in code; not yet deployed. Until the administrator's steps in
-[Hardening the account that already runs production](#hardening-the-account-that-already-runs-production) run, the
-account has the single `aws-demo` environment and deploy role described in [What exists today](#what-exists-today).*
+*Status: Guards A and 1 to 4 deployed on 2026-11-01; guards 5 to 8 are built and reach each environment with its first
+deployment ([deployment status](../docs/production-readiness.md#deployment-status)). One part of guard 4 waits for the
+last administrator step: production's bootstrap still runs CloudFormation with CDK's default `AdministratorAccess`
+execution policy, so for production guard 4 is the deploy scope alone until the administrator narrows it ([Hardening the
+account that already runs production](#hardening-the-account-that-already-runs-production), step 5).*
 
 ![Who can reach and change what in AWS, all built. By hand (A), the administrator sets BRANCHBOOK_ALERT_EMAIL or BRANCHBOOK_GUARDRAILS=true and deploys BranchbookAccount and BranchbookGuardrails. The pipeline, in a staging lane and a production lane, passes four guards: the delivery jobs never set those switches (1, code and workflow); the GitHub environments admit main only, and production needs an approval (2, GitHub setting); each environment's deploy role trusts only this repository and that environment and assumes only its own bootstrap's roles (3, IAM); and each bootstrap's deploy scope and execution policy keep it off the other environment's stacks and the administrator's (4, IAM). A crossed arrow shows staging cannot reach the administrator's stacks. At run time, WAF asks for a CAPTCHA, applies per-address limits and blocks /actuator (5), the load balancer forwards only to port 8080, never the actuator's 8081 (6), every app role carries the permissions boundary (7), and the task signs in to the database as branchbook_app with an IAM token and row privileges only (8). The gaps: one account for both environments, and a merge to main needs no second person's approval.](../docs/assets/diagrams/access-boundary.svg)
 
@@ -193,8 +201,9 @@ The pipeline, on a push to `main`, in a staging lane and a production lane:
    synthetic-traffic token ([account-stack.test.ts](test/account-stack.test.ts)). IAM enforces this.
 4. **Each environment's CDK bootstrap.** Its deploy role carries the deploy scope `branchbook-cdk-deploy-scope-<env>`,
    which denies CloudFormation on the other environment's stacks and the administrator's. Its execution role carries
-   `branchbook-cdk-cfn-exec-<env>` instead of `AdministratorAccess`: the application's services, and IAM only on that
-   environment's own stacks' roles, created only with the permissions boundary
+   `branchbook-cdk-cfn-exec-<env>` instead of `AdministratorAccess`: the application's services,
+   `cloudformation:DescribeStacks` on that environment's own stacks alone (`ReadOwnStackOutputs`, so CloudFormation
+   can resolve `Fn::GetStackOutput`), and IAM only on those stacks' roles, created only with the permissions boundary
    ([guardrails-stack.test.ts](test/guardrails-stack.test.ts),
    [deployment-policies.test.ts](test/deployment-policies.test.ts)). IAM enforces this. So `BranchbookAccount` and
    `BranchbookGuardrails` are out of the pipeline's reach in IAM, not only in code (guards 1, 3 and 4): a workflow
@@ -244,9 +253,10 @@ environment's branch policy admits only `main`.
 
 ## Environments: staging and production
 
-*Status: Built in code; not yet deployed. Tests: [environments.test.ts](test/environments.test.ts),
-[config.test.ts](test/config.test.ts), [nag.test.ts](test/nag.test.ts),
-[schema-migration-handler.test.ts](test/schema-migration-handler.test.ts).*
+*Status: Built and merged; not yet deployed ([deployment status](../docs/production-readiness.md#deployment-status)):
+staging at https://stg.branchbook.click and, after a person's approval, production at https://branchbook.click. Tests:
+[environments.test.ts](test/environments.test.ts), [config.test.ts](test/config.test.ts),
+[nag.test.ts](test/nag.test.ts), [schema-migration-handler.test.ts](test/schema-migration-handler.test.ts).*
 
 `BRANCHBOOK_ENV` selects one environment, and only its stacks exist in the app. Both run in `af-south-1`, from the
 same image, named by digest in `BRANCHBOOK_IMAGE_DIGEST`.
@@ -410,7 +420,7 @@ CPU, connections, freeable memory and free storage; service CPU and memory, heal
 Insights) running tasks; WAF's allowed and blocked requests, blocks per rule and CAPTCHAs asked and solved; the
 canary's success and duration.
 
-**Canary.** A CloudWatch Synthetics canary on `syn-nodejs-puppeteer-18.0` (CDK 2.274.0's newest constant is 13.0, so
+**Canary.** A CloudWatch Synthetics canary on `syn-nodejs-puppeteer-18.0` (CDK 2.275.0's newest constant is 13.0, so
 the name is written out) runs [lambda/canary/index.js](lambda/canary/index.js) every 5 minutes: `GET /readyz` must
 answer 200 with `"status":"UP"`, and `GET /api/v1/branches/SAN/availability?service=FICA&date=<tomorrow in
 Africa/Johannesburg>` 200 with that branch, service, date and a list of slots. GET only, so WAF's CAPTCHA never fires
@@ -443,100 +453,84 @@ aws fis get-experiment --region af-south-1 --id <experiment id>   # state, and w
 
 Or in the console: AWS FIS, Experiment templates, the template, Start experiment.
 
-## The hosted demo
+<a id="the-hosted-demo"></a>
 
-*Status: Built; first deployed by hand on 2026-10-26, and by the pipeline on every push to `main` since it took over
-([Automatic deployment](#automatic-deployment)). This section describes the deployment as it runs today; the hosted
-demo becomes the `production` environment ([Environments](#environments-staging-and-production)) on its next
-deployment.* The design is in
-[ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md), and where the build departs from it is in its
-[Notes](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md#notes); the cost line items are on the
-[architecture page](https://katlehokomeke.github.io/Appointment-Booking-System/).
+## Production
 
-The demo runs at https://branchbook.click. The domain was registered through Route 53 on 2026-10-26, and Route 53
+*Status: Built and merged; not yet deployed. Until production's first deployment, which keeps the hosted demo's stack
+IDs and names, https://branchbook.click serves the hosted demo that has run there since 2026-10-26, as the previous
+pipeline last deployed it on 2026-10-31 ([deployment status](../docs/production-readiness.md#deployment-status)). What
+production runs, beside staging, is in [Environments](#environments-staging-and-production); this section is how it is
+reached and run.* The design is in [ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md) and
+[ADR-0008](../docs/adr/0008-two-environments-promoted-by-digest.md) to
+[ADR-0011](../docs/adr/0011-waf-captcha-instead-of-a-one-time-pin.md), and where the build departs from ADR-0006 is in
+its [Notes](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md#notes); the cost line items are on the [architecture
+page](https://katlehokomeke.github.io/Appointment-Booking-System/).
+
+Production runs at https://branchbook.click. The domain was registered through Route 53 on 2026-10-26, and Route 53
 created its hosted zone on registration, so no stack owns DNS; the zone's ID is in
-[config/production.json](config/production.json) (`domain`). `https://branchbook.click` is 24 characters, inside the 28 the confirmation SMS
-allows (BR-18).
-
-Both stacks are in `af-south-1`:
-
-- **[`BranchbookData`](lib/data-stack.ts):** a VPC, `10.40.0.0/16`, across `af-south-1a` and `af-south-1b`, with a
-  public and an isolated `/24` subnet in each and no NAT gateway. RDS for PostgreSQL 17.11, the version `make up`
-  runs, on `db.t4g.micro` in the isolated subnets: Single-AZ, gp3 storage of 20 GB that may grow to 50, encrypted,
-  7-day backups, and `rds.force_ssl=1`, so it refuses any connection without TLS. Its credentials are generated into
-  Secrets Manager as `branchbook/database`, and so is `branchbook/sms-cap-key`, the key of the SMS daily cap's ledger
-  ([Real SMS](#real-sms)). Deleting the stack leaves a final snapshot; deletion protection is off.
-  PostgreSQL's own log is not exported, because a constraint error's `DETAIL` line can quote a mobile number (BR-19).
-- **[`BranchbookApp`](lib/app-stack.ts):** an ACM certificate for `branchbook.click`, validated through Route 53; AWS
-  WAF; an internet-facing Application Load Balancer; two Fargate tasks, one in each availability zone, so one can
-  fail or be replaced while the other serves; an AWS End User Messaging SMS protect configuration that lets the tasks
-  text South Africa only ([Real SMS](#real-sms)); application logs in
-  `/branchbook/app`, kept 7 days; three CloudWatch alarms; and the Route 53 A alias that points the domain at the load
-  balancer.
+[config/production.json](config/production.json) (`domain`), and each environment's App stack writes its own alias
+record in it. `https://branchbook.click` is 24 characters, inside the 28 the confirmation SMS allows (BR-18).
 
 A request takes this path:
 
 1. The browser resolves `branchbook.click` through Route 53, whose alias names the load balancer. DNS answers the
    name; it is not in the data path.
-2. AWS WAF, attached to the load balancer, applies its rules in order: it blocks `/actuator` (403); allows 10
-   `POST`s to `/api/v1/appointments` and the paths under it, bookings and cancellations together, per IP in 5
-   minutes; then applies AWS's managed rule groups `AWSManagedRulesAmazonIpReputationList`,
-   `AWSManagedRulesKnownBadInputsRuleSet` and `AWSManagedRulesCommonRuleSet`. Both path rules decode and lowercase
-   the path before comparing it (`URL_DECODE`, `LOWERCASE`), so `/%61ctuator` and `/ACTUATOR` are blocked too. It
-   asks for no sign-in.
+2. AWS WAF, attached to the load balancer, applies its rules in order: it blocks `/actuator` (403); blocks an address
+   that sends more than 10 bookings and cancellations, 100 lookups or 1,000 requests in 5 minutes; asks for a CAPTCHA
+   on every booking and cancellation `POST`; then applies AWS's managed rule groups
+   `AWSManagedRulesAmazonIpReputationList`, `AWSManagedRulesKnownBadInputsRuleSet` and `AWSManagedRulesCommonRuleSet`.
+   The path rules decode and lowercase the path before comparing it (`URL_DECODE`, `LOWERCASE`), so `/%61ctuator` and
+   `/ACTUATOR` are blocked too. It asks for no sign-in.
 3. The load balancer, in the public subnets, ends HTTPS on port 443 with ELB's recommended TLS 1.3 policy, drops
    invalid header fields and health-checks `/readyz`. Plain HTTP on port 80 is answered with a redirect to HTTPS, and
    HSTS keeps browsers there.
-4. One of the two Fargate tasks (ARM64, 0.5 vCPU, 1 GB each), which admit traffic only from the load balancer, serves
-   the request on port 8080. Each runs in a public subnet with a public IP, so it reaches ECR, Secrets Manager and AWS
-   End User Messaging without a NAT gateway.
-5. The task talks to RDS on port 5432 over TLS, directly, with no RDS Proxy; the database admits only the tasks.
+4. One of two to four Fargate tasks (ARM64, 0.5 vCPU, 1 GB each), in the private `app` subnets with no public address,
+   serves the request on port 8080. The tasks admit traffic only from the load balancer and reach AWS's APIs through
+   the NAT gateway in their zone.
+5. The task talks to the Multi-AZ RDS database on port 5432, directly, with no RDS Proxy, over TLS with
+   `sslmode=verify-full`, signed in as `branchbook_app` with an IAM token; the database admits only the tasks.
 
-The task is configured by environment variables; there are no `prod` or `demo` Spring profiles:
+The task runs the `prod` Spring profile, which fails closed ([docs/configuration.md](../docs/configuration.md)). Its
+settings are `appEnvironment` in [config/production.json](config/production.json) and the variables the stack computes
+([Environments](#environments-staging-and-production)); these decide how production behaves:
 
 | Variable | Value |
 |---|---|
-| `DB_URL` | The RDS endpoint and the database `branchbook`, with `sslmode=require` |
-| `DB_USER`, `DB_PASSWORD` | From the Secrets Manager secret `branchbook/database`; never in the template |
-| `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY` | From the Secrets Manager secret `branchbook/sms-cap-key`, 48 random letters and digits; never in the template. The daily cap's ledger counts each number under an HMAC-SHA256 fingerprint keyed with it |
-| `PUBLIC_BASE_URL` | `https://branchbook.click`, the confirmation SMS's `/manage` link |
 | `BRANCHBOOK_INBOX_ENABLED` | `false`: the simulated inbox is off, so `/api/v1/messages` answers 404 and the `/messages` page says it is switched off on this deployment. Each booker still sees their own SMS and its status on the confirmation page |
 | `BRANCHBOOK_INBOX_REDACT_REFERENCES` | `true`: should the inbox ever be switched on, it shows every appointment reference as `APT-****-****` |
 | `BRANCHBOOK_RETENTION_ENABLED` | `true`: an hourly job deletes each booking, with its messages and idempotency keys, once its appointment is over |
+| `BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY` | `false`: any South African mobile number may book, because production texts the number it is given |
 | `BRANCHBOOK_SMS_GATEWAY` | `aws`: each SMS goes through AWS End User Messaging SMS ([Real SMS](#real-sms)). The published demo numbers, 082 555 0000 to 082 555 0199, stay on the simulated gateway |
-| `BRANCHBOOK_SMS_AWS_REGION` | `af-south-1`, the stack's own Region |
-| `BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID` | The ID of the stack's protect configuration, which every send names |
 | `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` | `5`: the most SMS one number is sent in a day, whatever the bookings |
+| `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY` | From the Secrets Manager secret `branchbook/sms-cap-key`; never in the template. The daily cap's ledger counts each number under an HMAC-SHA256 fingerprint keyed with it |
 | `BRANCHBOOK_SMS_AWS_DRY_RUN` | `false`. A deploy run with `BRANCHBOOK_SMS_AWS_DRY_RUN=true` sets it to `true`, and AWS then only checks each send and texts no one |
-| `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE` | `health,info`: the task serves no `/actuator/prometheus`, so its meters stay private even if a request slipped past WAF's block |
+| `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE` | `health,info`: the management port, 8081, serves no `/actuator/prometheus`; the meters go to CloudWatch instead ([Observability](#observability-and-fault-injection)) |
 | `SERVER_FORWARD_HEADERS_STRATEGY` | `native`: the app trusts the load balancer's `X-Forwarded-*` headers, so it sees each request as HTTPS |
 
-Any South African mobile number may book: the demo-numbers-only rule (`BRANCHBOOK_BOOKING_DEMO_NUMBERS_ONLY`) is
-off, because the demo now texts the number it is given.
+**No sign-in.** Anyone with the address can use it: a sign-in prompt in front of a public booking page is a poor
+experience for everyone who opens it ([ADR-0006, Notes](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). What
+limits what a visitor can do is the deletion of each booking once its appointment is over, the SMS controls under
+[Real SMS](#real-sms), and WAF's CAPTCHA and per-address limits. The inbox is off because, with no sign-in, it would
+list every booking's reference to every visitor, and a demo number's last four digits are public, so anyone could open
+a booking made with one and see the name typed into it.
 
-**No sign-in.** Anyone with the address can try the demo: a sign-in prompt in front of a demo is a poor experience
-for everyone who opens it
-([ADR-0006, Notes](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md#notes)). What limits what a visitor can do is
-the deletion of each booking once its appointment is over, the SMS controls under [Real SMS](#real-sms), and WAF's limit on
-bookings and cancellations. The inbox is off because, with no sign-in, it would list every booking's reference to
-every visitor, and a demo number's last four digits are public, so anyone could open a booking made with one and see
-the name typed into it.
+A new version starts and passes its health check before the old one stops (minimum 100, maximum 200 percent); the
+deployment circuit breaker rolls back a version that never becomes healthy, and the `ServerErrors` alarm one whose
+tasks answer 5xx. The alarms ([Observability](#observability-and-fault-injection)) publish to an SNS topic, which
+e-mails the address in the `production` environment's secret `ALERT_EMAIL`.
 
-A new version starts and passes its health check before the old one stops (minimum 100, maximum 200 percent), and
-the deployment circuit breaker rolls back a version that never becomes healthy. The three alarms publish to an SNS
-topic: the app answering 5xx to 5 or more requests in 5 minutes, no healthy task for 3 minutes, and the database
-with less than 2 GB free. They are e-mailed only if `BRANCHBOOK_DEMO_ALERT_EMAIL` was set at deploy time.
+**Cost.** Production, staging, the guardrails and the observability are estimated, not measured, at about $380 to
+$450 a month, inside the US$450 budget ([What exists today](#what-exists-today)). The domain costs about $3 a year.
+Each SMS is charged on top, up to the account's SMS spend limit ([Real SMS](#real-sms)).
 
-**Cost.** About $102 a month before VAT while it runs, inside the $110 budget. The second task adds about $19.50:
-Fargate ARM in Cape Town is $0.04372 per vCPU-hour and $0.0048 per GB-hour, and each task has 0.5 vCPU and 1 GB. The
-domain costs about $3 a year. Each SMS is charged on top, up to the account's SMS spend limit ([Real SMS](#real-sms)).
-
-**Teardown date: 2026-11-30.** Extend it here, with the reason, if the demo must run longer; until then the budget's
-alerts are the backstop.
+**Teardown date: 2026-11-30,** for both environments. Extend it here, with the reason, if they must run longer; until
+then the budget's alerts are the backstop.
 
 ### Real SMS
 
-*Status: Built. The project owner decided on 2026-10-27 that the hosted demo texts for real.*
+*Status: Built. The project owner decided on 2026-10-27 that the hosted demo texts for real, and production after
+it; staging stays simulated, with demo numbers only.*
 
 **What is texted, and to whom.** Each booking's confirmation SMS, and a cancellation SMS when an appointment is
 cancelled, go to the number the booking was made with, through AWS End User Messaging SMS in `af-south-1`. They go
@@ -557,7 +551,8 @@ never texts a stranger; 082 555 0000 still fails, as it does locally.
   The app counts each SMS in a ledger in the database, under an HMAC-SHA256 fingerprint of the number, so the ledger
   holds no number. Its key, `branchbook/sms-cap-key`, is generated by the data stack and lives as long as the
   database, so a new task, or a redeployed app stack, keeps the count.
-- **Ten bookings and cancellations per address in 5 minutes,** WAF's lowest limit, because each sends a real SMS.
+- **A CAPTCHA, and ten bookings and cancellations per address in 5 minutes,** WAF's lowest limit, because each
+  sends a real SMS.
 - **No delivery events are logged.** No configuration set records them, because they carry the destination number,
   and no log may hold personal data ([BR-19](../docs/domain-rules.md#br-19)). So `SENT` means AWS accepted the
   message; nothing tells the app whether the handset received it.
@@ -581,10 +576,10 @@ delivered", and the booking still stands.
 
 ### Deploying and updating it
 
-The pipeline deploys both stacks on every push to `main` ([Automatic deployment](#automatic-deployment)): it builds
-the image on an ARM runner and smoke-tests the result before it records the commit. An administrator can run the same
-deployment by hand, as the fallback when the pipeline cannot run, or for a dry run. From this folder, signed in as
-`branchbook-admin`, with Docker running:
+The pipeline deploys production's stacks after each approved push to `main`
+([Automatic deployment](#automatic-deployment)): the digest staging tested, smoke-tested before it records the release.
+An administrator can run the same deployment by hand, as the fallback when the pipeline cannot run, or for a dry run.
+From this folder, signed in as `branchbook-admin`:
 
 ```bash
 AWS_PROFILE=branchbook-admin BRANCHBOOK_ENV=production \
@@ -603,27 +598,35 @@ BRANCHBOOK_DEMO_ALERT_EMAIL=<your address> \
 - **`BRANCHBOOK_SMS_AWS_DRY_RUN=true` is optional.** It deploys a task that asks AWS to check each send without sending
   it. Deploy again without it, or let the next push to `main` do so, to text for real.
 - **No image is built at deploy time.** The tasks pull the image the pipeline built once and pushed to the
-  `branchbook` repository, by digest. (Until this change deploys, the live stacks still build the
-  [Dockerfile](../Dockerfile) during `cdk deploy`.)
-- **To update,** push to `main`. By hand, run the same command from the commit you want live; nothing records a hand
-  deploy, `/branchbook/release` names only what the pipeline deployed, and the next push to `main` deploys `main` over
-  it.
+  `branchbook` repository, by digest; read the live one from `/branchbook/release-image`
+  ([Automatic deployment](#automatic-deployment)).
+- **To update,** push to `main` and approve production's deployment. By hand, run the same command from the commit
+  you want live; nothing records a hand deploy, `/branchbook/release` names only what the pipeline deployed, and the
+  next push to `main` deploys `main` over it.
 
 ### Tearing it down
+
+Each environment, with its release record:
 
 ```bash
 AWS_PROFILE=branchbook-admin BRANCHBOOK_ENV=production \
 BRANCHBOOK_IMAGE_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
-  npx cdk destroy BranchbookApp BranchbookData
+  npx cdk destroy BranchbookRelease BranchbookApp BranchbookData
+AWS_PROFILE=branchbook-admin BRANCHBOOK_ENV=staging \
+BRANCHBOOK_IMAGE_DIGEST=sha256:0000000000000000000000000000000000000000000000000000000000000000 \
+  npx cdk destroy BranchbookStagingRelease BranchbookStagingApp BranchbookStagingData
 ```
 
 The variables must be set, because the stacks are in the app only when they are; any digest works for a destroy.
 Production's database has deletion protection, so destroying `BranchbookData` fails until it is turned off in the
 RDS console (staging's has none). The protect configuration goes with
-`BranchbookApp`. Four things outlive the stacks:
+`BranchbookApp`. These outlive the stacks:
 
-- **The database's final snapshot.** Delete it by hand, under Snapshots in the RDS console.
-- **The log group `/branchbook/app`,** which CloudFormation keeps. Delete it in the CloudWatch console.
+- **Each database's final snapshot.** Delete it by hand, under Snapshots in the RDS console.
+- **The log groups `/branchbook/app` and `/branchbook-staging/app`,** which CloudFormation keeps. Delete them in the
+  CloudWatch console.
+- **Production's canary reports bucket,** which CloudFormation keeps (staging's is emptied and deleted). Empty it,
+  then delete it, in the S3 console.
 - **The domain and its hosted zone,** which no stack owns. The domain renews each year unless auto-renew is turned
   off under Registered domains in Route 53; the hosted zone stays until it is deleted by hand.
 - **Any verified destination numbers,** which belong to the account, not a stack. Delete them in the AWS End User
@@ -633,9 +636,10 @@ RDS console (staging's has none). The protect configuration goes with
 because the [Dockerfile](../Dockerfile)'s runtime stage has `RUN` steps; and the release record is written after the
 smoke test, so it records only a version that works.
 
-**Resolved on 2026-10-26:** the availability zones are pinned in [bin/branchbook.ts](bin/branchbook.ts), so
-synthesis needs no lookup; the App stack's alert address has its own input, `BRANCHBOOK_DEMO_ALERT_EMAIL`; and
-`application-prod.yml` and `application-demo.yml` are not needed, because the task sets environment variables.
+**Resolved on 2026-10-26:** the availability zones are pinned, today in each environment's `availabilityZones`, so
+synthesis needs no lookup; and the App stack's alert address has its own input, `BRANCHBOOK_DEMO_ALERT_EMAIL`. The
+`prod` profile, `application-prod.yml`, came later, with
+[ADR-0009](../docs/adr/0009-configuration-from-the-environment.md).
 
 ## Prerequisites
 
@@ -745,8 +749,11 @@ These steps need you personally, and only happen once.
    Each execution policy allows the services the application stacks use, but IAM only on roles and managed policies
    named after that environment's own stacks (`BranchbookData-*`, `BranchbookApp-*` and `BranchbookRelease-*` for
    production; `BranchbookStaging*-*` and `BranchbookRegistry-*` for staging), and creates or grants a role only with
-   the permissions boundary `branchbook-permissions-boundary` attached. [cdk.json](cdk.json) attaches that boundary to
-   every role the application stacks create (`@aws-cdk/core:permissionsBoundary`).
+   the permissions boundary `branchbook-permissions-boundary` attached. It may also read those same stacks' outputs
+   (`ReadOwnStackOutputs`: `cloudformation:DescribeStacks` on them alone), which CloudFormation needs to resolve the
+   `Fn::GetStackOutput` that passes the Data stack's outputs to the App stack
+   ([pull request #43](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/43)). [cdk.json](cdk.json)
+   attaches that boundary to every role the application stacks create (`@aws-cdk/core:permissionsBoundary`).
    `BranchbookRegistry` belongs to staging because the pipeline creates it in its first job, in the `staging`
    environment, before any environment is deployed; production only pulls the image by digest and never changes it.
    Pass the qualifier and toolkit stack name on every later `cdk bootstrap` of either environment; without them the
@@ -783,15 +790,25 @@ These steps need you personally, and only happen once.
       --output text | tr -d '\n' | pbcopy
     ```
 
+    In each environment also add the variables `AWS_REGION` (`af-south-1`) and `BRANCHBOOK_ENV` (`staging` or
+    `production`). The delivery jobs read both, and aws-connection-check reads `AWS_REGION`, so step 11 fails without
+    it. Optionally add the secret `ALERT_EMAIL`, the address the alarms e-mail
+    ([docs/delivery.md](../docs/delivery.md#github-settings-this-relies-on)).
+
 11. **Prove the connection.** Under **Actions**, run **aws-connection-check**. It assumes the role and reports which
     role it obtained, with the account ID masked.
 
 ### Hardening the account that already runs production
 
+*Status: Steps 1 to 3, and steps 6 and 7 above, done on 2026-11-01. Step 4 waits for an administrator to redeploy
+`BranchbookGuardrails` with `ReadOwnStackOutputs` ([pull request
+#43](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/43)), so that staging, then production, can
+deploy; step 5 follows step 4 ([deployment status](../docs/production-readiness.md#deployment-status)).*
+
 The account deployed on 2026-10-26 runs production's stacks through the default bootstrap, `CDKToolkit` (`hnb659fds`),
-which other CDK apps in the account share, with CDK's default `AdministratorAccess` execution role; it has the single
-deploy role `branchbook-github-deploy`, and production's roles carry no boundary. The default bootstrap is never
-changed. Steps 6 and 7 above apply unchanged. Then, in this order:
+which other CDK apps in the account share, with CDK's default `AdministratorAccess` execution role, and production's
+roles carry no boundary, until step 4. It had the single deploy role `branchbook-github-deploy`. The default bootstrap
+is never changed. Steps 6 and 7 above apply unchanged. Then, in this order:
 
 1. **Bootstrap production's own toolkit, at first with the default execution policy**, so its first deployment can
    add the boundary to roles that do not yet carry it:
@@ -809,7 +826,8 @@ changed. Steps 6 and 7 above apply unchanged. Then, in this order:
    replaced, and the deploy adds the boundary to each of production's roles, an in-place update
    (`PermissionsBoundary` needs no replacement). Check one:
    `aws iam get-role --role-name <a BranchbookApp-... role> --query Role.PermissionsBoundary --profile branchbook-admin`.
-5. **Narrow production's bootstrap** with the first command of step 8; the next deployment must change nothing.
+5. **Narrow production's bootstrap** with the first command of step 8, once `BranchbookGuardrails` holds
+   `ReadOwnStackOutputs` (step 8); the next deployment must change nothing.
 
 **Rollback.** `cdk bootstrap` keeps a parameter's previous value unless it is passed, so restore the default execution
 policy by passing it explicitly; the roles keep their names, and the stacks continue as before:
@@ -828,11 +846,12 @@ npx cdk bootstrap "aws://$ACCOUNT/af-south-1" --profile branchbook-admin \
 Run these in order, from this folder. Each stack is destroyed through the bootstrap roles of its Region, so the
 bootstrap goes last.
 
-1. Tear down the hosted demo, as in [Tearing it down](#tearing-it-down), if it is still running.
-2. Destroy the release record:
+1. Tear down both environments, with their release records, as in [Tearing it down](#tearing-it-down).
+2. Destroy the image registry. CloudFormation keeps the repository `branchbook` on purpose; delete it, with its
+   images, in the ECR console afterwards:
 
    ```bash
-   npx cdk destroy BranchbookRelease --profile branchbook-admin
+   npx cdk destroy BranchbookRegistry --profile branchbook-admin
    ```
 
 3. Destroy the GitHub trust, the deploy roles, the deploy scopes and the budget. The variable must be set, because the stack is in the
@@ -860,8 +879,9 @@ bootstrap goes last.
    Leave each Region's default `CDKToolkit` unless no other CDK app in the account deploys through it: list the
    stacks first (`aws cloudformation list-stacks`), since the default bootstrap is shared.
 
-   The ECR repository must be empty for the delete to succeed; in `af-south-1` it holds the hosted demo's images,
-   so delete them first in the ECR console. CloudFormation keeps each assets bucket
+   Each bootstrap's ECR repository must be empty for its delete to succeed; the default `CDKToolkit`'s, in
+   `af-south-1`, holds the hosted demo's images, so delete them first in the ECR console. CloudFormation keeps each
+   assets bucket
    (`cdk-<qualifier>-assets-<account>-<region>`) on purpose. In the S3 console, empty it, which also removes its old
    versions, then delete it.
 
@@ -901,7 +921,7 @@ bootstrap goes last.
 | `lib/constructs/observability.ts`, `lambda/canary/` | The app's metrics export, the alarms, the dashboard and the canary with its script |
 | `lib/constructs/fault-injection.ts` | The AWS FIS experiment templates and their role |
 | `lib/constructs/nag-arn.ts` | How cdk-nag writes an ARN in a finding's ID, for acknowledgments of ARN-scoped wildcards |
-| `lib/sms-countries.ts` | The countries AWS lists for a protect configuration; the hosted demo blocks every one but South Africa |
+| `lib/sms-countries.ts` | The countries AWS lists for a protect configuration; production blocks every one but South Africa |
 | `test/account-stack.test.ts` | Unit tests that check the connection's security properties and the account configuration |
 | `test/guardrails-stack.test.ts` | Unit tests for the audit trail, the detective controls, the execution policies and the boundary |
 | `test/deployment-policies.test.ts` | Checks the execution policies cover every resource type each environment deploys, every application role carries the boundary, and every stack uses its environment's bootstrap |
@@ -914,7 +934,7 @@ bootstrap goes last.
 | `test/canary-script.test.ts` | Unit tests for the canary's date, paths and checks |
 | `test/registry-stack.test.ts` | Unit tests for the ECR repository |
 | `test/schema-migration-handler.test.ts` | Unit tests for the migration handlers: a failed migration fails the deployment |
-| `cdk.json` | Non-sensitive account configuration (repository name and public IDs, GitHub environment, budget) and CDK feature flags |
+| `cdk.json` | The CDK app's command, the permissions boundary every application role carries, and CDK feature flags |
 
 Next: [docs/delivery.md](../docs/delivery.md) for how a commit gets here; [SECURITY.md](../SECURITY.md) for secrets
 and personal information.

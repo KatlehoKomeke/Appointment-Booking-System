@@ -7,7 +7,7 @@ an SMS confirmation that cannot be lost: simulated locally and in staging, and a
 
 > **Fynbos Bank is fictional.** This repository is an engineering assessment submitted to Capitec Bank. It is not
 > affiliated with Capitec Bank or any other bank. Every branch, person and phone number in it is made up. Run locally
-> it sends nothing; the hosted demo texts the number you book with, unless it is a demo number, 082 555 0000 to 0199.
+> it sends nothing; production texts the number you book with, unless it is a demo number, 082 555 0000 to 0199.
 
 ![BranchBook at a glance, all built: a customer's browser reaches one Spring Boot jar that serves the React app and a REST API which books, looks up and cancels over PostgreSQL 17, texting through a simulated gateway or, in production, AWS End User Messaging; code ships through GitHub Actions, which builds the image once and signs in to AWS through OpenID Connect, to Cape Town, where the same image is deployed by digest to staging and then, after approval, to production.](docs/assets/diagrams/system-at-a-glance.svg)
 
@@ -16,10 +16,8 @@ an SMS confirmation that cannot be lost: simulated locally and in staging, and a
 | Area | Today |
 |---|---|
 | Stage | Milestones M0 to M7 built: the web app's five-step booking flow, confirmation page, `/manage` and simulated inbox; booking in one transaction that also writes the confirmation SMS; lookup with the reference and the last four digits; a dispatcher that delivers the SMS through a simulated gateway, or through AWS End User Messaging SMS where a deployment asks, with the race proofs; and cancelling and retrying, in the API and the web app, with end-to-end tests in a real browser. M7 is built too: the final documentation pass, a clean-clone rehearsal and the `v1.0.0` release tag, pushed on 2026-10-27. |
-| Design | The whole design, including planned work, is on the [architecture page](https://katlehokomeke.github.io/Appointment-Booking-System/); its header names the commit it was last checked against. The repository records what is built and wins where the two disagree. |
 | Run locally | `make up`, then open http://localhost:8080 |
-| Hosted demo | https://branchbook.click, in AWS Cape Town (af-south-1) since 2026-10-26, open to anyone with no sign-in, and with the simulated inbox off so no visitor sees another's booking. Any South African mobile may book there: a number outside the demo block 082 555 0000 to 0199 is sent a real SMS through AWS End User Messaging SMS, at most five a day to one number (best effort over a shared route, and only to verified numbers while the AWS account is in the SMS sandbox). Each booking is deleted within the hour after its appointment ends, or at once when it is cancelled. It becomes the production environment below when the administrator's steps in [infra/README.md](infra/README.md#hardening-the-account-that-already-runs-production) run ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md), [infra/README.md](infra/README.md#the-hosted-demo)). |
-| Environments | Staging and production, built in code and not yet deployed: one image, built and tested once, promoted by digest from staging to production ([Environments](#environments), [ADR-0008](docs/adr/0008-two-environments-promoted-by-digest.md)). |
+| Environments | Staging, https://stg.branchbook.click, and production, https://branchbook.click, in AWS Cape Town (af-south-1): one image, built and tested once, promoted by digest from staging to production ([Environments](#environments), [ADR-0008](docs/adr/0008-two-environments-promoted-by-digest.md)). Built and merged; not yet deployed. Until production's first deployment, https://branchbook.click serves the single hosted demo that has run there since 2026-10-26, on the infrastructure before the hardening ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)), and staging serves nothing. The first deployment waits for one administrator step ([deployment status](docs/production-readiness.md#deployment-status)). |
 | Deployment | Every push to `main` runs `ci`. Once every check passes, `publish` pushes the image the checks tested to ECR and attests it; `deploy-staging` deploys it by digest and runs the smoke and end-to-end tests there; then, once a person approves, `deploy-production` verifies the image's provenance, deploys the same digest and smoke-tests it, and rolls production back to the last release if that fails. Each environment records its release only after its smoke test. GitHub reaches AWS through OpenID Connect with no stored keys, and a red check means no deployment ([docs/delivery.md](docs/delivery.md)). |
 | Production readiness | Every control, with the test, CI job, CDK assertion or cdk-nag rule that proves it: [docs/production-readiness.md](docs/production-readiness.md). What can fail and what contains it: [docs/resilience.md](docs/resilience.md). The threats and the risks that remain: [docs/threat-model.md](docs/threat-model.md), [SECURITY.md](SECURITY.md#known-risks). |
 
@@ -27,7 +25,7 @@ an SMS confirmation that cannot be lost: simulated locally and in staging, and a
 
 | Milestone | Scope | Status |
 |---|---|---|
-| M0 | Scaffold, `make up`, CI, continuous deployment | Built; since the pipeline took over the hosted demo, `ci` deploys it too |
+| M0 | Scaffold, `make up`, CI, continuous deployment | Built; `ci` also holds the delivery jobs for staging and production |
 | M1 | Schema and named constraints, reference data, public holidays, branch API, ArchUnit rules | Built |
 | M2 | `SlotCalendar`, the availability API, the committed OpenAPI contract | Built |
 | M3 | Booking transaction with idempotency, the PENDING confirmation SMS in the same transaction, lookup with the last four digits and its rate limit | Built |
@@ -35,29 +33,29 @@ an SMS confirmation that cannot be lost: simulated locally and in staging, and a
 | M5 | The dispatcher and simulated SMS gateway, delivery status, the simulated inbox, the race and idempotency proofs | Built |
 | M6 | Tier 2 if time allows, UI states and accessibility, web and end-to-end tests, CI completion | Built: cancel, retry, demo data and two metrics in the API and the web app; Playwright in CI at 390 and 1280 px |
 | M7 | Final documentation pass, clean-clone rehearsal, release tag | Built: the documentation pass, a rehearsal from a fresh clone, and `v1.0.0` tagged on 2026-10-27 |
-| AWS | Hosted demo: the deploy role, budget and release record, and the data and app stacks, first deployed by hand on 2026-10-26 and by the pipeline on every push to `main` since it took over | Built |
-| Hardening | Staging and production from validated configuration, the image promoted by digest behind an approval with automatic rollback, private subnets, IAM database authentication with a least-privilege role, a WAF CAPTCHA, the SMS circuit breaker, account guardrails, alarms, a canary and fault-injection experiments ([docs/production-readiness.md](docs/production-readiness.md)) | Built in code; not yet deployed |
+| AWS | The hosted demo, deployed by hand on 2026-10-26 and then by the pipeline; then the hardening that replaces it: staging and production from validated configuration, the image promoted by digest behind an approval with automatic rollback, private subnets, IAM database authentication with a least-privilege role, a WAF CAPTCHA, the SMS circuit breaker, account guardrails, alarms, a canary and fault-injection experiments ([docs/production-readiness.md](docs/production-readiness.md)) | The hosted demo deployed; the hardening built and merged, its first deployment waiting for one administrator step ([deployment status](docs/production-readiness.md#deployment-status)) |
 
 ### Environments
 
-*Built in code; not yet deployed. The live hosted demo is the single environment that preceded them.* Both run in
-Cape Town (af-south-1) from the same image, with the `prod` profile. Every value is in
-[infra/config/](infra/config) and every application setting in [docs/configuration.md](docs/configuration.md); the
-full comparison is in [infra/README.md](infra/README.md#environments-staging-and-production).
+*Not yet deployed ([deployment status](docs/production-readiness.md#deployment-status)).* Both run in Cape Town from one
+image, with the `prod` profile. Values: [infra/config/](infra/config); settings: [docs/configuration.md](docs/configuration.md);
+the full comparison: [infra/README.md](infra/README.md#environments-staging-and-production).
 
 | | Staging | Production |
 |---|---|---|
 | Address | https://stg.branchbook.click | https://branchbook.click |
 | Deployed | On every push to `main` that passes every check | The same image, by digest, once staging passes and a person approves |
 | Tasks, database | 1 to 2 tasks; Single-AZ | 2 to 4 tasks over two zones; Multi-AZ, deletion protection |
-| SMS | Simulated; the published demo numbers only | Real, through AWS End User Messaging, South Africa only, five a day to a number; the demo numbers stay simulated |
+| SMS | Simulated; the published demo numbers only | Real, through AWS End User Messaging, South Africa only, five a day to a number, and only to verified numbers while the account is in the SMS sandbox; the demo numbers stay simulated |
 | CAPTCHA | On every booking and cancellation; the pipeline's synthetic traffic may skip it | On every booking and cancellation, with no way past it |
+| Sign-in; simulated inbox | None, open to anyone; off | None, open to anyone; off |
+| Each booking | Deleted within the hour after its appointment ends, or at once when cancelled | The same |
 
 ## The full design
 
 <a href="https://katlehokomeke.github.io/Appointment-Booking-System/"><picture><source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-page-dark.png"><img src="docs/assets/architecture-page-light.png" width="100%" alt="The BranchBook architecture page: the title, a one-paragraph summary of the design and the brief it answers"></picture></a>
 
-**[BranchBook architecture](https://katlehokomeke.github.io/Appointment-Booking-System/)** holds the whole design, including planned work: each section is marked built, partly built or planned, with every departure from the plan.
+**[BranchBook architecture](https://katlehokomeke.github.io/Appointment-Booking-System/)** holds the whole design, including planned work: each section is marked built, partly built or planned, with every departure from the plan, and its header names the commit it was last checked against. The repository records what is built and wins where the two disagree.
 
 ## Reviewing this repository
 
@@ -110,23 +108,6 @@ One Spring Boot jar serves the React app and the REST API, over PostgreSQL 17. I
 `application`, `domain`, `infrastructure`). ArchUnit fails the build on a cycle between modules, a controller that
 reaches a database adapter, or a transaction opened outside the application layer ([docs/architecture.md](docs/architecture.md)).
 
-## How it is tested and delivered
-
-![From a commit to Cape Town, all built: an opt-in pre-commit hook runs gitleaks (1), main's ruleset requires every check (2), ci builds the ARM64 image once and tests that build (3), publish pushes it to ECR and attests it (4), deploy-staging deploys its digest to staging and tests it (5), and, after a person's approval, deploy-production verifies its provenance and deploys the same digest to production (6), with rollback-production if it fails; every delivery job signs in through OpenID Connect, and the administrator deploys BranchbookAccount and BranchbookGuardrails by hand (A).](docs/assets/diagrams/delivery-pipeline.svg)
-
-- **Before a commit:** an opt-in pre-commit hook (`make hooks`) refuses secret-bearing files and runs gitleaks.
-- **On every push to `main` and every pull request:** `ci` runs `api`, `web`, `infra` (the CDK app's tests, cdk-nag
-  and a synth of both environments), `workflow-lint` (actionlint and zizmor) and `image`, which builds the ARM64
-  image once, scans it with Trivy and writes its SBOM; then `stack` runs that image under Docker Compose,
-  smoke-tested, with Playwright in a real browser, a short k6 load test and an OWASP ZAP scan. `codeql`,
-  `dependency-review` and `secret-scan` run beside it. `main` requires every one of these checks before a push or
-  merge.
-- **Deploying:** on a push to `main`, once every check passes, the same image is pushed to ECR and attested, deployed
-  by digest to staging and tested there, then, after a person approves, verified and deployed to production, which
-  rolls back by itself if its smoke test fails. Each step: [docs/delivery.md](docs/delivery.md#at-a-glance).
-
-## Technology
-
 | Layer | Choice |
 |---|---|
 | Back end | Java 25 LTS, Spring Boot 4.1, Spring Data JPA, Flyway, Resilience4j |
@@ -138,34 +119,35 @@ reaches a database adapter, or a transaction opened outside the application laye
 
 ### Versions
 
-Current at M7, with the production hardening's additions. `api/pom.xml`, the lockfiles, `Dockerfile` and `compose.yaml` are authoritative; Dependabot proposes updates weekly.
-
-<details><summary>Every pinned version</summary>
+<details><summary>Every pinned version. The build files named below are authoritative; Dependabot proposes updates weekly.</summary>
 
 | Component | Version | Pinned in |
 |---|---|---|
-| Java | 25 LTS; Eclipse Temurin 25.0.4.1 in the image | `api/pom.xml`, `Dockerfile` |
-| Spring Boot | 4.1.1, with Spring Framework 7.0.9 and Spring Security 7.1.1 | `api/pom.xml` |
-| Hibernate ORM, Flyway | 7.4.5, 12.4.0 | managed by Spring Boot |
-| libphonenumber, AWS SDK for Java v2 | 9.0.41, to tell a mobile number from a landline; 2.55.15, the `software.amazon.awssdk` BOM, for the real SMS | `api/pom.xml` |
-| AWS Advanced JDBC Wrapper | 4.5.0, for IAM database authentication | `api/pom.xml` |
-| Resilience4j | 2.4.0, the SMS circuit breaker and its meters | `api/pom.xml` |
-| Tomcat, Jackson | 11.0.25; 3.1.7 and 2.21.7: security fixes pinned ahead of the versions Spring Boot 4.1.1 manages, until it manages these or later | `api/pom.xml` |
-| PostgreSQL | 17.11; JDBC driver 42.7.13 | `compose.yaml`, `TestcontainersConfiguration` |
-| JUnit, Testcontainers | 6.0.3, 2.0.5 | managed by Spring Boot |
-| ArchUnit | 1.5.1 | `api/pom.xml` |
-| springdoc-openapi | 3.2.0 | `api/pom.xml` |
-| Maven | 3.10.0, checksum-verified by the wrapper | `api/.mvn/wrapper/maven-wrapper.properties` |
+| Java, Maven | 25 LTS, Eclipse Temurin 25.0.4.1 in the image; Maven 3.10.0, checksum-verified by the wrapper | `api/pom.xml`, `Dockerfile`, `api/.mvn/wrapper/maven-wrapper.properties` |
+| Spring Boot | 4.1.2, with Spring Framework 7.0.10, Spring Security 7.1.2, Tomcat 11.0.27, Jackson 3.1.7 and 2.21.7, Hibernate ORM 7.4.13, Flyway 12.4.0, the PostgreSQL JDBC driver 42.7.14, JUnit 6.0.3 and Testcontainers 2.0.5 | `api/pom.xml` |
+| libphonenumber, AWS SDK for Java v2 | 9.0.42, to tell a mobile number from a landline; 2.57.5, the `software.amazon.awssdk` BOM, for the real SMS | `api/pom.xml` |
+| AWS Advanced JDBC Wrapper, Resilience4j | 4.5.0, for IAM database authentication; 2.4.0, the SMS circuit breaker and its meters | `api/pom.xml` |
+| PostgreSQL | 17.11 | `compose.yaml`, `TestcontainersConfiguration`, `infra/lib/data-stack.ts` |
+| ArchUnit, springdoc-openapi | 1.5.1, 3.2.0 | `api/pom.xml` |
 | Node.js | 24; 24.22.1 in the build image | `.nvmrc`, `Dockerfile` |
-| React, React Router | 19.3.1, 8.4.0 | `web/package-lock.json` |
-| TanStack Query, react-hook-form, zod | 5.104.2, 7.90.0, 4.6.6 | `web/package-lock.json` |
-| TypeScript | 6.0.3 | `web/` and `infra/` lockfiles |
-| Vite, Vitest; Playwright, axe | 8.3.5, 5.0.5; 1.64.0, 4.13.0 | `web/` and `e2e/` lockfiles |
-| openapi-typescript, openapi-fetch | 7.13.0, 0.17.0 | `web/package-lock.json` |
-| ESLint | 10.13.0 | `web/` and `infra/` lockfiles |
-| AWS CDK | `aws-cdk-lib` 2.274.0, CLI 2.1146.1 | `infra/package.json` |
+| React, React Router, TanStack Query, react-hook-form, zod | 19.3.1, 8.5.0, 5.105.0, 7.91.0, 4.6.7 | `web/package-lock.json` |
+| TypeScript, ESLint | 6.0.3, 10.13.0 | `web/` and `infra/` lockfiles; TypeScript also `e2e/` |
+| Vite, Vitest, openapi-typescript, openapi-fetch; Playwright, axe | 8.3.5, 5.0.5, 7.13.0, 0.17.0; 1.64.1 (`playwright-core` held at 1.64.0 by an override), 4.14.0 | `web/` and `e2e/` lockfiles |
+| AWS CDK | `aws-cdk-lib` 2.275.0, CLI 2.1146.1 | `infra/package.json` |
 
 </details>
+
+## How it is tested and delivered
+
+![From a commit to Cape Town, all built: an opt-in pre-commit hook runs gitleaks (1), main's ruleset requires every check (2), ci builds the ARM64 image once and tests that build (3), publish pushes it to ECR and attests it (4), deploy-staging deploys its digest to staging and tests it (5), and, after a person's approval, deploy-production verifies its provenance and deploys the same digest to production (6), with rollback-production if it fails; every delivery job signs in through OpenID Connect, and the administrator deploys BranchbookAccount and BranchbookGuardrails by hand (A).](docs/assets/diagrams/delivery-pipeline.svg)
+
+- **Before a commit:** an opt-in pre-commit hook (`make hooks`) refuses secret-bearing files and runs gitleaks.
+- **On every push to `main` and every pull request:** `ci` runs `api`, `web`, `infra` (the CDK app's tests, cdk-nag
+  and a synth of both environments), `workflow-lint` (actionlint and zizmor) and `image`, which builds the ARM64
+  image once, scans it with Trivy and writes its SBOM; then `stack` runs that image under Docker Compose,
+  smoke-tested, with Playwright in a real browser, a short k6 load test and an OWASP ZAP scan. `codeql` and
+  `secret-scan` run beside it, and `dependency-review` on pull requests. `main` requires all eleven checks.
+  Deploying is in [Status](#status), and each step in [docs/delivery.md](docs/delivery.md#at-a-glance).
 
 ## Scope
 
@@ -194,10 +176,9 @@ make smoke    # check the running app over HTTP
 make down     # stop everything and delete the local database
 ```
 
-`make up` prints the address: http://127.0.0.1:8080 unless you change it. If port 8080 is taken, choose another
-with `APP_PORT=18080 make up`, or in a `.env` file copied from [.env.example](.env.example). No database password is
-committed: the first `make up` writes a random one to the git-ignored `.env`, and a copy started before that needs
-`make down` once. Without make, set `DB_PASSWORD` and run `docker compose up --build --wait`.
+`make up` prints the address, http://127.0.0.1:8080 unless `APP_PORT` (or a `.env` copied from
+[.env.example](.env.example)) chooses another. No database password is committed: the first `make up` writes a random
+one to the git-ignored `.env`. Without make, set `DB_PASSWORD` and run `docker compose up --build --wait`.
 
 ### Try the API
 
@@ -215,23 +196,19 @@ curl -X POST http://localhost:8080/api/v1/appointments \
 curl http://localhost:8080/api/v1/appointments/APT-VY4A-WNB7 -H 'X-Mobile-Last4: 0101'   # your reference
 ```
 
-Availability lists each slot's `startsAt`, `endsAt` and `seatsAvailable` at the branch's offset, `+02:00`; a date
-outside the next 30 days is `422 DATE_OUTSIDE_BOOKING_WINDOW`. On a public holiday the branch is closed (Rustenburg
-also on Sundays), so pick a date that `closedDates` does not list. An earlier run, booking 27 October 2026, returned
-`201 Created`, with `Location: /api/v1/appointments/APT-VY4A-WNB7` and, shortened:
+Availability lists each slot's `startsAt`, `endsAt` and `seatsAvailable` at `+02:00`; a date beyond 30 days is
+`422 DATE_OUTSIDE_BOOKING_WINDOW`, and a holiday (Rustenburg also on Sundays) is closed, so pick a date `closedDates`
+does not list. A run booking 27 October 2026 returned `201 Created`, `Location: /api/v1/appointments/APT-VY4A-WNB7` and:
 
 ```json
-{ "reference": "APT-VY4A-WNB7", "status": "CONFIRMED",
-  "startsAt": "2026-10-27T09:30:00+02:00", "endsAt": "2026-10-27T09:45:00+02:00",
+{ "reference": "APT-VY4A-WNB7", "status": "CONFIRMED", "startsAt": "2026-10-27T09:30:00+02:00",
   "customer": { "firstName": "Nomvula", "lastName": "Dlamini", "mobileMasked": "082 *** 0101" },
-  "notifications": [{ "channel": "SMS", "kind": "CONFIRMATION", "status": "PENDING",
-    "recipientMasked": "082 *** 0101", "body": "Appt confirmed: FICA update, Sandton Summit, …" }] }
+  "notifications": [{ "channel": "SMS", "kind": "CONFIRMATION", "status": "PENDING", "recipientMasked": "082 *** 0101" }] }
 ```
 
-The SMS, written in the same transaction as the booking, fits one segment: `Appt confirmed: FICA update, Sandton
-Summit, Tue 27 Oct 09:30 SAST. Ref APT-VY4A-WNB7. Bring ID + docs. Manage: http://localhost:8080/manage`. The lookup
-returns the same body; other digits get the same `404` as an unknown reference. Every endpoint and error:
-[api/README.md](api/README.md), [docs/errors.md](docs/errors.md).
+The SMS fits one segment: `Appt confirmed: FICA update, Sandton Summit, Tue 27 Oct 09:30 SAST. Ref APT-VY4A-WNB7.
+Bring ID + docs. Manage: http://localhost:8080/manage`. The lookup returns the same body; other digits get the same
+`404` as an unknown reference. Every endpoint and error: [api/README.md](api/README.md), [docs/errors.md](docs/errors.md).
 
 ### Develop it
 
@@ -254,12 +231,9 @@ api/                     the Spring Boot application: the API, and serving the w
 web/, e2e/               the React app, and its end-to-end tests in a real browser
 infra/                   the AWS CDK app: staging and production, the image registry, deploy roles, guardrails, budget
 load/                    the k6 load test
-docs/                    architecture, delivery, production readiness, resilience, threat model, configuration,
-                         decision records, domain rules, error codes, the API contract
-docs/assets/diagrams/    the SVG diagrams, their key and their rules
+docs/                    the documents (mapped in docs/README.md), ADRs, the API contract, diagrams in assets/diagrams/
 scripts/                 smoke.sh, demo-409.sh, check-test-refs.sh, major-commits.sh
-.github/                 the workflows ci (checks, then delivery), codeql, dependency-review, secret-scan and
-                         aws-connection-check; dependabot.yml
+.github/                 workflows: ci (checks, then delivery), codeql, dependency-review, secret-scan, aws-connection-check
 .githooks/ .gitleaks.toml the hooks (make hooks) and the secret-scanning rules they share with CI
 Dockerfile, compose.yaml the image (web build, API build, runtime) and the local stack behind make up
 Makefile                 one entry point for every task
@@ -272,14 +246,12 @@ Makefile                 one entry point for every task
 - **Each service has a fixed duration** of 15, 30 or 45 minutes, and a capacity per branch: the number of
   consultants who can see customers at the same time.
 - **Bookings close two hours before a slot,** and open 30 days ahead.
-- **Public holidays are seeded for 2026 and 2027.** See [Reference data](#reference-data).
 - **A customer is identified by their mobile number.** There are no accounts in this version.
 
 ## Reference data
 
-Flyway seeds the catalogue of the fictional Fynbos Bank
-([V3__reference_data.sql](api/src/main/resources/db/migration/V3__reference_data.sql)). The names and street
-addresses are made up; no migration contains personal data.
+Flyway seeds the fictional Fynbos Bank's catalogue ([V3__reference_data.sql](api/src/main/resources/db/migration/V3__reference_data.sql)).
+The names and street addresses are made up; no migration contains personal data.
 
 | Branch | Code | Province | Sundays | Why it is there |
 |---|---|---|---|---|
@@ -302,12 +274,10 @@ holiday also closes the Monday after it (section 2(1)), derived in code: 10 Augu
 
 ## Security and privacy
 
-No secret is stored here. A pre-commit hook scans each commit, push protection each push, and a workflow the full
-history after every push. GitHub Actions reaches AWS through OpenID Connect, so no AWS key exists. In AWS the service
-signs in to the database with IAM and holds no database password, and its database role can only read and write rows.
-Local data is synthetic; production takes real names and numbers, asks for a CAPTCHA before a booking, texts South
-Africa only and deletes each booking once it is over. Details: [SECURITY.md](SECURITY.md),
-[docs/production-readiness.md](docs/production-readiness.md) and [docs/threat-model.md](docs/threat-model.md).
+No secret is stored here: a hook, push protection and a full-history workflow scan for them, and GitHub Actions
+reaches AWS through OpenID Connect with no key. In AWS the service signs in to the database with IAM, as a role that
+can only read and write rows. Production takes real names and numbers, asks for a CAPTCHA before a booking, texts
+South Africa only and deletes each booking once it is over ([SECURITY.md](SECURITY.md)).
 
 ## AI assistance
 
@@ -323,8 +293,7 @@ gates, whoever wrote it: tests in two time zones, a real browser under the stric
   once. Also rejected: a sign-in in front of the hosted demo, which would have stopped every visitor at a login screen.
 
 The gates catch what neither of us saw. The first real-browser pass logged `CSP-VIOLATION script-src eval` on every
-page with a form: zod 4 probing for `new Function` under the strict policy. Parsing without compiling fixed it
-(3985f40).
+page with a form: zod 4 probing for `new Function` under the strict policy. Parsing without compiling fixed it (3985f40).
 
 ## Licence
 

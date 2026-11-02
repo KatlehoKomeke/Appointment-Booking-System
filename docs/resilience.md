@@ -1,9 +1,8 @@
 # Resilience
 
-*Status: Built in code; not yet deployed. Staging and production, their alarms and their AWS FIS experiments exist in
-the CDK app and its tests, and reach AWS when an administrator runs the steps in
-[infra/README.md](../infra/README.md#hardening-the-account-that-already-runs-production). The recovery targets below
-are set; none is measured yet.*
+*Status: Built and merged; not yet deployed. Staging and production, their alarms and their AWS FIS experiment templates
+are in the CDK app and its tests, and reach AWS with the pipeline's first deployment ([deployment
+status](production-readiness.md#deployment-status)). The recovery targets below are set; none is measured yet.*
 
 This page lists what can fail, what contains each failure, how it is noticed and how it is rehearsed. What each alarm
 means and how to act on it is in the [runbook](runbook.md#alarms); every threshold is in
@@ -130,7 +129,7 @@ queue that drains at the dispatcher's rate. Nothing is lost while it waits; a co
    deployment alarm.
 5. **The pipeline rolls production back.** If production's deployment or smoke test fails, `rollback-production`
    redeploys the last release that passed, its commit's CDK app with its digest. It waits for the production
-   approval first, and the first production deployment has nothing to roll back to
+   approval first, and production's first deployment through the pipeline has nothing to roll back to
    ([SECURITY.md](../SECURITY.md#known-risks)). By hand: [runbook](runbook.md#roll-back-by-hand).
 
 A rollback never undoes a migration, so every migration must work with the release before it

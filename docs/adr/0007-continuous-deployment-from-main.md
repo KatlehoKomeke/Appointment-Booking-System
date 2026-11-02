@@ -91,3 +91,11 @@ decision, not its trigger: every push to `main` still starts delivery, once ever
   permissions boundary and a deploy scope that keeps each role off the other environment's and the administrator's
   stacks ([infra/README.md](../../infra/README.md#who-can-change-what-in-aws)).
 - **Still open:** the trust names no workflow, and the required checks are not strict.
+
+**2026-11-01.** The administrator deployed `BranchbookAccount` with the two roles; `branchbook-github-deploy` and the
+`aws-demo` environment are deleted ([infra/README.md](../../infra/README.md#how-github-reaches-aws-without-keys)).
+Production's bootstrap still runs CloudFormation with CDK's default execution policy until the administrator narrows
+it, the one step left ([infra/README.md](../../infra/README.md#hardening-the-account-that-already-runs-production),
+step 5). Until then, in production, the deploy scope alone keeps the pipeline off the other stacks, and IAM does not
+stop a production deployment from creating a role without the permissions boundary
+([SECURITY.md](../../SECURITY.md#known-risks)).

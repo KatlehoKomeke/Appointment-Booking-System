@@ -1,6 +1,8 @@
 # ADR-0008: Two environments, the image built once and promoted by digest
 
-- **Status:** Accepted. Supersedes in part [ADR-0007](0007-continuous-deployment-from-main.md).
+- **Status:** Accepted. Supersedes in part [ADR-0006](0006-hosted-demo-on-aws-with-cdk.md), whose single hosted demo
+  becomes production, and [ADR-0007](0007-continuous-deployment-from-main.md), whose push to `main` now deploys to
+  staging, and to production only after a person approves it.
 - **Date:** 2026-10-30
 
 ## Context
@@ -59,3 +61,20 @@ The steps of each job are in [docs/delivery.md](../delivery.md#continuous-deploy
   risk in [SECURITY.md](../../SECURITY.md#known-risks). The controls and their evidence are in
   [production-readiness.md](../production-readiness.md), and the failure modes a rollback covers in
   [resilience.md](../resilience.md).
+
+## Notes
+
+**2026-11-01, the first run stops at staging.** The pipeline's first run, at `ab9aa7f`, passed every check, and
+`publish` pushed the image to `BranchbookRegistry`. `deploy-staging` created `BranchbookStagingData`, then
+`BranchbookStagingApp` failed and rolled back: staging's CloudFormation execution role lacked
+`cloudformation:DescribeStacks`, which CloudFormation needs to resolve the App stack's `Fn::GetStackOutput` references
+to the Data stack, because [cdk.json](../../infra/cdk.json) makes cross-stack references weak. `deploy-production` was
+skipped; production was not touched.
+
+**2026-11-02, the fix is merged.** [Pull request
+#43](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/43) lets each execution policy describe its own
+environment's stacks (`ReadOwnStackOutputs`), with a test. It takes effect when an administrator redeploys
+`BranchbookGuardrails`; the next run then deploys staging and, after a person's approval, production. That first
+production deployment has no recorded release to roll back to, and narrowing production's bootstrap to its execution
+policy follows it ([infra/README.md](../../infra/README.md#hardening-the-account-that-already-runs-production), step 5;
+[deployment status](../production-readiness.md#deployment-status)).

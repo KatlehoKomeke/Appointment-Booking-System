@@ -18,7 +18,7 @@
       infra/lib/release-stack.ts; infra/lib/guardrails-stack.ts; infra/config/*.json; docs/delivery.md (GitHub
       settings: push protection on; ruleset Protect main with every check required, no force-push or deletion;
       environments staging (main only) and production (main only, approval required)).
-    Verified at 90bf68b (2026-10-30)
+    Verified at ab9aa7f (2026-11-02)
     Conventions: docs/assets/diagrams/README.md
     Planned elements carry class="planned" data-milestone; none is left in this diagram.
     Steps 1 to 6 and A match the numbered list in docs/delivery.md (At a glance).

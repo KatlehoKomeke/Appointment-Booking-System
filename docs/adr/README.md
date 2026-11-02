@@ -15,9 +15,9 @@ point at it.
 | [0003](0003-transactional-outbox-for-confirmations.md) | The simulated confirmation is a transactional outbox | Accepted |
 | [0004](0004-restraint-no-login-no-id-number.md) | No login, no ID number and no staff endpoints in v1 | Accepted |
 | [0005](0005-committed-openapi-contract.md) | A committed OpenAPI contract with a generated TypeScript client | Accepted |
-| [0006](0006-hosted-demo-on-aws-with-cdk.md) | An optional hosted demo in AWS Cape Town, owned by AWS CDK | Accepted; delivery trigger superseded by 0007 |
+| [0006](0006-hosted-demo-on-aws-with-cdk.md) | An optional hosted demo in AWS Cape Town, owned by AWS CDK | Accepted; delivery trigger superseded by 0007; superseded in part by 0008 |
 | [0007](0007-continuous-deployment-from-main.md) | Continuous deployment from main, through OpenID Connect | Accepted; superseded in part by 0008 |
-| [0008](0008-two-environments-promoted-by-digest.md) | Two environments, the image built once and promoted by digest | Accepted |
+| [0008](0008-two-environments-promoted-by-digest.md) | Two environments, the image built once and promoted by digest | Accepted; supersedes in part 0006 and 0007 |
 | [0009](0009-configuration-from-the-environment.md) | Configuration comes from the environment, validated | Accepted |
 | [0010](0010-private-network-and-iam-database-auth.md) | A private network, and IAM database authentication for a least-privilege runtime role | Accepted |
 | [0011](0011-waf-captcha-instead-of-a-one-time-pin.md) | WAF CAPTCHA and per-address limits instead of a one-time PIN | Accepted |

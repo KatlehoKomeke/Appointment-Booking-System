@@ -290,7 +290,7 @@ How to read a rule:
 <a id="br-23"></a>
 ## BR-23: Error bodies never reveal another booking
 
-**Rule.** No problem body reveals another appointment: 409 DUPLICATE_APPOINTMENT and 409 CUSTOMER_OVERLAP carry neither reference nor branch nor time, so a caller who knows only a cellphone number learns no credential. The residual signal (an appointment exists for that number) is an accepted demo risk closed in production by OTP-verified identity (ADR-0004).
+**Rule.** No problem body reveals another appointment: 409 DUPLICATE_APPOINTMENT and 409 CUSTOMER_OVERLAP carry neither reference nor branch nor time, so a caller who knows only a cellphone number learns no credential. The residual signal (an appointment exists for that number) is an accepted risk in production too: the product owner chose no login and no one-time PIN (ADR-0004, ADR-0011), and a one-time PIN or the bank's sign-in would close it ([SECURITY.md](../SECURITY.md#known-risks)).
 
 **Enforced in.** application service (each refusal's fixed detail; ProblemDetailHandler, ConstraintViolationTranslator)
 

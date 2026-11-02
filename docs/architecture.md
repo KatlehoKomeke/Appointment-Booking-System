@@ -4,24 +4,24 @@ This document explains how BranchBook is built and why. The decisions behind it 
 [docs/adr](adr/README.md); the business rules are in [domain-rules.md](domain-rules.md). The whole design,
 including the parts not built yet, is on the [architecture page](https://katlehokomeke.github.io/Appointment-Booking-System/).
 
-**Status: design complete; milestones M0 to M7 are built, and `v1.0.0` is tagged.** M0
-is the skeleton: one jar that serves the app, PostgreSQL 17 migrated by Flyway, health probes and security headers.
-M1 adds the whole schema, the seeded catalogue, the `catalogue` module with the public-holiday rule, and the shared
-error and correlation-id handling. M2 adds the `scheduling` module (`SlotCalendar` and the availability API) and
-the committed OpenAPI contract that the web app's types are generated from. M3 adds the `booking` module's
-transaction and lookup, and the part of `notification` that writes and reads the confirmation SMS. M4 adds the web
-app's screens: the five-step booking flow, the confirmation page with its live delivery status, `/manage` and the
-simulated inbox, built to the [UI design](../web/README.md#ui-design). M5 adds the dispatcher that delivers the SMS
-through a simulated gateway, the simulated inbox's API and the concurrent proofs. M6 adds the Tier 2 API: cancelling
-an appointment with its cancellation SMS, retrying a failed message from the simulated inbox, demo data for a fresh
-compose stack, and two meters on `/actuator/prometheus`, with the web app's screens for them: cancelling from the
-appointment page and Retry in the simulated inbox. The production hardening that followed is built in code and not
-yet deployed: staging and production from validated configuration, the image promoted by digest, private subnets,
-IAM database authentication with a least-privilege role, migrations as a deployment step, a WAF CAPTCHA, the SMS
-circuit breaker, and the alarms and drills ([production-readiness.md](production-readiness.md)). Each section opens
-with its status. Diagrams are Mermaid, or SVG
-files in [assets/diagrams](assets/diagrams/README.md); solid parts are built and dashed parts are planned, with
-their milestone.
+**Status: design complete; milestones M0 to M7 are built, and `v1.0.0` is tagged.** M0 is the skeleton: one jar that
+serves the app, PostgreSQL 17 migrated by Flyway, health probes and security headers. M1 adds the whole schema, the
+seeded catalogue, the `catalogue` module with the public-holiday rule, and the shared error and correlation-id handling.
+M2 adds the `scheduling` module (`SlotCalendar` and the availability API) and the committed OpenAPI contract that the
+web app's types are generated from. M3 adds the `booking` module's transaction and lookup, and the part of
+`notification` that writes and reads the confirmation SMS. M4 adds the web app's screens: the five-step booking flow,
+the confirmation page with its live delivery status, `/manage` and the simulated inbox, built to the [UI
+design](../web/README.md#ui-design). M5 adds the dispatcher that delivers the SMS through a simulated gateway, the
+simulated inbox's API and the concurrent proofs. M6 adds the Tier 2 API: cancelling an appointment with its cancellation
+SMS, retrying a failed message from the simulated inbox, demo data for a fresh compose stack, and two meters on
+`/actuator/prometheus`, with the web app's screens for them: cancelling from the appointment page and Retry in the
+simulated inbox. The production hardening that followed is built and merged, and not yet deployed: staging and
+production from validated configuration, the image promoted by digest, private subnets, IAM database authentication with
+a least-privilege role, migrations as a deployment step, a WAF CAPTCHA, the SMS circuit breaker, and the alarms and
+drills ([production-readiness.md](production-readiness.md)). Its first deployment waits for one administrator step
+([deployment status](production-readiness.md#deployment-status)). Each section opens with its status. Diagrams are
+Mermaid, or SVG files in [assets/diagrams](assets/diagrams/README.md); solid parts are built and dashed parts are
+planned, with their milestone.
 
 **Contents:** [1. What it does](#1-what-the-system-does) ·
 [2. System and containers](#2-system-context-and-containers) ·
@@ -45,8 +45,8 @@ SMS where a deployment asks (after M6).*
 A customer of the fictional Fynbos Bank picks a branch, a service, a date and a time slot, enters a name and a
 South African mobile number, and gets a booking reference such as `APT-7K3M-9Q2X`. An SMS confirmation follows
 within a few seconds, and its delivery status is visible on the confirmation page: simulated locally and for the
-published demo numbers, and a real SMS through AWS End User Messaging SMS where a deployment asks, as the hosted
-demo does ([5](#5-the-confirmation-sms)). The customer can later
+published demo numbers, and a real SMS through AWS End User Messaging SMS where a deployment asks, as production
+does ([5](#5-the-confirmation-sms)). The customer can later
 look the appointment up, and cancel it, with the reference and the last four digits of their mobile number. A cancel
 deletes the booking at once ([6](#6-appointment-lifecycle)).
 
@@ -137,8 +137,9 @@ returns no slots without reading the appointments.
 
 ### 2.2 A booking through the firewall
 
-*Status: Built in code after M7; not yet deployed. Only staging and production put the CAPTCHA in front of a booking;
-locally, and wherever no CAPTCHA is configured, step 3 never happens and nothing changes.*
+*Status: Built after M7; not yet deployed ([deployment status](production-readiness.md#deployment-status)). Only
+staging and production put the CAPTCHA in front of a booking; locally, and wherever no CAPTCHA is configured, such as
+the hosted demo, step 3 never happens and nothing changes.*
 
 ```mermaid
 sequenceDiagram
@@ -193,7 +194,7 @@ flowchart TB
     scheduling -- "calendars and service offers" --> catalogue
 ```
 
-Every module may use `shared` (config, correlation, problem, security, time, web), and `shared` uses no module.
+Every module may use `shared` (config, correlation, metrics, problem, security, time, web), and `shared` uses no module.
 [ADR-0001](adr/0001-modular-monolith.md) also allows `notification` to use `catalogue`, but it does not need to.
 
 | Module | Status | Responsibility |
@@ -312,8 +313,10 @@ In AWS the web application firewall also limits each address's lookups, 100 in 5
 limit on bookings and cancellations ([ADR-0011](adr/0011-waf-captcha-instead-of-a-one-time-pin.md)).
 
 Because the window is per reference, someone who knows a reference can block its lookup for an hour. A reference
-is printed only in the customer's own SMS and pages, and production would bind appointments to a verified identity
-instead ([ADR-0004](adr/0004-restraint-no-login-no-id-number.md)).
+is printed only in the customer's own SMS and pages, so this is accepted in production too; binding appointments to a
+verified customer, through a one-time PIN or the bank's sign-in, would close it
+([SECURITY.md](../SECURITY.md#known-risks), [ADR-0004](adr/0004-restraint-no-login-no-id-number.md),
+[ADR-0011](adr/0011-waf-captcha-instead-of-a-one-time-pin.md)).
 
 <a id="5-the-simulated-confirmation"></a>
 ## 5. The confirmation SMS
@@ -533,16 +536,16 @@ booking's outcome or a URI template, never a value a customer typed (`MetricsIT.
 [`LogRedactionIT`](../api/src/test/java/za/co/fynbos/branchbook/LogRedactionIT.java) takes one customer through
 every outcome of a booking and a lookup, and through a cancellation and a retry, and checks both the application's
 log and PostgreSQL's for their name, number and reference; `StructuredLogRedactionIT` does the same for the `prod`
-profile's JSON log lines. How the data is protected, and what is planned, is in
+profile's JSON log lines. How the data is protected is in
 [SECURITY.md](../SECURITY.md#personal-information-popia).
 
 ## 10. Deployment
 
-*Status: Built. The image and the local stack are built, and the hosted demo has run in Cape Town (af-south-1) since
-2026-10-26, deployed by the pipeline on every push to `main` and texting real SMS since 2026-10-27. Built in code and
-not yet deployed: staging and production, which replace the single hosted demo when the administrator's steps in
-[infra/README.md](../infra/README.md#hardening-the-account-that-already-runs-production) run. Sections 10.2 and 10.3
-describe them.*
+*Status: Built. The image and the local stack are built, and staging and production, in Cape Town (af-south-1), are
+built and merged but not yet deployed; production texts real SMS. Until production's first deployment, which keeps its
+address and stack IDs, https://branchbook.click serves the single hosted demo that has run there since 2026-10-26
+([deployment status](production-readiness.md#deployment-status)). Sections 10.2 and 10.3 describe staging and
+production.*
 
 ### 10.1 Locally: the image and the stack
 
@@ -587,7 +590,7 @@ proves and the gaps that remain.
 
 ### 10.3 In AWS
 
-![BranchBook in AWS, all built: staging and production in one account, each with WAF (a CAPTCHA and per-address limits), a load balancer, autoscaled Fargate tasks in private subnets, a migration task, a VPC with a NAT gateway per zone, Secrets Manager and an RDS database the tasks sign in to as branchbook_app with IAM, alarms, a canary, fault-injection experiments and a release record; shared, the ECR registry, AWS End User Messaging SMS for production, BranchbookGuardrails and the CDK bootstraps; in us-east-1, BranchbookAccount with a deploy role per environment. The administrator deploys the account-level stacks by hand (A); a delivery job signs in through OpenID Connect (1); the image is pushed once (2); staging is deployed, then production after approval (3).](assets/diagrams/aws-footprint.svg)
+![BranchBook in AWS, all built: staging and production in one account, each with WAF (a CAPTCHA and per-address limits), a load balancer, autoscaled Fargate tasks in private subnets, a migration task, a VPC with a NAT gateway per zone in production (one in staging), Secrets Manager and an RDS database the tasks sign in to as branchbook_app with IAM, alarms, a canary, fault-injection experiments and a release record; shared, the ECR registry, AWS End User Messaging SMS for production, BranchbookGuardrails and the CDK bootstraps; in us-east-1, BranchbookAccount with a deploy role per environment. The administrator deploys the account-level stacks by hand (A); a delivery job signs in through OpenID Connect (1); the image is pushed once (2); staging is deployed, then production after approval (3).](assets/diagrams/aws-footprint.svg)
 
 The letter and numbers in the picture:
 

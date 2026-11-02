@@ -10,8 +10,8 @@
       DemoDataLoader.java, IdempotencyKeyPurgeJob.java; notification/application/NotificationDispatcher.java;
       notification/infrastructure/RecipientSendLedgerPurgeJob.java;
       notification/infrastructure/SimulatedSmsGateway.java and the AWS End User Messaging gateway);
-      api/src/main/resources/db/migration/ (V1__enable_btree_gist.sql, V2__schema.sql, and V6 and V7, which bring
-      the tables to 9 and the named constraints to 56);
+      api/src/main/resources/db/migration/ (V1__enable_btree_gist.sql, V2__schema.sql, and V6 to V8, which bring
+      the tables to ten and the named constraints to 61);
       api/src/test/java/za/co/fynbos/branchbook/ArchitectureTest.java; web/package.json; web/src/routes.tsx;
       web/src/api/client.ts; web/src/api/queries.ts; compose.yaml; Makefile; Dockerfile;
       docs/domain-rules.md (Status lines); docs/architecture.md; .githooks/pre-commit;

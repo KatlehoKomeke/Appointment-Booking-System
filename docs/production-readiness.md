@@ -1,9 +1,8 @@
 # Production readiness
 
-*Status: Built in code; not yet deployed. Every control below is in the code and proven by the evidence beside it.
-The AWS side reaches staging and production when an administrator runs the steps in
-[infra/README.md](../infra/README.md#hardening-the-account-that-already-runs-production); until then the hosted demo
-runs as [infra/README.md](../infra/README.md#the-hosted-demo) describes.*
+*Status: Built and merged to `main`; not yet deployed. Every control below is in the code and proven by the evidence
+beside it. Staging and production are first deployed by the pipeline run after one administrator step; until then
+https://branchbook.click serves the single hosted demo ([Deployment status](#deployment-status)).*
 
 This page is the control-by-control account of what makes BranchBook fit to run for a bank: what each control is,
 and its evidence, a test, a CI job, a CDK assertion or cdk-nag, so each claim can be checked. The decisions behind
@@ -17,6 +16,7 @@ contains are in [resilience.md](resilience.md).
 A test written `Class.method` is under [api/src/test/java](../api/src/test/java); a `.test.ts` file named alone is
 under [infra/test](../infra/test), with the test's name in quotes.
 
+- [Deployment status](#deployment-status)
 - [Security](#security)
 - [Resilience](#resilience)
 - [Delivery](#delivery)
@@ -26,6 +26,49 @@ under [infra/test](../infra/test), with the test's name in quotes.
 - [Still outside this repository](#still-outside-this-repository)
 - [Residual risks](#residual-risks)
 - [Not yet measured](#not-yet-measured)
+
+## Deployment status
+
+As of 2026-11-02, with `main` at `096bdd9`. This is the one place the deployment's state is recorded; other pages link
+here.
+
+**Merged.** The production hardening is on `main`: pull requests
+[#32](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/32) and
+[#33](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/33) on 2026-10-31, and
+[#34](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/34) on 2026-11-01 (`ab9aa7f`). It defines
+staging, https://stg.branchbook.click, with the stacks `BranchbookStagingData`, `BranchbookStagingApp` and
+`BranchbookStagingRelease` and the bootstrap `CDKToolkitStaging` (qualifier `bbstg`); production,
+https://branchbook.click, with `BranchbookData`, `BranchbookApp` and `BranchbookRelease` and the bootstrap
+`CDKToolkitProduction` (qualifier `bbprod`); the image registry `BranchbookRegistry`; and the pipeline that builds the
+image once and promotes its digest from staging to production, behind a person's approval, with an automatic rollback.
+
+**Done by the administrator.** On 2026-11-01: `BranchbookAccount`, `BranchbookGuardrails`, both bootstraps and the
+GitHub environments `staging` and `production`. On 2026-11-02: the `Protect main` ruleset gained its required checks
+and its code-scanning rule, actions pinned to a full commit SHA became required, and the `aws-demo` environment was
+deleted.
+
+**The first run, 2026-11-01, at `ab9aa7f`.** Every check passed. `publish` deployed `BranchbookRegistry` and pushed the
+image to ECR. `deploy-staging` created `BranchbookStagingData`; `BranchbookStagingApp` then failed and rolled back,
+because staging's CloudFormation execution role lacked `cloudformation:DescribeStacks`. CloudFormation needs it to
+resolve the App stack's `Fn::GetStackOutput` references to the Data stack, since [cdk.json](../infra/cdk.json) makes
+cross-stack references weak. `deploy-production` was skipped; production was not touched.
+
+**The fix.** Pull request [#43](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/43) (`f64a429`,
+2026-11-02) lets each environment's execution role describe its own stacks (`ReadOwnStackOutputs`), with a test in
+deployment-policies.test.ts. It takes effect when an administrator redeploys `BranchbookGuardrails`, which holds the
+execution policies. The next pipeline run then deploys staging and, after a person's approval, production.
+
+**What https://branchbook.click serves until then.** The single hosted demo, last deployed by the previous pipeline on
+2026-10-31 from `bab2d81` (#33's merge): the infrastructure before the hardening, as
+[ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md) designed it, running the application with #32 and #33 in it. The
+WAF CAPTCHA is not switched on there: `/api/v1/client-config` returns `{"captcha":null}`. Staging serves nothing yet.
+
+**Left after the first deployment.** Production's `bbprod` bootstrap still has CDK's default execution policy;
+narrowing it to `branchbook-cdk-cfn-exec-production` waits for production's first deployment through it
+([infra/README.md](../infra/README.md#hardening-the-account-that-already-runs-production), step 5). That first
+deployment has no recorded release to roll back to ([SECURITY.md](../SECURITY.md#known-risks)). The fault-injection
+game day and the point-in-time restore drill have not run, so the recovery targets are set, not measured
+([Not yet measured](#not-yet-measured)). The hosted environments' teardown date stays 2026-11-30.
 
 ## Security
 
@@ -68,7 +111,7 @@ under [infra/test](../infra/test), with the test's name in quotes.
 |---|---|---|
 | Audit and detection | `BranchbookGuardrails`: a CloudTrail trail over every Region with log file validation, GuardDuty, AWS Config, Security Hub (AWS Foundational Security Best Practices) and IAM Access Analyzer. | [guardrails-stack.test.ts](../infra/test/guardrails-stack.test.ts) |
 | A permissions boundary on every application role | The boundary denies IAM users and keys, leaving or changing the boundary, account and Organizations changes, tampering with the audit and detection services, and borrowing an unbounded role. | guardrails-stack.test.ts "the permissions boundary"; [deployment-policies.test.ts](../infra/test/deployment-policies.test.ts) "every role the stacks it deploys create carries the permissions boundary, custom-resource roles included" |
-| A narrowed execution policy per environment | Each CDK bootstrap's CloudFormation role may use the application's services, and IAM only on its own environment's roles, with the boundary attached. | deployment-policies.test.ts "the execution policy allows the service of every resource type the stacks it deploys contain"; guardrails-stack.test.ts |
+| A narrowed execution policy per environment | Each CDK bootstrap's CloudFormation role may use the application's services, read its own environment's stacks' outputs ([pull request #43](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/43)), and use IAM only on its own environment's roles, with the boundary attached. Staging's bootstrap has it; production's gets it in the last administrator step. | deployment-policies.test.ts "the execution policy allows the service of every resource type the stacks it deploys contain" and "the execution policy may read the outputs of every stack the stacks it deploys reference, and no other stack"; guardrails-stack.test.ts |
 | One deploy role per environment | Each GitHub environment's role trusts only this repository, by its immutable IDs, and that environment; it may assume only its own bootstrap's roles, and a deploy scope denies it the other environment's stacks. | [account-stack.test.ts](../infra/test/account-stack.test.ts) "creates exactly one deploy role per environment and no other role" |
 | cdk-nag | The AWS Solutions rule pack runs over every stack of both environments; each accepted finding is acknowledged where its resource is defined, with the reason. | [nag.test.ts](../infra/test/nag.test.ts) "every stack synthesises with no unacknowledged finding" |
 | No committed database password | `compose.yaml` holds none; `make up` writes a random one to the git-ignored `.env`, and CI generates its own and fails if any log mentions a password. | The `stack` job of [ci.yml](../.github/workflows/ci.yml), step *Check that the logs hold no credentials* |
@@ -182,17 +225,15 @@ pipeline's remaining gaps in [delivery.md, Known gaps](delivery.md#known-gaps).
 
 ## Not yet measured
 
-These depend on the first deployment to AWS and are recorded once run:
+These need staging and production deployed ([Deployment status](#deployment-status)), and are recorded once run:
 
 - **Recovery times and data loss** against their targets: the FIS game day (a task stopped, the database failed over)
   and the point-in-time restore drill ([resilience.md](resilience.md#recovery-targets)).
-- **The pipeline end to end:** the delivery jobs, the approval and the automatic rollback have not run against AWS
-  ([delivery.md](delivery.md#one-push-measured)).
+- **The pipeline end to end:** no push through staging, the approval and production has been timed, and the
+  automatic rollback has not been rehearsed against AWS ([delivery.md](delivery.md#one-push-measured)).
 - **AWS's CAPTCHA puzzle in a browser** on staging, including that the Content-Security-Policy blocks nothing it
   needs. CI uses fakes and the staging bypass.
 - **Load in AWS.** The k6 figures come from a laptop ([resilience.md](resilience.md#load-test)).
-- **The GitHub settings** the pipeline relies on, read back once they are in place
-  ([delivery.md](delivery.md#github-settings-this-relies-on)).
 
 Next: [threat-model.md](threat-model.md) for the threats these controls answer; [SECURITY.md](../SECURITY.md) for the
 policy.
