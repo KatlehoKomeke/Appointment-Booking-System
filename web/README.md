@@ -5,7 +5,7 @@ The React app customers use to book and look up branch appointments, and to canc
 its own: the Dockerfile builds it and places the output inside the Spring Boot jar, which serves the app and the API
 from one origin ([docs/architecture.md, section 2](../docs/architecture.md#2-system-context-and-containers)).
 
-**Status (M6):** built to the [UI design](#ui-design): the five booking steps, the confirmation page with the SMS's
+**Status:** built to the [UI design](#ui-design): the five booking steps, the confirmation page with the SMS's
 live delivery status, `/manage` and the simulated inbox, with the landing page, the privacy notice, a not-found page
 and an error page. Each page but the landing, not-found and error pages loads when it is first opened, and the
 confirmation page offers to book the same service again. From Tier 2, the appointment page cancels an appointment
@@ -267,7 +267,8 @@ adds `step=details`, then `step=review`. The name and number stay in the tab's s
 - **Manage.** The reference from the SMS and the last four digits of the cellphone number. A wrong reference and wrong
   digits get the same answer, so the page cannot be used to discover references.
 - **Simulated inbox.** Every message the outbox has produced, newest first, with its status, attempts and last error,
-  under a banner saying it is a demo operator view, switched off in production, where every message is simulated.
+  under a banner saying it is a demo operator view, switched off in production, and that every message there is
+  simulated. Staging and production both switch it off.
 - **Privacy notice.** The POPIA section 18 notice: Fynbos Bank (fictional demo) as the responsible party, the three
   fields collected and why, the hosted demo's deletion of each booking once its appointment is over, the deletion of a
   cancelled booking at once, all but its cancellation SMS, which is kept until it has been sent or has failed for good,

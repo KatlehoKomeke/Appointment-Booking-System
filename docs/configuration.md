@@ -12,9 +12,12 @@ Rules:
   capitals), except for a few short names kept from before (`DB_URL`, `DB_USER`, `DB_PASSWORD`, `PORT`,
   `PUBLIC_BASE_URL`) and the deployment switches (`BRANCHBOOK_MIGRATE_ON_START`, `BRANCHBOOK_DB_*`).
 - **Design decisions are literal** in the file (for example `ddl-auto: validate`). The variable named below would
-  still override one through relaxed binding; none is ever set.
+  still override one through relaxed binding; none is set, except `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE`, which
+  staging and production narrow to `health,info` (`infra/config/<environment>.json`).
 - **`ConfigurationReferenceTest` fails the build** if a property in `application*.yml` is missing from this page or its
-  variable is not named here, and if the defaults the unit tests use drift from application.yml's.
+  variable is not named here, and if the defaults the unit tests use drift from application.yml's. A variable that only
+  `infra/config/<environment>.json` sets, for a property no `application*.yml` holds
+  (`SERVER_FORWARD_HEADERS_STRATEGY`), is listed here by hand; the test cannot see it.
 - **Secrets never appear in a file.** A secret is marked **yes** below; it comes from the environment, which AWS Secrets
   Manager fills in staging and production, and is never logged.
 
@@ -31,7 +34,8 @@ does not set the variable. Staging and production values are set by the CDK app 
 | `branchbook.migrate-only` | `BRANCHBOOK_MIGRATE_ONLY` | `false` | Migrate, validate the schema, exit 0 (non-zero on failure); no web server, scheduler, dispatcher or demo data | no | default | `true` in the migration task only | `true` in the migration task only |
 | (web type) | `SPRING_MAIN_WEB_APPLICATION_TYPE` | servlet | `none` starts no web server; the migrate-only mode forces it | no | unset | `none` in the migration task | `none` in the migration task |
 | `server.port` | `PORT` | `8080` | The HTTP port: the app, the API and the probes `/livez`, `/readyz` | no | default | default | default |
-| `management.server.port` (prod file) | `MANAGEMENT_SERVER_PORT` | unset; `8081` under `prod` | The actuator's own port (health details, info, prometheus), which the load balancer never routes. Unset, it shares the main port | no | unset | `8081` | `8081` |
+| `server.forward-headers-strategy` | `SERVER_FORWARD_HEADERS_STRATEGY` | unset: Spring Boot detects no cloud platform on ECS, so forwarded headers are ignored | `native` has Tomcat trust the load balancer's `X-Forwarded-*` headers, so the app sees each request's scheme (HTTPS) and client address as the caller sent them | no | unset | `native` (task definition) | `native` (task definition) |
+| `management.server.port` (prod file) | `MANAGEMENT_SERVER_PORT` | unset; `8081` under `prod` | The actuator's own port (health details, info, and prometheus where exposed), which the load balancer never routes. Unset, it shares the main port | no | unset | `8081` | `8081` |
 | `spring.lifecycle.timeout-per-shutdown-phase` | `SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE` | `20s` | How long in-flight requests get to finish on shutdown; below the 30 seconds compose and ECS wait | no | default | default | default |
 | `logging.structured.format.console` (prod file) | `LOGGING_STRUCTURED_FORMAT_CONSOLE` | plain text; `ecs` under `prod` | One JSON object per log line in Elastic Common Schema, for CloudWatch Logs Insights | no | unset | `ecs` | `ecs` |
 
@@ -44,12 +48,12 @@ does not set the variable. Staging and production values are set by the CDK app 
 | `spring.datasource.password` | `DB_PASSWORD` | empty | The user's password; empty with IAM authentication, and a database that wants one refuses the connection | **yes** | random, in the git-ignored `.env` that `make up` writes | app: empty (IAM authentication); migration task: the RDS master secret | as staging |
 | `spring.datasource.driver-class-name` | `SPRING_DATASOURCE_DRIVER_CLASS_NAME` | empty: chosen from the URL | The JDBC driver; a `jdbc:aws-wrapper:` URL needs `software.amazon.jdbc.Driver` | no | default | app: `software.amazon.jdbc.Driver` | as staging |
 | `spring.datasource.hikari.connection-timeout` | `SPRING_DATASOURCE_HIKARI_CONNECTION_TIMEOUT` | `3000` (ms) | How long a request waits for a connection before `503 TRY_AGAIN` | no | default | default | default |
-| `spring.datasource.hikari.maximum-pool-size` | `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` | `10` | Connections per instance; instances times this must stay below `max_connections`. The task definitions spell it `SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE`, which relaxed binding treats as the same property (`ConfigurationReferenceTest`) | no | default | `5` | `5` |
+| `spring.datasource.hikari.maximum-pool-size` | `SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE` | `10` | Connections per instance; instances times this must stay below `max_connections`. The task definitions spell it `SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE`, which relaxed binding treats as the same property (`ConfigurationReferenceTest`) | no | default | app: `5`; migration task: `2` | app: `5`; migration task: `2` |
 | `spring.datasource.hikari.data-source-properties.options` | `BRANCHBOOK_DB_LOCK_TIMEOUT`, `BRANCHBOOK_DB_STATEMENT_TIMEOUT` | `2000`, `5000` (ms) | Every session's `lock_timeout` and `statement_timeout` | no | default | default | default |
 | `spring.datasource.hikari.data-source-properties.logServerErrorDetail` | `SPRING_DATASOURCE_HIKARI_DATA_SOURCE_PROPERTIES_LOGSERVERERRORDETAIL` | `false`, fixed | Leaves the server's DETAIL line, which can quote a mobile number, out of exceptions (BR-19) | no | fixed | fixed | fixed |
-| `spring.flyway.enabled` | `BRANCHBOOK_MIGRATE_ON_START` | `true`; `false` under `prod` | Whether the app migrates at start-up | no | default | `false` (profile) | `false` (profile) |
+| `spring.flyway.enabled` | `BRANCHBOOK_MIGRATE_ON_START` | `true`; `false` under `prod` | Whether the app migrates at start-up | no | default | app: `false` (task definition, from config); migration task: `true` | app: `false` (task definition, from config); migration task: `true` |
 | `spring.flyway.fail-on-missing-locations` | `SPRING_FLYWAY_FAIL_ON_MISSING_LOCATIONS` | `true`, fixed | A jar without migrations fails start-up | no | fixed | fixed | fixed |
-| `spring.flyway.placeholders.appRole` | `BRANCHBOOK_DB_APP_ROLE` | `branchbook_app` | The runtime role migration V9 creates and grants row access to | no | default | default | default |
+| `spring.flyway.placeholders.appRole` | `BRANCHBOOK_DB_APP_ROLE` | `branchbook_app` | The runtime role migration V9 creates and grants row access to | no | default | app: default; migration task: `branchbook_app` (from config `database.appUser`) | app: default; migration task: `branchbook_app` (from config `database.appUser`) |
 | `spring.jpa.open-in-view` | `SPRING_JPA_OPEN_IN_VIEW` | `false`, fixed | Connections are held only inside a transaction | no | fixed | fixed | fixed |
 | `spring.jpa.hibernate.ddl-auto` | `SPRING_JPA_HIBERNATE_DDL_AUTO` | `validate`, fixed | Flyway owns the schema; Hibernate only checks it | no | fixed | fixed | fixed |
 | `spring.jpa.properties.hibernate.jdbc.time_zone` | `SPRING_JPA_PROPERTIES_HIBERNATE_JDBC_TIME_ZONE` | `UTC`, fixed | Timestamps are read and written in UTC | no | fixed | fixed | fixed |
@@ -95,23 +99,23 @@ does not set the variable. Staging and production values are set by the CDK app 
 | `branchbook.dispatcher.circuit-breaker.permitted-calls-in-half-open-state` | `BRANCHBOOK_DISPATCHER_CIRCUIT_BREAKER_PERMITTED_CALLS_IN_HALF_OPEN_STATE` | `2` | Probe messages sent while half open | no | default | default | default |
 | `branchbook.metrics.cloudwatch.enabled` | `BRANCHBOOK_METRICS_CLOUDWATCH_ENABLED` | `false` | Exports the chosen meters to CloudWatch for the alarms | no | default | `true` (task definition) | `true` (task definition) |
 | `branchbook.metrics.cloudwatch.namespace` | `BRANCHBOOK_METRICS_CLOUDWATCH_NAMESPACE` | `BranchBook` | Where the metrics go; the task role may write only there | no | default | `BranchBook/staging` | `BranchBook/production` |
-| `branchbook.metrics.cloudwatch.step` | `BRANCHBOOK_METRICS_CLOUDWATCH_STEP` | `PT1M` | How often they are sent | no | default | default | default |
+| `branchbook.metrics.cloudwatch.step` | `BRANCHBOOK_METRICS_CLOUDWATCH_STEP` | `PT1M` | How often they are sent | no | default | `PT60S` (task definition) | `PT60S` (task definition) |
 | `branchbook.metrics.cloudwatch.region` | `BRANCHBOOK_METRICS_CLOUDWATCH_REGION` | empty: SDK chain | Region to send to | no | default | default | default |
 | `branchbook.metrics.cloudwatch.include` | `BRANCHBOOK_METRICS_CLOUDWATCH_INCLUDE` | `outbox.,resilience4j.circuitbreaker.,appointments.booked` | Meter-name prefixes exported; everything else stays out | no | default | default | default |
 | `branchbook.sms.gateway` | `BRANCHBOOK_SMS_GATEWAY` | `simulated` | `aws` sends real SMS to numbers outside the demo block | no | default | `simulated` | `aws` |
 | `branchbook.sms.recipient-daily-cap` | `BRANCHBOOK_SMS_RECIPIENT_DAILY_CAP` | `0` (off) | Most SMS one number is written in 24 hours (BR-17) | no | default | from config | from config |
 | `branchbook.sms.recipient-cap-key` | `BRANCHBOOK_SMS_RECIPIENT_CAP_KEY` | empty: random per start | HMAC key of the cap's ledger, at least 32 characters; required under `prod` when the cap is on | **yes** | default | Secrets Manager `branchbook-staging/sms-cap-key` | Secrets Manager `branchbook/sms-cap-key` |
-| `branchbook.sms.aws.region` | `BRANCHBOOK_SMS_AWS_REGION` | empty: SDK chain | Region to send from | no | default | `af-south-1` | `af-south-1` |
-| `branchbook.sms.aws.protect-configuration-id` | `BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID` | empty | Protect configuration (South Africa only) | no | default | from config | from config |
+| `branchbook.sms.aws.region` | `BRANCHBOOK_SMS_AWS_REGION` | empty: SDK chain | Region to send from | no | default | default (simulated gateway) | `af-south-1` |
+| `branchbook.sms.aws.protect-configuration-id` | `BRANCHBOOK_SMS_AWS_PROTECT_CONFIGURATION_ID` | empty | Protect configuration (South Africa only) | no | default | default (simulated gateway) | the app stack's protect configuration |
 | `branchbook.sms.aws.configuration-set` | `BRANCHBOOK_SMS_AWS_CONFIGURATION_SET` | empty | Configuration set for delivery events | no | default | default | default |
 | `branchbook.sms.aws.origination-identity` | `BRANCHBOOK_SMS_AWS_ORIGINATION_IDENTITY` | empty: AWS chooses | Number, pool or sender ID to send from | no | default | default | default |
 | `branchbook.sms.aws.max-price` | `BRANCHBOOK_SMS_AWS_MAX_PRICE` | `0.20` | Most one message may cost, in US dollars | no | default | default | default |
-| `branchbook.sms.aws.dry-run` | `BRANCHBOOK_SMS_AWS_DRY_RUN` | `false` | AWS checks each message and sends none | no | default | default | default |
+| `branchbook.sms.aws.dry-run` | `BRANCHBOOK_SMS_AWS_DRY_RUN` | `false` | AWS checks each message and sends none | no | default | default (simulated gateway) | `false`, set by the app stack; `true` only for a deploy run with `BRANCHBOOK_SMS_AWS_DRY_RUN=true` |
 | `branchbook.sms.aws.connect-timeout` | `BRANCHBOOK_SMS_AWS_CONNECT_TIMEOUT` | `PT2S` | Connecting to AWS | no | default | default | default |
 | `branchbook.sms.aws.read-timeout` | `BRANCHBOOK_SMS_AWS_READ_TIMEOUT` | `PT5S` | Waiting for AWS's answer | no | default | default | default |
 | `branchbook.sms.aws.call-timeout` | `BRANCHBOOK_SMS_AWS_CALL_TIMEOUT` | `PT10S` | One whole `SendTextMessage` call; the client never retries | no | default | default | default |
 | `branchbook.inbox.enabled` | `BRANCHBOOK_INBOX_ENABLED` | `false` | The simulated inbox, `GET /api/v1/messages` | no | `true` (compose) | `false` | `false` |
-| `branchbook.inbox.redact-references` | `BRANCHBOOK_INBOX_REDACT_REFERENCES` | `false`; `true` under `prod` | References shown as `APT-****-****`; the guard refuses the inbox without it | no | default | `true` (profile) | `true` (profile) |
+| `branchbook.inbox.redact-references` | `BRANCHBOOK_INBOX_REDACT_REFERENCES` | `false`; `true` under `prod` | References shown as `APT-****-****`; the guard refuses the inbox without it | no | default | `true` (task definition) | `true` (task definition) |
 
 ## Data lifecycle and jobs
 
@@ -153,12 +157,12 @@ These are literal in application.yml because changing one would break a guarante
 |---|---|---|---|
 | `spring.application.name` | `SPRING_APPLICATION_NAME` | `branchbook` | Names the application in logs and `/actuator/info` |
 | `spring.threads.virtual.enabled` | `SPRING_THREADS_VIRTUAL_ENABLED` | `true` | Requests waiting on PostgreSQL tie up no platform thread |
-| `spring.jackson.deserialization.fail-on-unknown-properties` | `SPRING_JACKSON_DESERIALIZATION_FAIL_ON_UNKNOWN_PROPERTIES` | `true` | An undeclared request field is `400 UNKNOWN_FIELD` (docs/errors.md) |
+| `spring.jackson.deserialization.fail-on-unknown-properties` | `SPRING_JACKSON_DESERIALIZATION_FAIL_ON_UNKNOWN_PROPERTIES` | `true` | An undeclared request field is `400 VALIDATION_FAILED` with an `UNKNOWN_FIELD` item in `errors[]` (docs/errors.md) |
 | `server.shutdown` | `SERVER_SHUTDOWN` | `graceful` | In-flight requests finish before exit |
 | `logging.pattern.correlation` | `LOGGING_PATTERN_CORRELATION` | `[%X{correlationId:-}] ` | Every request's log lines carry its correlation id |
 | `logging.level.org.hibernate.orm.jdbc.error` | `LOGGING_LEVEL_ORG_HIBERNATE_ORM_JDBC_ERROR` | `OFF` | Hibernate's SQL error log can quote values (BR-19, `LogRedactionIT`) |
 | `logging.level.software.amazon.awssdk` | `LOGGING_LEVEL_SOFTWARE_AMAZON_AWSSDK` | `WARN` | SDK request logs carry numbers (BR-19) |
-| `management.endpoints.web.exposure.include` | `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE` | `health, info, prometheus` | Every other actuator endpoint stays closed |
+| `management.endpoints.web.exposure.include` | `MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE` | `health, info, prometheus`; staging and production set `health,info` | Every other actuator endpoint stays closed |
 | `management.endpoint.health.probes.enabled` | `MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED` | `true` | Liveness and readiness probes exist |
 | `management.endpoint.health.probes.add-additional-paths` | `MANAGEMENT_ENDPOINT_HEALTH_PROBES_ADD_ADDITIONAL_PATHS` | `true` | `/livez` and `/readyz` stay on the main port for the load balancer |
 | `management.endpoint.health.group.readiness.include` | `MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE` | `readinessState, db` | Ready only when PostgreSQL answers; liveness ignores it |

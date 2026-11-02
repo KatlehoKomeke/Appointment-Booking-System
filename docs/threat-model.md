@@ -1,7 +1,7 @@
 # Threat model
 
-*Status: Written for the code as built. The AWS controls are built in code and not yet deployed
-([production-readiness.md](production-readiness.md)).*
+*Status: Written for the code as built. The AWS controls are built and merged, and not yet deployed
+([deployment status](production-readiness.md#deployment-status)).*
 
 This page takes each main flow and asks the six STRIDE questions of it: can someone **S**poof an identity, **T**amper
 with data, **R**epudiate an action, learn something they should not (**I**nformation disclosure), **D**eny service,
@@ -78,7 +78,7 @@ From a commit on `main` to a running task ([delivery.md](delivery.md)).
 | T | A compromised action or dependency runs in the pipeline. | Every action pinned to a commit SHA and audited by zizmor, including for impostor commits; the `dependency-review` check refuses high and critical advisories; CodeQL; Trivy on the image; no dependency cache in the jobs that hold credentials. | The `workflow-lint` job; [dependency-review.yml](../.github/workflows/dependency-review.yml); [codeql.yml](../.github/workflows/codeql.yml); the `image` job |
 | R | No one can say what is live, or who let it into production. | Each environment records its commit and digest after its smoke test; production waits for a person's approval in the `production` environment, which GitHub records. | release-stack.test.ts; the *Verify the recorded commit and image* steps |
 | I | A secret or the account ID leaks through the repository or a log. | gitleaks in the pre-commit hook and on every push, push protection, the account ID masked in logs, staging's token masked, Playwright traces off while it is set. | [secret-scan.yml](../.github/workflows/secret-scan.yml); [SECURITY.md](../SECURITY.md#secrets) |
-| E | A pipeline run widens its own access or reaches the other environment. | A permissions boundary on every role the stacks create; each bootstrap's execution policy limited to its environment's roles; a deploy scope denying the other environment's stacks and the administrator's; one role per environment. | [guardrails-stack.test.ts](../infra/test/guardrails-stack.test.ts) "the permissions boundary"; [deployment-policies.test.ts](../infra/test/deployment-policies.test.ts); account-stack.test.ts |
+| E | A pipeline run widens its own access or reaches the other environment. | A permissions boundary on every role the stacks create; each bootstrap's execution policy limited to its environment's roles (production's once the administrator narrows its bootstrap); a deploy scope denying the other environment's stacks and the administrator's; one role per environment. | [guardrails-stack.test.ts](../infra/test/guardrails-stack.test.ts) "the permissions boundary"; [deployment-policies.test.ts](../infra/test/deployment-policies.test.ts); account-stack.test.ts |
 
 ## Operator access
 

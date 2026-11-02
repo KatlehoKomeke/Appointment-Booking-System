@@ -15,7 +15,7 @@
       infra/config/account.json, registry.json, staging.json and production.json;
       .github/workflows/ci.yml (jobs publish, deploy-staging, deploy-production, rollback-production);
       infra/README.md (bootstrap qualifiers and toolkit stacks)
-    Verified at 90bf68b (2026-10-30)
+    Verified at ab9aa7f (2026-11-02)
     Conventions: docs/assets/diagrams/README.md
     Planned elements carry class="planned" data-milestone; none is left in this diagram.
   -->

@@ -1,12 +1,13 @@
 # Delivery: from a commit to Cape Town
 
 *Status: Built: two git hooks, five workflows, Dependabot with a 14-day cooldown, and a pipeline that builds one ARM64
-image per commit, tests, scans and attests it, then promotes its digest from staging to production, behind a
-reviewer's approval, with an automatic rollback. Every action is pinned to a commit SHA and every tool image to a
-digest. The GitHub environments, variables and required checks it relies on are listed in
-[GitHub settings](#github-settings-this-relies-on). Not built: strict checks, a review on pull requests and
-`CODEOWNERS` ([Known gaps](#known-gaps)). `BranchbookAccount` and `BranchbookGuardrails` are deployed by the
-administrator by hand ([infra/README.md](../infra/README.md#who-can-change-what-in-aws)).*
+image per commit, tests, scans and attests it, then promotes its digest from staging to production, behind a reviewer's
+approval, with an automatic rollback. Its first run, on 2026-11-01, stopped at staging, and staging and production are
+not yet deployed ([deployment status](production-readiness.md#deployment-status)). Every action is pinned to a commit
+SHA and every tool image to a digest. The GitHub environments, variables and required checks it relies on, read back on
+2026-11-02, are listed in [GitHub settings](#github-settings-this-relies-on). Not built: strict checks, a review on pull
+requests and `CODEOWNERS` ([Known gaps](#known-gaps)). `BranchbookAccount` and `BranchbookGuardrails` are deployed by
+the administrator by hand ([infra/README.md](../infra/README.md#who-can-change-what-in-aws)).*
 
 This page is the one home for how code moves from a laptop to AWS: the hooks, how changes reach `main`, what each
 workflow proves, which workflow runs when, the delivery to staging and production, the supply chain, Dependabot, the
@@ -171,8 +172,8 @@ The push of c5feafe, the head of the six M2 commits, on 25 October 2026, measure
 own that ran beside `ci`. These are the only pipeline timings in the documentation, and they predate two changes:
 delivery now waits for every check, and it deploys twice, to staging and then, after an approval, to production. A
 push to `main` therefore takes at least the `image` and `stack` jobs end to end, plus two deployments and the time a
-reviewer takes. The timings are re-measured, and the picture redrawn, after the first run of the pipeline as it now
-stands.
+reviewer takes. The timings are re-measured, and the picture redrawn, after the pipeline's first run that reaches
+production.
 
 - **Start.** GitHub created all three runs at 12:40:13Z: [ci](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/runs/40194135208),
   [secret-scan](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/runs/40194135188) and
@@ -378,11 +379,12 @@ to them, and record the date and commit below the table.
 |---|---|---|---|
 | Default branch | `main` | `gh api $R --jq .default_branch` | anyone |
 | Rulesets | `Protect main`, on the default branch: refuses force-pushes and deletion, with no bypass; requires the status checks `api`, `web`, `infra`, `workflow-lint`, `image` and `stack` (`ci`), `analyze (java-kotlin)`, `analyze (javascript-typescript)` and `analyze (actions)` (`codeql`), `dependency-review` and `gitleaks` (`secret-scan`), all from GitHub Actions, not strict; and a code-scanning rule that blocks a merge on a CodeQL security alert of high severity or more | `gh api $R/rules/branches/main --jq '[.[].type]'` lists `non_fast_forward`, `deletion`, `required_status_checks` and `code_scanning`; `gh api $R/rules/branches/main --jq '.[] \| select(.type=="required_status_checks") \| .parameters'` lists the eleven contexts | anyone |
-| Environment `staging` | Deployment branches: `main` only (no tags); no required reviewers | `gh api $R/environments/staging --jq '{rules: [.protection_rules[].type], can_admins_bypass}'` and `gh api $R/environments/staging/deployment-branch-policies --jq '.branch_policies[] \| {name, type}'` | anyone |
+| Environment `staging` | Deployment branches: `main` only (no tags); no required reviewers; `can_admins_bypass` is `true` | `gh api $R/environments/staging --jq '{rules: [.protection_rules[].type], can_admins_bypass}'` and `gh api $R/environments/staging/deployment-branch-policies --jq '.branch_policies[] \| {name, type}'` | anyone |
 | Environment `production` | Deployment branches: `main` only; one required reviewer; administrators may not bypass | The same two calls for `production`; `rules` includes `required_reviewers` and `can_admins_bypass` is `false` | anyone |
-| Environment secrets | In each: `AWS_DEPLOY_ROLE_ARN` (that environment's role, `branchbook-github-deploy-staging` or `-production`), and `ALERT_EMAIL` if the alarms should e-mail someone. No repository-level Actions secrets | `gh api $R/environments/staging/secrets --jq '.secrets[].name'`, the same for `production`; `gh api $R/actions/secrets --jq .total_count` prints `0` | owner |
+| Environment secrets | In each: `AWS_DEPLOY_ROLE_ARN` (that environment's role, `branchbook-github-deploy-staging` or `-production`) and `ALERT_EMAIL`, the address the alarms e-mail, which is optional and set in both. No repository-level Actions secrets | `gh api $R/environments/staging/secrets --jq '.secrets[].name'`, the same for `production`; `gh api $R/actions/secrets --jq .total_count` prints `0` | owner |
 | Environment variables | In each: `AWS_REGION` (`af-south-1`) and `BRANCHBOOK_ENV` (`staging` or `production`) | `gh api $R/environments/staging/variables --jq '.variables[] \| {name, value}'`, the same for `production` | owner |
-| Environment `aws-demo` | Deleted, with its secret, once `BranchbookAccount` no longer trusts it | `gh api $R/environments --jq '[.environments[].name]'` prints `["production","staging"]` | anyone |
+| Environments | `staging` and `production`, and `github-pages`, which GitHub Pages creates for its own deployments of the architecture page from the `gh-pages` branch: no workflow here declares it, and no AWS role trusts it. The single-environment pipeline's `aws-demo` is deleted, with its secret | `gh api $R/environments --jq '[.environments[].name]'` prints `["github-pages","production","staging"]` | anyone |
+| GitHub Pages | The architecture page, served from the root of the `gh-pages` branch | `gh api $R/pages --jq .source` prints `{"branch":"gh-pages","path":"/"}` | owner |
 | OIDC subject | GitHub's immutable subject, with numeric owner and repository IDs | `gh api $R/actions/oidc/customization/sub --jq .use_immutable_subject` prints `true` | anyone |
 | Secret scanning and push protection | On; non-provider patterns and validity checks off | `gh api $R --jq .security_and_analysis` | owner |
 | Dependency graph, Dependabot alerts and security updates | On (the dependency graph is what `dependency-review` reads) | `gh api $R/vulnerability-alerts --silent && echo on`; `gh api $R/automated-security-fixes --jq .enabled` | owner |
@@ -392,8 +394,8 @@ to them, and record the date and commit below the table.
 | Actions | All actions allowed; actions must be pinned to a full-length commit SHA | `gh api $R/actions/permissions --jq '{allowed_actions, sha_pinning_required}'` | owner |
 | Default `GITHUB_TOKEN` | Read-only; cannot approve pull requests | `gh api $R/actions/permissions/workflow` | owner |
 
-Not yet read back after this change. "Anyone" means the endpoint is public, so any GitHub account can run the check;
-the others answer only the repository's administrators.
+Read back on 2026-11-02, with `main` at `ab9aa7f`. "Anyone" means the endpoint is public, so any GitHub account can
+run the check; the others answer only the repository's administrators.
 
 ## Known gaps
 
@@ -409,8 +411,9 @@ review, image scan, SBOM, provenance or dynamic scan; and a manual run from a `v
 | A rollback waits for an approval | GitHub applies an environment's required reviewers to every job that enters it, and the production role trusts that environment alone, so `rollback-production` waits for the same reviewer. Until then production runs whatever the failed deployment left: after a failed `cdk deploy`, CloudFormation has already restored the previous template; after a failed smoke test, the new image. | A separate rollback environment without reviewers, whose role may only redeploy a digest already recorded; or the rollback as steps inside `deploy-production`. |
 | A waiting deployment can be replaced | GitHub keeps one job waiting per concurrency group. With three pushes in quick succession, the third's job replaces the second's while it waits, so the second is never deployed; the newest always is, and none is cancelled once started. | Accept it: the newest commit contains the replaced one. |
 | The first production deployment cannot roll back automatically | `/branchbook/release-image` is first written by this pipeline, so until one production deployment succeeds there is no digest to return to, and `rollback-production` stops and says so. | Nothing after the first success. |
+| No review is required before a merge | The repository has one collaborator, an administrator. A change reaches `main` once its checks pass, with no second person reading it, workflows and `infra/` included. Production's approval gates each production deployment, but the same person gives it. | One approving review in the `Protect main` ruleset, and a `CODEOWNERS` file covering `.github/` and `infra/`, once there is a second maintainer ([With a team](#with-a-team)). |
 | The trust subject names no workflow | Any workflow run from `main` that declares `staging` or `production` and requests an OIDC token can assume that environment's role: today `ci.yml`'s delivery jobs and `aws-connection-check.yml`. | `CODEOWNERS` and a required review on `.github/`, or `job_workflow_ref` in the OIDC subject and the trust policy. |
-| The pipeline's self-access guard lives in code | `BranchbookAccount` and `BranchbookGuardrails` stay out of the pipeline's reach because the CDK app omits them unless `BRANCHBOOK_ALERT_EMAIL` or `BRANCHBOOK_GUARDRAILS` is set, and only the credential-free `infra` job sets them. IAM does not forbid it: the bootstrap roles a deploy role may assume can update any stack, and a change to `ci.yml` needs no review. | The options in [infra/README.md](../infra/README.md#who-can-change-what-in-aws). |
+| Production's bootstrap still has CDK's default execution policy | The CDK app's switch (guard 1), each deploy role's reach (guard 3) and each bootstrap's deploy scope, `OnlyThisEnvironmentsStacks` (guard 4), keep both pipelines from running CloudFormation on `BranchbookAccount` or `BranchbookGuardrails`. Staging's execution policy also allows IAM only on staging's roles, created with the permissions boundary. Production's execution role still holds `AdministratorAccess`, so any stack deployed through production's pipeline, new or existing, could create any resource. Examples are a role without the boundary, or a policy on a deploy role. Such a change alters the administrator's resources without touching their stacks. Only `main`, after a person's approval, reaches it. | Narrowing it to `branchbook-cdk-cfn-exec-production` ([infra/README.md](../infra/README.md#hardening-the-account-that-already-runs-production), step 5). |
 | Attestations are verified online only | They are stored by GitHub, not pushed to ECR, because the registry's host name holds the account ID and attestations of a public repository are public. Verifying one needs GitHub's API. | A registry host without the account ID in it, then `push-to-registry` and offline verification in AWS. |
 | The ZAP baseline sees what its spider finds | A passive scan of the app shell, its assets and `robots.txt`; the single-page app's API calls are not crawled, and nothing is attacked actively. The smoke test checks the API's headers and refusals instead. | Proxy the end-to-end tests through ZAP, or an API scan from `docs/openapi.yaml` against a disposable stack. |
 | Unfixed vulnerabilities do not fail the build | Trivy fails only on a HIGH or CRITICAL vulnerability with a fixed version; the rest are visible in ECR's scan of the published image. | A reviewed exceptions file and a failing gate on all of them. |

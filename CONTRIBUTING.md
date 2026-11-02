@@ -15,11 +15,14 @@ Nothing installs the hooks for you: until you run `make hooks`, your commits are
 
 - **How changes land today.** This is a one-person repository: each change arrives on a short-lived branch and is
   merged through a pull request, with `make test` run first, and each push runs the workflows described in
-  [docs/delivery.md](docs/delivery.md). `main` refuses force-pushes and deletion, and requires every check of `ci`,
-  `codeql`, `dependency-review` and `secret-scan` to pass before a push or merge, so a red check keeps a change off
-  `main`; the checks are not strict, and no second person's approval of a pull request is required
-  ([docs/delivery.md](docs/delivery.md#known-gaps)). A person's approval is required before each production
-  deployment ([ADR-0008](docs/adr/0008-two-environments-promoted-by-digest.md)).
+  [docs/delivery.md](docs/delivery.md). The `Protect main` ruleset refuses force-pushes and deletion, with no
+  bypass, and requires eleven checks to pass before a push or merge: `ci`'s `api`, `web`, `infra`, `workflow-lint`,
+  `image` and `stack`, `codeql`'s three `analyze` jobs, `dependency-review`, and `secret-scan`'s `gitleaks`. Its
+  code-scanning rule also blocks a merge on a CodeQL security alert of high severity or more. A red check keeps a
+  change off `main`; the checks are not strict, and no second person's approval of a pull request is required
+  ([docs/delivery.md](docs/delivery.md#known-gaps)). Every action must be pinned to a full commit SHA. A person's
+  approval is required before each production deployment
+  ([ADR-0008](docs/adr/0008-two-environments-promoted-by-digest.md)).
 - **With a team.** `main` would also require a second person's approval of every pull request, strict checks, linear
   history, and a CODEOWNERS file covering `.github/` and `infra/`.
   Work would arrive on `feat/<topic>`, `fix/<topic>`, `docs/<topic>` or `chore/<topic>` branches, merged through a
@@ -112,7 +115,7 @@ that matter most.
 | Change the API: a path, parameter or response | Run `make contract`, and commit [docs/openapi.yaml](docs/openapi.yaml) and `web/src/api/schema.d.ts` with the change |
 | Make a decision with a rejected alternative | A new record in [docs/adr](docs/adr/README.md) |
 | Change how the system is built or connected | [docs/architecture.md](docs/architecture.md) |
-| Change how to run or test it | [README.md](README.md) |
+| Change how to run or test it | [README.md](README.md), which stays at 300 lines or fewer: detail belongs in the guide it links to |
 | Make a major commit, finish a milestone, or build something differently from the design | The [architecture page](#the-architecture-page) |
 | Change a workflow, a hook, Dependabot or a GitHub setting | [docs/delivery.md](docs/delivery.md) and [delivery-pipeline.svg](docs/assets/diagrams/delivery-pipeline.svg); [secret-layers.svg](docs/assets/diagrams/secret-layers.svg) if a secret layer changes |
 | Change `infra/` or what runs in AWS | [infra/README.md](infra/README.md) and [aws-footprint.svg](docs/assets/diagrams/aws-footprint.svg); [access-boundary.svg](docs/assets/diagrams/access-boundary.svg) if access changes |

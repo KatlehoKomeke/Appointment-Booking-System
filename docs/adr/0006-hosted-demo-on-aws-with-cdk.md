@@ -1,6 +1,9 @@
 # ADR-0006: An optional hosted demo in AWS Cape Town, owned by AWS CDK
 
 - **Status:** Accepted. The delivery trigger is superseded by [ADR-0007](0007-continuous-deployment-from-main.md): every push to `main` deploys.
+  Superseded in part by [ADR-0008](0008-two-environments-promoted-by-digest.md): the single hosted demo is replaced by
+  two environments, staging and production, and production keeps its stacks and address. The Region, CDK and
+  no-RDS-Proxy decisions stand.
 - **Date:** 2026-10-22
 
 ## Context
@@ -178,3 +181,24 @@ CDK and no-RDS-Proxy decisions stand.
   ([ADR-0011](0011-waf-captcha-instead-of-a-one-time-pin.md)).
 - **Multi-AZ, deletion protection and 14-day backups** for production's database, and a `prod` Spring profile that
   fails closed ([ADR-0009](0009-configuration-from-the-environment.md)).
+
+**2026-11-01, the first run stops at staging.** Facts that have changed since the notes above. The hosted demo
+still serves https://branchbook.click.
+
+- **The two-environment pipeline's first run did not reach production.** At `ab9aa7f` every check passed and the
+  image was pushed to `BranchbookRegistry`; `BranchbookStagingData` was created, then `BranchbookStagingApp` failed and
+  rolled back, because staging's CloudFormation execution role lacked `cloudformation:DescribeStacks`, which
+  CloudFormation needs to resolve the App stack's `Fn::GetStackOutput` references to the Data stack. Production was not
+  touched: the hosted demo runs as the previous pipeline last deployed it, on 2026-10-31 from `bab2d81`
+  ([deployment status](../production-readiness.md#deployment-status)).
+- **The budget is US$450 a month, not $110,** e-mailing at 50, 80 and 100 percent of it. The administrator deployed it
+  in `BranchbookAccount` on 2026-11-01 ([infra/config/account.json](../../infra/config/account.json)). Both
+  environments, with their guardrails and observability, are estimated, not measured, at about US$380 to 450 a month,
+  against about $102 before ([ADR-0010](0010-private-network-and-iam-database-auth.md)).
+
+**2026-11-02, the fix is merged.** [Pull request
+#43](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/43) lets each environment's execution role
+describe its own stacks, with a test. It takes effect when an administrator redeploys `BranchbookGuardrails`; the next
+pipeline run then deploys staging and, after a person's approval, production, which keeps the hosted demo's stack IDs,
+`BranchbookData`, `BranchbookApp` and `BranchbookRelease`, and its address. The teardown date, 2026-11-30, is unchanged
+([infra/README.md](../../infra/README.md#production)).

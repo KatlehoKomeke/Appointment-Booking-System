@@ -7,11 +7,13 @@ rewritten. Nothing here is planned; it records how far the seams reach.
 
 ## What carries over unchanged
 
-- **The schema.** The eight Flyway migrations, with the two `EXCLUDE USING gist` constraints, the 61 named
-  constraints and the indexes ([architecture.md, section 7](architecture.md#7-data-model)). The database rejects an
-  overlapping seat from any code path ([ADR-0002](adr/0002-double-booking-prevention.md)), so the guarantee holds
-  whichever runtime writes the rows. Flyway also runs as a command-line tool or a container, so the same files can
-  migrate the database before a .NET app starts.
+- **The schema.** The nine Flyway migrations, with the two `EXCLUDE USING gist` constraints, the 61 named
+  constraints and the indexes ([architecture.md, section 7](architecture.md#7-data-model)), and V9's runtime role,
+  which may read and write rows and nothing more. The database rejects an overlapping seat from any code path
+  ([ADR-0002](adr/0002-double-booking-prevention.md)), so the guarantee holds whichever runtime writes the rows.
+  Migrations already run as a deployment step, a one-off task before the service is updated; Flyway also runs as a
+  command-line tool or a container, so the same files, with V9's `appRole` placeholder set, can migrate the database
+  before a .NET app starts.
 - **The contract.** [openapi.yaml](openapi.yaml) fixes every path, header (`Idempotency-Key`, `X-Mobile-Last4`),
   response and error code ([errors.md](errors.md)). A back-end port is finished when the document it generates
   matches the committed file, the check `OpenApiContractIT` makes today. A front-end port touches only `web/`
@@ -45,10 +47,14 @@ ASP.NET Core, with EF Core on Npgsql over the same PostgreSQL 17 schema.
 
 The infrastructure barely moves. The Fargate task runs whatever image the [Dockerfile](../Dockerfile) builds, so a
 rewritten Dockerfile whose app listens on port 8080 and answers `/readyz` deploys as it is. The task's environment
-variables are the app's settings, and the port reads the same names, except three
-([app-stack.ts](../infra/lib/app-stack.ts)): `DB_URL` is a JDBC URL today, `SERVER_FORWARD_HEADERS_STRATEGY` is a
-Spring Boot setting, replaced by ASP.NET Core's forwarded-headers middleware, and
-`MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE` limits Spring Boot's actuator to `health` and `info`.
+variables are the app's settings, and the port reads the same names, except the Spring Boot ones
+([app-stack.ts](../infra/lib/app-stack.ts), [infra/config/](../infra/config)). `DB_URL` is a JDBC URL for the AWS
+Advanced JDBC Wrapper today, whose `iam` plugin signs in with the task's role, so a .NET port needs an IAM
+authentication token from the AWS SDK for each new connection. `SPRING_DATASOURCE_DRIVER_CLASS_NAME` and
+`SPRING_DATASOURCE_HIKARI_MAXIMUMPOOLSIZE` choose that driver and size the pool; `SPRING_PROFILES_ACTIVE` selects the
+`prod` profile; `SERVER_FORWARD_HEADERS_STRATEGY` is replaced by ASP.NET Core's forwarded-headers middleware;
+`MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE` limits Spring Boot's actuator to `health` and `info`; and the migration
+task's `SPRING_MAIN_WEB_APPLICATION_TYPE` starts the app without a web server.
 
 ## The front end on Vue 3
 

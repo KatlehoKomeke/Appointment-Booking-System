@@ -4,18 +4,20 @@ The Spring Boot application at the heart of BranchBook. It serves the booking AP
 [web/](../web/README.md) on the same origin, and runs the dispatcher that delivers its SMS. How it is structured and
 why is in [docs/architecture.md](../docs/architecture.md).
 
-**Status (M6, Tier 2 API built):** the application starts, migrates PostgreSQL, answers its health probes, serves
-the app, lists branches with their bookable dates and each day's slots with the seats left, books an appointment with
-its confirmation SMS in one transaction, opens it again with its reference and the last four digits, and delivers the
-SMS through a simulated gateway (M5), or, where a deployment asks, as a real SMS through AWS End User Messaging SMS
-to every number outside the published demo block, with a per-recipient daily cap. From M6 it also cancels an appointment before it starts, with its cancellation
-SMS; retries a failed message from the simulated inbox; books three demo appointments on a fresh compose stack; and
-serves two meters of its own on `/actuator/prometheus`. Where a deployment switches them on, it takes bookings only
-from the demo numbers and deletes each booking once its appointment is over. It publishes its OpenAPI contract.
-For staging and production it reads every setting from the environment, runs a `prod` profile that refuses unsafe
-settings, migrates as a separate step and signs in to RDS with IAM as a role that can change rows but not the
-schema, holds SMS back behind a circuit breaker while a provider fails, and exports its outbox and breaker figures
-to CloudWatch ([Configuration](#configuration), [docs/production-readiness.md](../docs/production-readiness.md)).
+**Status (M0 to M7 built; staging and production not yet deployed, see [deployment
+status](../docs/production-readiness.md#deployment-status)):** the application starts, migrates PostgreSQL, answers its
+health probes, serves the app, lists branches with their bookable dates and each day's slots with the seats left, books
+an appointment with its confirmation SMS in one transaction, opens it again with its reference and the last four digits,
+and delivers the SMS through a simulated gateway (M5), or, where a deployment asks, as a real SMS through AWS End User
+Messaging SMS to every number outside the published demo block, with a per-recipient daily cap. From M6 it also cancels
+an appointment before it starts, with its cancellation SMS; retries a failed message from the simulated inbox; books
+three demo appointments on a fresh compose stack; and serves two meters of its own on `/actuator/prometheus`. Where a
+deployment switches them on, it takes bookings only from the demo numbers and deletes each booking once its appointment
+is over. It publishes its OpenAPI contract. For staging and production it reads every setting from the environment, runs
+a `prod` profile that refuses unsafe settings, migrates as a separate step and signs in to RDS with IAM as a role that
+can change rows but not the schema, holds SMS back behind a circuit breaker while a provider fails, and exports its
+outbox and breaker figures to CloudWatch ([Configuration](#configuration),
+[docs/production-readiness.md](../docs/production-readiness.md)).
 
 ## Prerequisites
 
@@ -69,7 +71,7 @@ a Java agent at startup, as Mockito recommends on Java 21 and later.
 Integration tests are annotated `@IntegrationTest` (in `support/`). It starts the whole application on
 `postgres:17.11-alpine`, the image and logging flags `compose.yaml` uses, and replaces the clock with a
 `MutableClock` that tests set, so rules about dates and times are tested at fixed moments. Integration tests share
-that configuration, so Spring builds the context once and one container serves them. The six that switch a
+that configuration, so Spring builds the context once and one container serves them. The seven that switch a
 setting, `InboxSwitchedOffIT`, `InboxReferencesHiddenIT`, `DispatcherLoopIT`, `DemoNumbersOnlyIT`,
 `RecipientDailyCapIT`, `RecipientCapLedgerIT` and `CaptchaConfiguredIT`, each build a context of their own, and with
 it a container of their own, because the container is a bean of the context. `ProdProfileIT`, `AwsJdbcWrapperIT` and
