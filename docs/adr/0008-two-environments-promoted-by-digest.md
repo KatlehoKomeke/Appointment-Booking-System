@@ -78,3 +78,14 @@ environment's stacks (`ReadOwnStackOutputs`), with a test. It takes effect when 
 production deployment has no recorded release to roll back to, and narrowing production's bootstrap to its execution
 policy follows it ([infra/README.md](../../infra/README.md#hardening-the-account-that-already-runs-production), step 5;
 [deployment status](../production-readiness.md#deployment-status)).
+
+**2026-11-02, both environments deployed.** The administrator redeployed `BranchbookGuardrails`, so #43 took effect.
+Two more problems surfaced and were fixed: the app could not create Tomcat's temporary directory on the `/tmp` volume
+Fargate mounts root-owned ([pull request #48](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/48),
+`d6471c0`), and a failed first create of `BranchbookStagingApp` left its log group behind, which was deleted by hand
+([runbook](../runbook.md#a-first-deployment-fails-the-log-group-already-exists)). Pipeline run 41498174936 then
+deployed one digest to staging at 18:42Z, where the smoke and end-to-end tests passed, and, after a person's approval,
+to production at 19:15Z, where the smoke test passed with the CAPTCHA expected. Production has a recorded release to
+roll back to. The administrator then narrowed production's bootstrap to `branchbook-cdk-cfn-exec-production`; the
+first production deployment through it is #49's (`38d0a4d`)
+([deployment status](../production-readiness.md#deployment-status)).

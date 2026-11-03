@@ -77,8 +77,9 @@ cancel, and delete each booking once its appointment is over.
 
 - It has one AWS account for both environments, not one each, so a mistake in staging's stacks could still reach
   production's resources through what IAM allows ([SECURITY.md](../SECURITY.md#known-risks)).
-- Its recovery times are targets, not yet measured: the restore drill and the fault-injection game day come after the
-  first deployment ([resilience.md](resilience.md)).
+- Not every recovery target is met or rehearsed. The drills of 2026-11-02 met the targets for a lost task and a
+  database failover, but a point-in-time restore lost 7 minutes 48 seconds against a 5-minute target, and pointing the
+  stack at a restored database has not been rehearsed ([resilience.md](resilience.md#recovery-targets)).
 - Delivery is best effort over AWS's shared route, and while the account is in the SMS sandbox only verified numbers
   receive a text; the booking stands either way.
 - There are no staff screens, reminders, rescheduling or an email channel, each ruled out with its reason in the
