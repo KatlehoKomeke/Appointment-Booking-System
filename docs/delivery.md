@@ -2,12 +2,13 @@
 
 *Status: Built: two git hooks, five workflows, Dependabot with a 14-day cooldown, and a pipeline that builds one ARM64
 image per commit, tests, scans and attests it, then promotes its digest from staging to production, behind a reviewer's
-approval, with an automatic rollback. Its first run, on 2026-11-01, stopped at staging, and staging and production are
-not yet deployed ([deployment status](production-readiness.md#deployment-status)). Every action is pinned to a commit
-SHA and every tool image to a digest. The GitHub environments, variables and required checks it relies on, read back on
-2026-11-02, are listed in [GitHub settings](#github-settings-this-relies-on). Not built: strict checks, a review on pull
-requests and `CODEOWNERS` ([Known gaps](#known-gaps)). `BranchbookAccount` and `BranchbookGuardrails` are deployed by
-the administrator by hand ([infra/README.md](../infra/README.md#who-can-change-what-in-aws)).*
+approval, with an automatic rollback. Its first run, on 2026-11-01, stopped at staging; on 2026-11-02 it deployed
+staging and, after a person's approval, production ([deployment status](production-readiness.md#deployment-status)).
+Every action is pinned to a commit SHA and every tool image to a digest. The GitHub environments, variables and
+required checks it relies on, read back on 2026-11-02, are listed in [GitHub settings](#github-settings-this-relies-on).
+Not built: strict checks, a review on pull requests and `CODEOWNERS` ([Known gaps](#known-gaps)). `BranchbookAccount`
+and `BranchbookGuardrails` are deployed by the administrator by hand
+([infra/README.md](../infra/README.md#who-can-change-what-in-aws)).*
 
 This page is the one home for how code moves from a laptop to AWS: the hooks, how changes reach `main`, what each
 workflow proves, which workflow runs when, the delivery to staging and production, the supply chain, Dependabot, the
@@ -172,8 +173,8 @@ The push of c5feafe, the head of the six M2 commits, on 25 October 2026, measure
 own that ran beside `ci`. These are the only pipeline timings in the documentation, and they predate two changes:
 delivery now waits for every check, and it deploys twice, to staging and then, after an approval, to production. A
 push to `main` therefore takes at least the `image` and `stack` jobs end to end, plus two deployments and the time a
-reviewer takes. The timings are re-measured, and the picture redrawn, after the pipeline's first run that reaches
-production.
+reviewer takes. The pipeline's first run to reach production, 41498174936 on 2026-11-02, has not been timed here
+yet; the timings are re-measured, and the picture redrawn, from it or a later run.
 
 - **Start.** GitHub created all three runs at 12:40:13Z: [ci](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/runs/40194135208),
   [secret-scan](https://github.com/KatlehoKomeke/Appointment-Booking-System/actions/runs/40194135188) and
@@ -403,6 +404,10 @@ Each gap is stated here once, with what limits it today and what would close it.
 rebuilt at deploy time rather than the one tested; actions pinned by a movable tag; one environment, so every commit
 went straight to the public address; no human gate before it; no automatic rollback; no static analysis, dependency
 review, image scan, SBOM, provenance or dynamic scan; and a manual run from a `v*` tag that would deploy that tag.
+Closed by the first deployments, on 2026-11-02 ([deployment status](production-readiness.md#deployment-status)):
+production's bootstrap ran CloudFormation with CDK's default `AdministratorAccess` execution policy until the
+administrator narrowed it to `branchbook-cdk-cfn-exec-production` after production's first deployment through it; and
+that first deployment had no recorded release to roll back to, which production now has.
 
 | Gap | Effect today | What would close it |
 |---|---|---|
@@ -410,10 +415,8 @@ review, image scan, SBOM, provenance or dynamic scan; and a manual run from a `v
 | The required checks are not strict | A pull request whose checks passed on a branch behind `main` can merge without being rebuilt on the merge result. The push to `main` then builds the merge, and a red check there means no delivery, but the commit is already on `main`. | Strict checks in the ruleset, so a pull request must be up to date with `main` before it merges. |
 | A rollback waits for an approval | GitHub applies an environment's required reviewers to every job that enters it, and the production role trusts that environment alone, so `rollback-production` waits for the same reviewer. Until then production runs whatever the failed deployment left: after a failed `cdk deploy`, CloudFormation has already restored the previous template; after a failed smoke test, the new image. | A separate rollback environment without reviewers, whose role may only redeploy a digest already recorded; or the rollback as steps inside `deploy-production`. |
 | A waiting deployment can be replaced | GitHub keeps one job waiting per concurrency group. With three pushes in quick succession, the third's job replaces the second's while it waits, so the second is never deployed; the newest always is, and none is cancelled once started. | Accept it: the newest commit contains the replaced one. |
-| The first production deployment cannot roll back automatically | `/branchbook/release-image` is first written by this pipeline, so until one production deployment succeeds there is no digest to return to, and `rollback-production` stops and says so. | Nothing after the first success. |
 | No review is required before a merge | The repository has one collaborator, an administrator. A change reaches `main` once its checks pass, with no second person reading it, workflows and `infra/` included. Production's approval gates each production deployment, but the same person gives it. | One approving review in the `Protect main` ruleset, and a `CODEOWNERS` file covering `.github/` and `infra/`, once there is a second maintainer ([With a team](#with-a-team)). |
 | The trust subject names no workflow | Any workflow run from `main` that declares `staging` or `production` and requests an OIDC token can assume that environment's role: today `ci.yml`'s delivery jobs and `aws-connection-check.yml`. | `CODEOWNERS` and a required review on `.github/`, or `job_workflow_ref` in the OIDC subject and the trust policy. |
-| Production's bootstrap still has CDK's default execution policy | The CDK app's switch (guard 1), each deploy role's reach (guard 3) and each bootstrap's deploy scope, `OnlyThisEnvironmentsStacks` (guard 4), keep both pipelines from running CloudFormation on `BranchbookAccount` or `BranchbookGuardrails`. Staging's execution policy also allows IAM only on staging's roles, created with the permissions boundary. Production's execution role still holds `AdministratorAccess`, so any stack deployed through production's pipeline, new or existing, could create any resource. Examples are a role without the boundary, or a policy on a deploy role. Such a change alters the administrator's resources without touching their stacks. Only `main`, after a person's approval, reaches it. | Narrowing it to `branchbook-cdk-cfn-exec-production` ([infra/README.md](../infra/README.md#hardening-the-account-that-already-runs-production), step 5). |
 | Attestations are verified online only | They are stored by GitHub, not pushed to ECR, because the registry's host name holds the account ID and attestations of a public repository are public. Verifying one needs GitHub's API. | A registry host without the account ID in it, then `push-to-registry` and offline verification in AWS. |
 | The ZAP baseline sees what its spider finds | A passive scan of the app shell, its assets and `robots.txt`; the single-page app's API calls are not crawled, and nothing is attacked actively. The smoke test checks the API's headers and refusals instead. | Proxy the end-to-end tests through ZAP, or an API scan from `docs/openapi.yaml` against a disposable stack. |
 | Unfixed vulnerabilities do not fail the build | Trivy fails only on a HIGH or CRITICAL vulnerability with a fixed version; the rest are visible in ECR's scan of the published image. | A reviewed exceptions file and a failing gate on all of them. |

@@ -1,8 +1,9 @@
 # Resilience
 
-*Status: Built and merged; not yet deployed. Staging and production, their alarms and their AWS FIS experiment templates
-are in the CDK app and its tests, and reach AWS with the pipeline's first deployment ([deployment
-status](production-readiness.md#deployment-status)). The recovery targets below are set; none is measured yet.*
+*Status: Built and deployed. Staging and production, their alarms and their AWS FIS experiment templates were first
+deployed by the pipeline on 2026-11-02 ([deployment status](production-readiness.md#deployment-status)). The drills of
+2026-11-02 measured three of the recovery targets: losing a task and failing the database over met theirs, and the
+point-in-time restore met its RTO but not its RPO ([Recovery targets](#recovery-targets)).*
 
 This page lists what can fail, what contains each failure, how it is noticed and how it is rehearsed. What each alarm
 means and how to act on it is in the [runbook](runbook.md#alarms); every threshold is in
@@ -15,8 +16,8 @@ means and how to act on it is in the [runbook](runbook.md#alarms); every thresho
 | [The database fails over](#database-failover) | Multi-AZ standby; requests fail fast with `503 TRY_AGAIN` | `ServerErrors`, RDS events | FIS `<prefix>-database-failover` | RTO 1 to 2 minutes; nothing committed is lost |
 | [The SMS provider fails](#sms-provider-outage) | The circuit breaker; messages wait in the outbox | `SmsCircuitOpen`, `OutboxBacklogAge` | Integration tests | Every message sent once the provider is back |
 | [Messages pile up](#backlog) | The dispatcher on every task, in batches | `OutboxBacklogAge`, `DispatcherStalled` | The k6 load test | The backlog drains |
-| [A deployment is bad](#bad-deploy) | Staging first; ECS's circuit breaker and alarm rollback; the pipeline's rollback | The smoke tests, `ServerErrors`, `NoHealthyTask` | CDK tests; not yet in AWS | The previous release serves again |
-| [Data is lost](#lost-data) | Point-in-time restore, deletion protection, a final snapshot | Noticed by people or by the app's errors | The restore drill, not yet run | RPO 5 minutes; RTO about 30 minutes |
+| [A deployment is bad](#bad-deploy) | Staging first; ECS's circuit breaker and alarm rollback; the pipeline's rollback | The smoke tests, `ServerErrors`, `NoHealthyTask` | CDK tests; the pipeline's rollback not yet in AWS | The previous release serves again |
+| [Data is lost](#lost-data) | Point-in-time restore, deletion protection, a final snapshot | Noticed by people or by the app's errors | The restore drill, 2026-11-02, all but pointing the stack at the copy | RPO 5 minutes; RTO about 30 minutes |
 
 ## Task loss
 
@@ -30,7 +31,11 @@ runs one task, so there a lost task is an outage until its replacement passes it
 - **Detected by** `NoHealthyTask` (no healthy task for 3 minutes), `ServerErrors` and the canary's `CanaryFailing`.
 - **Rehearsed by** the FIS experiment `<prefix>-stop-one-task`, which stops one task at random
   ([runbook](runbook.md#run-a-fault-injection-experiment)). It stops itself if `ServerErrors` or `NoHealthyTask` is
-  raised.
+  raised. Run on 2026-11-02 in both environments, with a probe calling `GET /api/v1/branches/SAN/availability`, which
+  reads the database, once a second. In production, with two tasks, none of 233 requests failed; the replacement
+  registered with the load balancer 29 seconds after the stop, and the service was back at full strength about 95
+  seconds after it. In staging, with one task, the probe saw 61 seconds of `502` and `503` until the replacement
+  served, then only `200`.
 - **Evidence:** [environments.test.ts](../infra/test/environments.test.ts) (the task count, the health checks and
   autoscaling), [observability.test.ts](../infra/test/observability.test.ts) (the experiment and its stop
   conditions), `LookupAttemptLimiterIT.countsAreSharedBetweenInstances` and
@@ -63,7 +68,12 @@ replays the booking that did commit ([BR-12](domain-rules.md#br-12)).
 
 - **Detected by** `ServerErrors` while it lasts, and the RDS event log.
 - **Rehearsed by** the FIS experiment `<prefix>-database-failover` (production only), which reboots the database with
-  a forced failover under the same stop conditions.
+  a forced failover under the same stop conditions. Run on 2026-11-02 with the same probe: RDS reported the failover
+  started at 20:03:49Z and completed at 20:04:28Z, 39 seconds. Clients saw intermittent errors for 1 minute 49
+  seconds (20:03:55Z to 20:05:38Z): 37 of about 109 requests failed (26 `503`, 9 `502` and 2 timeouts). The errors
+  outlast the failover because both tasks' `/readyz` needs the database, so the load balancer took both out until
+  their health checks passed again. Data loss was not measured, since nothing was written during the drill; the
+  standby is synchronous by design.
 - **Evidence:** [observability.test.ts](../infra/test/observability.test.ts) ("fails the Multi-AZ database over to
   its standby, under the same stop conditions"), [environments.test.ts](../infra/test/environments.test.ts) ("runs
   the database Multi-AZ with deletion protection and 14-day backups"), `IdempotencyIT.failedBookingLeavesNoKeyRow`.
@@ -129,8 +139,7 @@ queue that drains at the dispatcher's rate. Nothing is lost while it waits; a co
    deployment alarm.
 5. **The pipeline rolls production back.** If production's deployment or smoke test fails, `rollback-production`
    redeploys the last release that passed, its commit's CDK app with its digest. It waits for the production
-   approval first, and production's first deployment through the pipeline has nothing to roll back to
-   ([SECURITY.md](../SECURITY.md#known-risks)). By hand: [runbook](runbook.md#roll-back-by-hand).
+   approval first ([SECURITY.md](../SECURITY.md#known-risks)). By hand: [runbook](runbook.md#roll-back-by-hand).
 
 A rollback never undoes a migration, so every migration must work with the release before it
 ([runbook](runbook.md#write-migrations-a-rollback-can-survive)).
@@ -155,22 +164,31 @@ Backups also keep what the application deleted on purpose: a booking the retenti
 the backups until they expire ([SECURITY.md](../SECURITY.md#personal-information-popia)).
 
 - **Detected by** people, or by the app's errors; no alarm watches for missing rows.
-- **Rehearsed by** the restore drill, not yet run.
+- **Rehearsed by** the restore drill, run on production on 2026-11-02: the runbook's steps 1, 2 and 4, restoring to
+  the latest restorable time into a temporary Multi-AZ instance, `branchbook-pitr-drill`, without deletion protection,
+  deleted afterwards. Requested at 20:49:43Z, it restored to 20:41:55Z, 7 minutes 48 seconds earlier, against the
+  5-minute target: not met. The newest restorable point was already 6.5 minutes behind at 20:43Z, shortly after the
+  failover drill, so the figure is to be measured again on a quiet day. The instance was usable, restored and
+  restarted, at 21:02:53Z, 13 minutes 10 seconds after the request; its Multi-AZ conversion and first backup finished
+  at 21:33:53Z, 44 minutes 10 seconds after it. Step 3, pointing the stack at the restored instance, was not
+  rehearsed and remains open ([runbook](runbook.md#restore-the-database-to-a-point-in-time)).
 - **Evidence:** [environments.test.ts](../infra/test/environments.test.ts) ("runs the database Multi-AZ with deletion
   protection and 14-day backups"), [config.test.ts](../infra/test/config.test.ts) (production refuses a database
   without deletion protection).
 
 ## Recovery targets
 
-RTO is how long until the service is whole again; RPO is how much committed data may be lost. These are targets.
-Each is measured by the drill or experiment named, after the first deployment, and the operator records the date and
-the result here.
+RTO is how long until the service is whole again; RPO is how much committed data may be lost. Each is measured by the
+drill or experiment named, and the operator records the date and the result here. The drills of 2026-11-02 ran with a
+probe calling `GET /api/v1/branches/SAN/availability`, which reads the database, once a second; the details are under
+each failure above.
 
 | Failure | RTO target | RPO target | Measured by | Measured on | RTO measured | RPO measured |
 |---|---|---|---|---|---|---|
-| One task lost (production) | Under 2 minutes, with the other task serving throughout | None: no state in the task | FIS `<prefix>-stop-one-task` | Not yet | | |
-| Database failover (production) | About 1 to 2 minutes | None: the standby is synchronous | FIS `<prefix>-database-failover` | Not yet | | |
-| Point-in-time restore | About 30 minutes | 5 minutes | The restore drill ([runbook](runbook.md#restore-the-database-to-a-point-in-time)) | Not yet | | |
+| One task lost (production) | Under 2 minutes, with the other task serving throughout | None: no state in the task | FIS `<prefix>-stop-one-task` | 2026-11-02 | Met: 0 of 233 requests failed; the replacement registered after 29 s, full strength after about 95 s | None: no state in the task |
+| One task lost (staging, one task) | None set: staging runs one task | None: no state in the task | FIS `branchbook-staging-stop-one-task` | 2026-11-02 | 61 s of `502` and `503` until the replacement served | None: no state in the task |
+| Database failover (production) | About 1 to 2 minutes | None: the standby is synchronous | FIS `<prefix>-database-failover` | 2026-11-02 | Met: 1 min 49 s of intermittent errors (37 of about 109 requests); RDS's failover itself took 39 s | Not measured: nothing was written during the drill |
+| Point-in-time restore | About 30 minutes | 5 minutes | The restore drill ([runbook](runbook.md#restore-the-database-to-a-point-in-time)) | 2026-11-02 | The restore met it: usable after 13 min 10 s, Multi-AZ and backed up after 44 min 10 s. Pointing the stack at it (step 3) not rehearsed | Not met: 7 min 48 s; to be measured again on a quiet day |
 
 ## Load test
 

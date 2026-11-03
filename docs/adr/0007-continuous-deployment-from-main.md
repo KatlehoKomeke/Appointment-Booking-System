@@ -99,3 +99,8 @@ it, the one step left ([infra/README.md](../../infra/README.md#hardening-the-acc
 step 5). Until then, in production, the deploy scope alone keeps the pipeline off the other stacks, and IAM does not
 stop a production deployment from creating a role without the permissions boundary
 ([SECURITY.md](../../SECURITY.md#known-risks)).
+
+**2026-11-02.** The pipeline deployed staging and, after a person's approval, production for the first time. The
+administrator then narrowed production's bootstrap to `branchbook-cdk-cfn-exec-production`, so in production too IAM
+now limits what a deployment may create, and every production role carries the permissions boundary
+([deployment status](../production-readiness.md#deployment-status)).

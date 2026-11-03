@@ -23,13 +23,11 @@ Every control here, with the test or cdk-nag rule that proves it, is listed in
 
 ## What exists today
 
-*Status: Built as drawn; partly deployed. The administrator's part was deployed on 2026-11-01: `BranchbookAccount` with
+*Status: Built as drawn and deployed. The administrator's part was deployed on 2026-11-01: `BranchbookAccount` with
 one deploy role per environment, the account's guardrails, `BranchbookGuardrails`, and each environment's CDK bootstrap.
-The pipeline's first run, on 2026-11-01, deployed the ECR repository `BranchbookRegistry` and `BranchbookStagingData`,
-then stopped when `BranchbookStagingApp` failed. The two environments, `staging` and `production`, selected with
-`BRANCHBOOK_ENV`, are first deployed from `main` by the run after one administrator step, production after a person's
-approval; until then production's three stacks hold the hosted demo ([deployment
-status](../docs/production-readiness.md#deployment-status)).*
+The two environments, `staging` and `production`, selected with `BRANCHBOOK_ENV`, were first deployed from `main` by the
+pipeline on 2026-11-02, at `d6471c0`: staging at 18:42Z, production at 19:15Z after a person's approval, replacing the
+hosted demo in place ([deployment status](../docs/production-readiness.md#deployment-status)).*
 
 ![BranchBook in AWS, all built: two environments, staging and production, in one account. Along the top, a customer's browser with no sign-in, GitHub's staging and production environments (production needs an approval), and the administrator. In us-east-1, BranchbookAccount holds the GitHub OIDC provider, one deploy role per environment and the budget. In Cape Town, staging and production are built from the same three stacks: WAF with a CAPTCHA and per-address limits, a load balancer, autoscaled Fargate tasks in private subnets, a migration task, alarms, a canary and fault-injection experiments; a VPC over two zones with a NAT gateway per zone, Secrets Manager and a Multi-AZ RDS database the tasks sign in to as branchbook_app with IAM (in production; staging has one NAT gateway, a Single-AZ database and only the stop-a-task experiment); and the release record. Shared: the ECR registry, AWS End User Messaging SMS (production only), BranchbookGuardrails and the CDK bootstraps. The administrator deploys the account-level stacks by hand (A); a delivery job signs in through OpenID Connect (1); the image is pushed once (2); staging is deployed, then production after approval (3).](../docs/assets/diagrams/aws-footprint.svg)
 
@@ -48,20 +46,21 @@ hand, from their own machine. The pipeline never deploys them ([Who can change w
 Until 2026-11-01, a single-environment pipeline signed in through the GitHub environment `aws-demo` as
 `branchbook-github-deploy`, built the image on the runner, deployed `BranchbookData` and `BranchbookApp`,
 smoke-tested https://branchbook.click and recorded the commit in `BranchbookRelease`: the hosted demo. The role and
-the environment are deleted. Its last deployment, on 2026-10-31 from `bab2d81`, is what https://branchbook.click still
-serves. Production keeps the stack IDs and physical names deployed on 2026-10-26.
+the environment are deleted. Its last deployment, on 2026-10-31 from `bab2d81`, served https://branchbook.click until
+production's first deployment on 2026-11-02 replaced it in place. Production keeps the stack IDs and physical names
+deployed on 2026-10-26.
 
 | Stack and Region | Deployed by | What it creates |
 |---|---|---|
 | [`BranchbookAccount`](lib/account-stack.ts)<br>`us-east-1` | Administrator, by hand (2026-11-01) | The GitHub OIDC provider, one deploy role per environment, `branchbook-github-deploy-staging` and `branchbook-github-deploy-production`, a deploy scope on each bootstrap's deploy role, the budget `branchbook-monthly` and the role ARNs as outputs |
 | [`BranchbookGuardrails`](lib/guardrails-stack.ts)<br>`af-south-1` | Administrator, by hand (2026-11-01) | CloudTrail, GuardDuty, AWS Config, Security Hub, IAM Access Analyzer, the permissions boundary and each environment's execution policy |
 | [`BranchbookRelease`](lib/release-stack.ts)<br>`af-south-1` | Pipeline, each approved push to `main` | The SSM parameters `/branchbook/release` and `/branchbook/release-image`: the last commit and digest that passed production's smoke test |
-| [`BranchbookData`](lib/data-stack.ts)<br>`af-south-1` | Pipeline, each approved push to `main` (first by hand, 2026-10-26; last by the previous pipeline, 2026-10-31) | Production's VPC, its RDS for PostgreSQL 17 database and the SMS daily cap's key ([Environments](#environments-staging-and-production)) |
-| [`BranchbookApp`](lib/app-stack.ts)<br>`af-south-1` | Pipeline, each approved push to `main` (first by hand, 2026-10-26; last by the previous pipeline, 2026-10-31) | Production's certificate, WAF, load balancer, Fargate service, schema migration, SMS protect configuration, logs, alarms, dashboard, canary, fault-injection templates and DNS record |
+| [`BranchbookData`](lib/data-stack.ts)<br>`af-south-1` | Pipeline, each approved push to `main`, first on 2026-11-02 (first by hand, 2026-10-26; by the previous pipeline until 2026-10-31) | Production's VPC, its RDS for PostgreSQL 17 database and the SMS daily cap's key ([Environments](#environments-staging-and-production)) |
+| [`BranchbookApp`](lib/app-stack.ts)<br>`af-south-1` | Pipeline, each approved push to `main`, first on 2026-11-02 (first by hand, 2026-10-26; by the previous pipeline until 2026-10-31) | Production's certificate, WAF, load balancer, Fargate service, schema migration, SMS protect configuration, logs, alarms, dashboard, canary, fault-injection templates and DNS record |
 | [`BranchbookRegistry`](lib/registry-stack.ts)<br>`af-south-1` | Pipeline (`publish`), every push to `main`; first on 2026-11-01 | The ECR repository `branchbook`: immutable tags, scan on push, the newest 50 images kept |
-| `BranchbookStagingData`, `BranchbookStagingApp`, `BranchbookStagingRelease`<br>`af-south-1` | Pipeline, every push to `main`. Not yet deployed: the first run created `BranchbookStagingData`, and `BranchbookStagingApp` failed and rolled back ([deployment status](../docs/production-readiness.md#deployment-status)) | Staging's copies of the three stacks, at https://stg.branchbook.click |
-| `CDKToolkit`<br>both Regions | Administrator, once per Region | CDK's default bootstrap, qualifier `hnb659fds`: the deploy, file-publishing, image-publishing, lookup and cfn-exec roles, an assets bucket and an ECR repository. `BranchbookAccount` deploys through it, and so do production's stacks until their first deployment through `bbprod`. Other CDK apps in the account share it, so BranchBook never changes it |
-| `CDKToolkitProduction`<br>`af-south-1` | Administrator, once (2026-11-01) | Production's own bootstrap, qualifier `bbprod`, through which the pipeline deploys production. It has CDK's default execution policy, which production's first deployment through it needs; narrowing it to `branchbook-cdk-cfn-exec-production` follows that deployment ([Hardening the account that already runs production](#hardening-the-account-that-already-runs-production)) |
+| `BranchbookStagingData`, `BranchbookStagingApp`, `BranchbookStagingRelease`<br>`af-south-1` | Pipeline, every push to `main`; first on 2026-11-02 ([deployment status](../docs/production-readiness.md#deployment-status)) | Staging's copies of the three stacks, at https://stg.branchbook.click |
+| `CDKToolkit`<br>both Regions | Administrator, once per Region | CDK's default bootstrap, qualifier `hnb659fds`: the deploy, file-publishing, image-publishing, lookup and cfn-exec roles, an assets bucket and an ECR repository. `BranchbookAccount` deploys through it, and so did production's stacks until their first deployment through `bbprod`, on 2026-11-02. Other CDK apps in the account share it, so BranchBook never changes it |
+| `CDKToolkitProduction`<br>`af-south-1` | Administrator, once (2026-11-01), narrowed 2026-11-02 | Production's own bootstrap, qualifier `bbprod`, through which the pipeline deploys production. Production's first deployment went through it with CDK's default execution policy, which it needed; the administrator then narrowed it to `branchbook-cdk-cfn-exec-production` ([Hardening the account that already runs production](#hardening-the-account-that-already-runs-production)) |
 | `CDKToolkitStaging`<br>`af-south-1` | Administrator, once (2026-11-01) | Staging's own bootstrap, qualifier `bbstg`, with the execution policy `branchbook-cdk-cfn-exec-staging` ([First-time setup](#first-time-setup)) |
 
 - **Cost.** `BranchbookAccount` and `BranchbookRelease` cost nothing to run; the bootstrap storage costs cents. Both
@@ -135,9 +134,9 @@ sequenceDiagram
     Note over Job: fail unless they match
 ```
 
-Everything in this diagram is built, and the sign-in is deployed; no run has yet gone all the way through it
-([deployment status](../docs/production-readiness.md#deployment-status)). Solid arrows are calls; dashed arrows are
-their replies.
+Everything in this diagram is built and deployed; the first run to go all the way through it, to staging and then
+production, was on 2026-11-02 ([deployment status](../docs/production-readiness.md#deployment-status)). Solid arrows
+are calls; dashed arrows are their replies.
 
 - **No access key exists anywhere.** Each job takes its role's ARN from its environment's secret
   `AWS_DEPLOY_ROLE_ARN`. GitHub proves the job's identity with a short-lived token, and AWS answers with credentials
@@ -167,11 +166,10 @@ their replies.
 
 ## Who can change what in AWS
 
-*Status: Guards A and 1 to 4 deployed on 2026-11-01; guards 5 to 8 are built and reach each environment with its first
-deployment ([deployment status](../docs/production-readiness.md#deployment-status)). One part of guard 4 waits for the
-last administrator step: production's bootstrap still runs CloudFormation with CDK's default `AdministratorAccess`
-execution policy, so for production guard 4 is the deploy scope alone until the administrator narrows it ([Hardening the
-account that already runs production](#hardening-the-account-that-already-runs-production), step 5).*
+*Status: Guards A and 1 to 4 deployed on 2026-11-01; guards 5 to 8 reached both environments with their first
+deployment on 2026-11-02 ([deployment status](../docs/production-readiness.md#deployment-status)). The last part of
+guard 4 followed the same day: the administrator narrowed production's bootstrap to its own execution policy
+([Hardening the account that already runs production](#hardening-the-account-that-already-runs-production), step 5).*
 
 ![Who can reach and change what in AWS, all built. By hand (A), the administrator sets BRANCHBOOK_ALERT_EMAIL or BRANCHBOOK_GUARDRAILS=true and deploys BranchbookAccount and BranchbookGuardrails. The pipeline, in a staging lane and a production lane, passes four guards: the delivery jobs never set those switches (1, code and workflow); the GitHub environments admit main only, and production needs an approval (2, GitHub setting); each environment's deploy role trusts only this repository and that environment and assumes only its own bootstrap's roles (3, IAM); and each bootstrap's deploy scope and execution policy keep it off the other environment's stacks and the administrator's (4, IAM). A crossed arrow shows staging cannot reach the administrator's stacks. At run time, WAF asks for a CAPTCHA, applies per-address limits and blocks /actuator (5), the load balancer forwards only to port 8080, never the actuator's 8081 (6), every app role carries the permissions boundary (7), and the task signs in to the database as branchbook_app with an IAM token and row privileges only (8). The gaps: one account for both environments, and a merge to main needs no second person's approval.](../docs/assets/diagrams/access-boundary.svg)
 
@@ -253,8 +251,9 @@ environment's branch policy admits only `main`.
 
 ## Environments: staging and production
 
-*Status: Built and merged; not yet deployed ([deployment status](../docs/production-readiness.md#deployment-status)):
-staging at https://stg.branchbook.click and, after a person's approval, production at https://branchbook.click. Tests:
+*Status: Built and deployed, first on 2026-11-02
+([deployment status](../docs/production-readiness.md#deployment-status)): staging at https://stg.branchbook.click
+and, after a person's approval, production at https://branchbook.click. Tests:
 [environments.test.ts](test/environments.test.ts), [config.test.ts](test/config.test.ts),
 [nag.test.ts](test/nag.test.ts), [schema-migration-handler.test.ts](test/schema-migration-handler.test.ts).*
 
@@ -404,7 +403,7 @@ worst task's view.
 | `ResponseTimeP99` | load balancer `TargetResponseTime`, p99, 5 min | over 1.5 s for 3 periods | not a breach |
 | `DatabaseCpu` | RDS `CPUUtilization`, Average, 5 min | over 80% for 3 periods | missing |
 | `DatabaseConnections` | RDS `DatabaseConnections`, Maximum, 5 min | over 80% of `connectionBudget` (60 of 75) for 3 periods | missing |
-| `DatabaseMemory` | RDS `FreeableMemory`, Minimum, 5 min | under 128 MiB for 3 periods | missing |
+| `DatabaseMemory` | RDS `FreeableMemory`, Minimum, 5 min | under `databaseFreeableMemoryMiB`, 128 MiB, for 3 periods. Raised in both environments today: `db.t4g.micro` leaves about 36 to 107 MB free ([runbook](../docs/runbook.md#alarms)) | missing |
 | `ServiceCpu` | ECS `CPUUtilization`, Average, 5 min | over 85% for 3 periods | missing |
 | `ServiceMemory` | ECS `MemoryUtilization`, Maximum, 5 min | over 85% for 3 periods | missing |
 | `CanaryFailing` | Synthetics `SuccessPercent`, Average, 5 min | under 90% for 2 runs in a row | **a breach** |
@@ -439,6 +438,9 @@ nothing until someone starts an experiment from it, and FIS refuses to start, or
   `forceFailover=true`. Expect a minute or two of failed database calls while the standby takes over, after which the
   pools reconnect to the same endpoint.
 
+Both were run on 2026-11-02; what they measured is in
+[docs/resilience.md](../docs/resilience.md#recovery-targets).
+
 The experiments run as their own role, which FIS may assume only for this account's experiments, and which may stop
 only this cluster's tasks and reboot only this database. FIS keeps each experiment's record for 120 days and CloudTrail
 records its calls; the experiments are not logged to CloudWatch Logs, which would need `logs:PutResourcePolicy` on any
@@ -457,11 +459,11 @@ Or in the console: AWS FIS, Experiment templates, the template, Start experiment
 
 ## Production
 
-*Status: Built and merged; not yet deployed. Until production's first deployment, which keeps the hosted demo's stack
-IDs and names, https://branchbook.click serves the hosted demo that has run there since 2026-10-26, as the previous
-pipeline last deployed it on 2026-10-31 ([deployment status](../docs/production-readiness.md#deployment-status)). What
-production runs, beside staging, is in [Environments](#environments-staging-and-production); this section is how it is
-reached and run.* The design is in [ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md) and
+*Status: Built and deployed. Production's first deployment, on 2026-11-02, replaced in place the hosted demo that had
+run at https://branchbook.click since 2026-10-26, keeping its stack IDs and names
+([deployment status](../docs/production-readiness.md#deployment-status)). What production runs, beside staging, is in
+[Environments](#environments-staging-and-production); this section is how it is reached and run.* The design is in
+[ADR-0006](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md) and
 [ADR-0008](../docs/adr/0008-two-environments-promoted-by-digest.md) to
 [ADR-0011](../docs/adr/0011-waf-captcha-instead-of-a-one-time-pin.md), and where the build departs from ADR-0006 is in
 its [Notes](../docs/adr/0006-hosted-demo-on-aws-with-cdk.md#notes); the cost line items are on the [architecture
@@ -800,14 +802,17 @@ These steps need you personally, and only happen once.
 
 ### Hardening the account that already runs production
 
-*Status: Steps 1 to 3, and steps 6 and 7 above, done on 2026-11-01. Step 4 waits for an administrator to redeploy
+*Status: Done. Steps 1 to 3, and steps 6 and 7 above, on 2026-11-01. On 2026-11-02 an administrator redeployed
 `BranchbookGuardrails` with `ReadOwnStackOutputs` ([pull request
-#43](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/43)), so that staging, then production, can
-deploy; step 5 follows step 4 ([deployment status](../docs/production-readiness.md#deployment-status)).*
+#43](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/43)); the pipeline then deployed staging and,
+after a person's approval, production through `bbprod` (step 4), and every production IAM role now carries
+`branchbook-permissions-boundary`; and the administrator narrowed production's bootstrap to
+`branchbook-cdk-cfn-exec-production` (step 5). The first deployment through the narrowed policy is #49's (`38d0a4d`)
+([deployment status](../docs/production-readiness.md#deployment-status)).*
 
-The account deployed on 2026-10-26 runs production's stacks through the default bootstrap, `CDKToolkit` (`hnb659fds`),
+The account deployed on 2026-10-26 ran production's stacks through the default bootstrap, `CDKToolkit` (`hnb659fds`),
 which other CDK apps in the account share, with CDK's default `AdministratorAccess` execution role, and production's
-roles carry no boundary, until step 4. It had the single deploy role `branchbook-github-deploy`. The default bootstrap
+roles carried no boundary, until step 4. It had the single deploy role `branchbook-github-deploy`. The default bootstrap
 is never changed. Steps 6 and 7 above apply unchanged. Then, in this order:
 
 1. **Bootstrap production's own toolkit, at first with the default execution policy**, so its first deployment can

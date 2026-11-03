@@ -64,10 +64,8 @@ The GitHub settings behind layers 4 and 6 can be read with
 ### At run time
 
 *Layer 8 is in place: the deploy roles were deployed on 2026-11-01, and every delivery job signs in through them.
-Layers 9 and 10 are built and merged, and reach AWS with each environment's first deployment
-([deployment status](docs/production-readiness.md#deployment-status)); until then the hosted demo at
-https://branchbook.click runs as [ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md) describes, with its database
-credentials in Secrets Manager.*
+Layers 9 and 10 reached AWS with each environment's first deployment, on 2026-11-02; production's database has IAM
+database authentication on ([deployment status](docs/production-readiness.md#deployment-status)).*
 
 8. **No AWS access key exists.** GitHub Actions signs in through OpenID Connect, with sessions of at most one hour.
    Each GitHub environment, `staging` and `production`, holds its own role's ARN as its secret
@@ -90,7 +88,7 @@ credentials in Secrets Manager.*
 
 ### In AWS
 
-The controls below are built and merged, and reach staging and production with their first deployment, as above.
+The controls below are deployed in staging and production, first on 2026-11-02, as above.
 
 Neither environment has a sign-in, so neither holds a password of its own
 ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)). Production texts real SMS, so any South African
@@ -287,11 +285,12 @@ which trusts only this repository and that environment, and may assume only its 
 also waits for a person's approval. Since this change, IAM limits a deployment too: every role the application stacks
 create carries a permissions boundary, each bootstrap's execution policy allows IAM only on its own environment's
 roles, and a deploy scope denies each role the other environment's stacks and the administrator's
-([ADR-0008](docs/adr/0008-two-environments-promoted-by-digest.md)). Production's bootstrap runs CloudFormation with
-CDK's default execution policy until the administrator narrows it, the one step left
-([infra/README.md](infra/README.md#hardening-the-account-that-already-runs-production)); until then its deploy scope
-alone keeps production's pipeline off the other stacks. What IAM, GitHub and the code each enforce, and what is still
-not prevented, are in [infra/README.md](infra/README.md#who-can-change-what-in-aws).
+([ADR-0008](docs/adr/0008-two-environments-promoted-by-digest.md)). Production's bootstrap has run CloudFormation with
+its own execution policy, `branchbook-cdk-cfn-exec-production`, since the administrator narrowed it on 2026-11-02,
+after production's first deployment through it
+([infra/README.md](infra/README.md#hardening-the-account-that-already-runs-production)). What IAM, GitHub and the
+code each enforce, and what is still not prevented, are in
+[infra/README.md](infra/README.md#who-can-change-what-in-aws).
 
 ## Known risks
 
@@ -304,8 +303,6 @@ them are in [docs/threat-model.md](docs/threat-model.md).
 | **Booking and cancelling without sign-in.** A person who solves CAPTCHAs can still book, and so make production text any South African number; booking with someone's number can reveal from a `409` that they have a booking, though never its reference or time ([BR-23](docs/domain-rules.md#br-23)); a leaked reference with the number's last four digits opens and cancels an appointment; and someone who knows a reference can block its lookups for an hour. | The product owner chose no login and no one-time PIN: an SMS PIN costs a message per booking, adds friction and invites SMS pumping ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md), [ADR-0011](docs/adr/0011-waf-captcha-instead-of-a-one-time-pin.md)). | The CAPTCHA and per-address limits; at most 5 SMS a day to one number, counting the messages a cancel deletes (cancels racing each other can pass it by a message or two); South Africa only; `MaxPrice` and AWS's monthly SMS spend limit; the demo block never texted; the lookup limit ([BR-13](docs/domain-rules.md#br-13)); a cancellation SMS to the booked number. | A one-time PIN to the number, or sign-in through the bank's identity provider, with appointments bound to the verified customer. |
 | **One AWS account for both environments.** Staging's stacks could reach production's resources through services the execution policy allows, such as a security group rule or a record in the shared hosted zone. | Separate accounts were rejected for this account's cost and setup time ([ADR-0008](docs/adr/0008-two-environments-promoted-by-digest.md)). The deploy-scope deny stops CloudFormation on the other environment's stacks, not every API call. | A bootstrap, an execution policy and a deploy role per environment, the deploy-scope deny, and the permissions boundary. | An AWS account per environment. |
 | **No required approval on `main`.** A merged commit could change what an application role trusts or may do, within the permissions boundary. | One-person repository: no second person can approve. | Required checks on `main`; the `production` environment's required approval gates every production deployment; the boundary stops an account takeover. | A required approval on pull requests and a `CODEOWNERS` file for `.github/` and `infra/`. |
-| **Production's bootstrap still has CDK's default execution policy.** A deployment through it could create any resource, or a role without the permissions boundary. | Production's first deployment through its own bootstrap has to add the boundary to roles that do not yet carry it, which the narrower policy would refuse; that deployment has not run yet ([deployment status](docs/production-readiness.md#deployment-status)). | The deploy scope denies CloudFormation on staging's stacks and the administrator's; only `main`, after a person's approval, reaches production's deploy role. | Narrowing it to `branchbook-cdk-cfn-exec-production` ([infra/README.md](infra/README.md#hardening-the-account-that-already-runs-production), step 5). |
-| **The first production deployment after the cutover cannot roll back automatically.** | `/branchbook/release-image` is first written by this pipeline, so there is no recorded digest to return to. | `rollback-production` stops and says so; a rollback by hand ([docs/runbook.md](docs/runbook.md#roll-back-by-hand)). | Nothing: it closes with the first successful production deployment. |
 | **Automatic rollback waits for approval.** `rollback-production` cannot start until a person approves it. | The production role trusts only the `production` environment, which requires an approval for every job. | During a deployment, ECS's circuit breaker and the 5xx alarm roll back on their own; a failed `cdk deploy` is restored by CloudFormation ([docs/delivery.md](docs/delivery.md#known-gaps)). | A rollback environment without approvers whose role may only redeploy a recorded digest. |
 | **The CAPTCHA puzzle is only exercised by hand.** | A test cannot solve AWS's puzzle: CI passes the staging bypass, and production's smoke test asserts only the challenge. | Unit tests with a fake puzzle; the smoke test proves an unsolved booking is challenged. | A check by hand in a browser on staging after any change to the CAPTCHA path. |
 | **Attestations are verified online and not stored in ECR.** | The registry's host name holds the account ID, and a public repository's attestations are public. | `deploy-production` verifies the provenance with `gh attestation verify` before every deployment. | A registry host without the account ID in it, then attestations pushed beside the image and verified in AWS. |
@@ -319,4 +316,7 @@ certificate is now checked (`sslmode=verify-full`, [Security](docs/production-re
 is off the public port; the pipeline's deployments are limited by IAM, not only by code; WAF limits each address's
 lookups as well as its bookings; code, dependencies and the image are scanned; staging comes before production, behind
 an approval, with the image promoted by digest ([Delivery](docs/production-readiness.md#delivery)); and the service no
-longer connects as the database's owner.
+longer connects as the database's owner. **Closed by the first deployments, 2026-11-02**
+([deployment status](docs/production-readiness.md#deployment-status)): production's bootstrap no longer has CDK's
+default execution policy, since the administrator narrowed it to `branchbook-cdk-cfn-exec-production`; and production
+now has a release recorded by the pipeline to roll back to.

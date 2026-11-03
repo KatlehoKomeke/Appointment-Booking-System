@@ -4,7 +4,7 @@ The Spring Boot application at the heart of BranchBook. It serves the booking AP
 [web/](../web/README.md) on the same origin, and runs the dispatcher that delivers its SMS. How it is structured and
 why is in [docs/architecture.md](../docs/architecture.md).
 
-**Status (M0 to M7 built; staging and production not yet deployed, see [deployment
+**Status (M0 to M7 built; staging and production deployed on 2026-11-02, see [deployment
 status](../docs/production-readiness.md#deployment-status)):** the application starts, migrates PostgreSQL, answers its
 health probes, serves the app, lists branches with their bookable dates and each day's slots with the seats left, books
 an appointment with its confirmation SMS in one transaction, opens it again with its reference and the last four digits,

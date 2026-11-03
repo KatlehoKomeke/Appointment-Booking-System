@@ -15,10 +15,10 @@ design](../web/README.md#ui-design). M5 adds the dispatcher that delivers the SM
 simulated inbox's API and the concurrent proofs. M6 adds the Tier 2 API: cancelling an appointment with its cancellation
 SMS, retrying a failed message from the simulated inbox, demo data for a fresh compose stack, and two meters on
 `/actuator/prometheus`, with the web app's screens for them: cancelling from the appointment page and Retry in the
-simulated inbox. The production hardening that followed is built and merged, and not yet deployed: staging and
+simulated inbox. The production hardening that followed is built, merged and deployed: staging and
 production from validated configuration, the image promoted by digest, private subnets, IAM database authentication with
 a least-privilege role, migrations as a deployment step, a WAF CAPTCHA, the SMS circuit breaker, and the alarms and
-drills ([production-readiness.md](production-readiness.md)). Its first deployment waits for one administrator step
+drills ([production-readiness.md](production-readiness.md)). The pipeline first deployed it on 2026-11-02
 ([deployment status](production-readiness.md#deployment-status)). Each section opens with its status. Diagrams are
 Mermaid, or SVG files in [assets/diagrams](assets/diagrams/README.md); solid parts are built and dashed parts are
 planned, with their milestone.
@@ -137,9 +137,9 @@ returns no slots without reading the appointments.
 
 ### 2.2 A booking through the firewall
 
-*Status: Built after M7; not yet deployed ([deployment status](production-readiness.md#deployment-status)). Only
-staging and production put the CAPTCHA in front of a booking; locally, and wherever no CAPTCHA is configured, such as
-the hosted demo, step 3 never happens and nothing changes.*
+*Status: Built after M7; deployed on 2026-11-02 ([deployment status](production-readiness.md#deployment-status)).
+Only staging and production put the CAPTCHA in front of a booking; locally, and wherever no CAPTCHA is configured,
+step 3 never happens and nothing changes.*
 
 ```mermaid
 sequenceDiagram
@@ -541,11 +541,11 @@ profile's JSON log lines. How the data is protected is in
 
 ## 10. Deployment
 
-*Status: Built. The image and the local stack are built, and staging and production, in Cape Town (af-south-1), are
-built and merged but not yet deployed; production texts real SMS. Until production's first deployment, which keeps its
-address and stack IDs, https://branchbook.click serves the single hosted demo that has run there since 2026-10-26
-([deployment status](production-readiness.md#deployment-status)). Sections 10.2 and 10.3 describe staging and
-production.*
+*Status: Built and deployed. The image and the local stack are built, and staging and production, in Cape Town
+(af-south-1), were first deployed on 2026-11-02; production texts real SMS. Production's first deployment replaced in
+place, keeping its address and stack IDs, the single hosted demo that had run at https://branchbook.click since
+2026-10-26 ([deployment status](production-readiness.md#deployment-status)). Sections 10.2 and 10.3 describe staging
+and production.*
 
 ### 10.1 Locally: the image and the stack
 

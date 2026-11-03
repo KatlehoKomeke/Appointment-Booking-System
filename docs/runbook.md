@@ -4,10 +4,11 @@ How to look after a running BranchBook: whether it is healthy, what happened to 
 means and how to let production send real SMS, how to replay one that failed, what the daily cap's ledger holds,
 whether a reference is blocked, whether the retention purge ran, how to follow one request through the logs and read
 the metrics, what each alarm means and what to do, how to run a fault-injection experiment, restore the database to
-a point in time and roll back by hand, and how to write a migration a rollback can survive. The commands are for the
-local stack that `make up` starts, where `make psql` opens a SQL prompt on its database, unless a section says it is
-for staging or production. Every number in this file is a synthetic demo number. The failure modes behind the alarms,
-and the drills that rehearse them, are in [resilience.md](resilience.md).
+a point in time and roll back by hand, what to do when a first deployment finds its log group already there, and how
+to write a migration a rollback can survive. The commands are for the local stack that `make up` starts, where
+`make psql` opens a SQL prompt on its database, unless a section says it is for staging or production. Every number
+in this file is a synthetic demo number. The failure modes behind the alarms, and the drills that rehearse them, are
+in [resilience.md](resilience.md).
 
 ## Is it healthy?
 
@@ -440,7 +441,7 @@ that GitHub environment where one is set. What each watches, its threshold and h
 | `ResponseTimeP99` | The slowest 1% of requests took over 1.5 seconds for 15 minutes. | 1. `DatabaseCpu` and `DatabaseConnections`. 2. `ServiceCpu` and the running task count. 3. Requests and WAF blocks on the dashboard: a surge, or one address? | Let autoscaling add tasks; raise `service.maxTasks` within the connection budget, or `database.instanceClass`. |
 | `DatabaseCpu` | The database's CPU averaged over 80% for 15 minutes. | 1. Requests on the dashboard. 2. `try_again` bookings ([Read the metrics](#read-the-metrics)). 3. A retention batch failing hour after hour ([above](#did-the-retention-purge-run)). | A larger `database.instanceClass`; in production the change is applied through the Multi-AZ standby. |
 | `DatabaseConnections` | More than 80% of the connection budget (60 of 75) is in use. | 1. Running tasks against `service.maxTasks`. 2. A migration task still running. 3. A deployment with old and new tasks side by side. | `config.ts` keeps the most the service can open inside the budget, so a breach means something else connects: find and stop it. |
-| `DatabaseMemory` | The database had under 128 MiB of freeable memory for 15 minutes. | 1. `DatabaseConnections`. 2. `DatabaseCpu`. 3. The trend since the last deployment. | A larger `database.instanceClass`. |
+| `DatabaseMemory` | The database had under 128 MiB of freeable memory for 15 minutes. In ALARM in both environments as of 2026-11-03: `db.t4g.micro` (1 GiB) leaves about 36 to 107 MB free under normal load. | 1. `DatabaseConnections`. 2. `DatabaseCpu`. 3. The trend since the last deployment. | A larger `database.instanceClass`: `db.t4g.small`, not yet made ([deployment status](production-readiness.md#deployment-status)). Lowering `databaseFreeableMemoryMiB` would only hide it. |
 | `ServiceCpu` | The tasks' CPU averaged over 85% for 15 minutes, beyond what autoscaling absorbed. | 1. Is the service at `service.maxTasks`? 2. Requests per task on the dashboard. 3. WAF's per-address blocks: one client driving it? | Raise `service.maxTasks` within the connection budget, or `service.cpu`. |
 | `ServiceMemory` | A task used over 85% of its memory for 15 minutes. | 1. Tasks restarting? 2. Since which deployment? 3. The same on the other tasks? | Raise `service.memoryMiB`, or roll back the deployment that started it. |
 | `CanaryFailing` | The outside-in canary failed two runs in a row: `/readyz` or the availability API did not answer 200 with a sane body. | 1. The canary's last run in the CloudWatch Synthetics console. 2. `EXPECT_PROD_PROFILE=1 EXPECT_CAPTCHA=1 scripts/smoke.sh <address>` from your machine. 3. `NoHealthyTask` and `ServerErrors`. | As for the alarm it points to; if only the canary fails, the domain, the certificate or WAF. |
@@ -501,12 +502,21 @@ Each environment has the AWS FIS experiment template `<prefix>-stop-one-task`, a
 
 Run them on staging first. Staging runs one task, so stopping it shows recovery from zero rather than continuity.
 
+All three were run on 2026-11-02, with a probe calling `GET /api/v1/branches/SAN/availability`, which reads the
+database, once a second: in staging a stopped task meant 61 seconds of `502` and `503`; in production no request failed
+while a task was replaced, and a database failover gave 1 minute 49 seconds of intermittent errors
+([resilience.md](resilience.md#recovery-targets)).
+
 ## Restore the database to a point in time
 
 RDS keeps automated backups for `database.backupRetentionDays` (14 days in production, 3 in staging) and can restore
-to any second in that window, up to about five minutes ago. A restore always makes a **new** instance; the live one
-is left as it was. This procedure has not been rehearsed yet: the restore drill in [resilience.md](resilience.md)
-will time it.
+to any second in that window, up to about five minutes ago; on 2026-11-02, shortly after a failover, the newest
+restorable point was 6.5 minutes behind. A restore always makes a **new** instance; the live one is left as it was.
+
+The restore drill of 2026-11-02 rehearsed steps 1, 2 and 4 on production, with `--use-latest-restorable-time` in
+place of `--restore-time`, `--multi-az`, and no deletion protection for the temporary copy: the instance was usable 13
+minutes 10 seconds after the request, and held the data as it was 7 minutes 48 seconds before it, against the
+5-minute target ([resilience.md](resilience.md#recovery-targets)). Step 3 was not rehearsed and remains open.
 
 1. **Find the live instance and its settings** (production shown; staging's stack is `BranchbookStagingData`):
 
@@ -534,8 +544,9 @@ will time it.
 3. **Point the stack at it.** The stack has no setting for this today: the tasks' endpoint, the master secret and the
    task role's `rds-db:connect` grant, which names the instance's resource ID and so changes with a restore, all come
    from the instance [data-stack.ts](../infra/lib/data-stack.ts) defines. Switching is therefore a change to that
-   stack, deployed through the pipeline, and is what the drill is to settle. Where only some rows were lost, copying
-   them back from the restored instance into the live one avoids the switch.
+   stack, deployed through the pipeline, and is what a later drill is to settle: the drill of 2026-11-02 stopped
+   before this step. Where only some rows were lost, copying them back from the restored instance into the live one
+   avoids the switch.
 
 4. **Afterwards,** delete the instance that is no longer used, once nothing needs it; with deletion protection on,
    turn it off first.
@@ -575,6 +586,29 @@ A hand deployment writes no release record, so `/<prefix>/release` still names t
 push to `main` deploys `main` over it: revert the bad commit on `main` too. The previous image runs against the
 schema as the newer release left it, which is why every migration must be one
 [a rollback can survive](#write-migrations-a-rollback-can-survive).
+
+## A first deployment fails: the log group already exists
+
+CDK retains the App stack's log group, `/<prefix>/app`, so a failed **first** create of an App stack can leave it
+behind when CloudFormation rolls the stack back. The next create then fails CloudFormation's early validation, which
+says the log group already exists. This happened to `BranchbookStagingApp` on 2026-11-02.
+
+1. **Check the log group is the failed attempt's,** empty or holding only that attempt's lines:
+
+   ```bash
+   aws logs describe-log-streams --log-group-name /branchbook-staging/app --region af-south-1 \
+     --profile branchbook-admin --query "logStreams[].[logStreamName,storedBytes]" --output text
+   ```
+
+2. **Delete it:**
+
+   ```bash
+   aws logs delete-log-group --log-group-name /branchbook-staging/app --region af-south-1 --profile branchbook-admin
+   ```
+
+3. **Re-run the failed job** in GitHub Actions.
+
+Only after a failed first create: once an App stack exists, its log group holds the environment's logs.
 
 ## Write migrations a rollback can survive
 

@@ -202,3 +202,11 @@ describe its own stacks, with a test. It takes effect when an administrator rede
 pipeline run then deploys staging and, after a person's approval, production, which keeps the hosted demo's stack IDs,
 `BranchbookData`, `BranchbookApp` and `BranchbookRelease`, and its address. The teardown date, 2026-11-30, is unchanged
 ([infra/README.md](../../infra/README.md#production)).
+
+**2026-11-02, production replaces the hosted demo.** The administrator redeployed `BranchbookGuardrails`, so #43 took
+effect. Pipeline run 41498174936 deployed staging, then, after a person's approval, production at 19:15Z, from
+`d6471c0` ([pull request #48](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/48), which lets the
+non-root user write the `/tmp` volume Fargate mounts). Production replaced the hosted demo in place: `BranchbookData`,
+`BranchbookApp` and `BranchbookRelease` kept their stack IDs, and https://branchbook.click its address. Its database
+now runs Multi-AZ with deletion protection, IAM database authentication and 14-day backups. The teardown date,
+2026-11-30, is unchanged ([deployment status](../production-readiness.md#deployment-status)).
