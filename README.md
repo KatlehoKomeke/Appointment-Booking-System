@@ -7,7 +7,8 @@ an SMS confirmation that cannot be lost: simulated locally and in staging, and a
 
 > **Fynbos Bank is fictional.** This repository is an engineering assessment submitted to Capitec Bank. It is not
 > affiliated with Capitec Bank or any other bank. Every branch, person and phone number in it is made up. Run locally
-> it sends nothing; production texts the number you book with, unless it is a demo number, 082 555 0000 to 0199.
+> it sends nothing; production, while it ran, texted the number booked with, unless it was a demo number, 082 555 0000
+> to 0199.
 
 ![BranchBook at a glance, all built: a customer's browser reaches one Spring Boot jar that serves the React app and a REST API which books, looks up and cancels over PostgreSQL 17, texting through a simulated gateway or, in production, AWS End User Messaging; code ships through GitHub Actions, which builds the image once and signs in to AWS through OpenID Connect, to Cape Town, where the same image is deployed by digest to staging and then, after approval, to production.](docs/assets/diagrams/system-at-a-glance.svg)
 
@@ -17,8 +18,8 @@ an SMS confirmation that cannot be lost: simulated locally and in staging, and a
 |---|---|
 | Stage | Milestones M0 to M7 built: the web app's five-step booking flow, confirmation page, `/manage` and simulated inbox; booking in one transaction that also writes the confirmation SMS; lookup with the reference and the last four digits; a dispatcher that delivers the SMS through a simulated gateway, or through AWS End User Messaging SMS where a deployment asks, with the race proofs; and cancelling and retrying, in the API and the web app, with end-to-end tests in a real browser. M7 is built too: the final documentation pass, a clean-clone rehearsal and the `v1.0.0` release tag, pushed on 2026-10-27. |
 | Run locally | `make up`, then open http://localhost:8080 |
-| Environments | Staging, https://stg.branchbook.click, and production, https://branchbook.click, in AWS Cape Town (af-south-1): one image, built and tested once, promoted by digest from staging to production ([Environments](#environments), [ADR-0008](docs/adr/0008-two-environments-promoted-by-digest.md)). Deployed: both first on 2026-11-02 by the pipeline, production after a person's approval, replacing in place the single hosted demo that had run there since 2026-10-26 ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)). The drills that day measured the recovery targets ([deployment status](docs/production-readiness.md#deployment-status), [docs/resilience.md](docs/resilience.md#recovery-targets)). |
-| Deployment | Every push to `main` runs `ci`. Once every check passes, `publish` pushes the image the checks tested to ECR and attests it; `deploy-staging` deploys it by digest and runs the smoke and end-to-end tests there; then, once a person approves, `deploy-production` verifies the image's provenance, deploys the same digest and smoke-tests it, and rolls production back to the last release if that fails. Each environment records its release only after its smoke test. GitHub reaches AWS through OpenID Connect with no stored keys, and a red check means no deployment ([docs/delivery.md](docs/delivery.md)). |
+| Environments | Staging and production in AWS Cape Town (af-south-1): one image, built and tested once, promoted by digest from staging to production ([Environments](#environments), [ADR-0008](docs/adr/0008-two-environments-promoted-by-digest.md)). Deployed by the pipeline on 2026-11-02, production after a person's approval, replacing in place the single hosted demo that had run since 2026-10-26 ([ADR-0006](docs/adr/0006-hosted-demo-on-aws-with-cdk.md)); the drills that day measured the recovery targets ([docs/resilience.md](docs/resilience.md#recovery-targets)). **Torn down on 2026-11-04,** with every BranchBook resource in AWS, to stop its costs: neither address resolves, and the code can rebuild both ([deployment status](docs/production-readiness.md#deployment-status)). Everything runs locally with `make up`. |
+| Deployment | Every push to `main` runs `ci`. Once every check passes, `publish` pushes the image the checks tested to ECR and attests it; `deploy-staging` deploys it by digest and runs the smoke and end-to-end tests there; then, once a person approves, `deploy-production` verifies the image's provenance, deploys the same digest and smoke-tests it, and rolls production back to the last release if that fails. Each environment records its release only after its smoke test. GitHub reaches AWS through OpenID Connect with no stored keys, and a red check means no deployment ([docs/delivery.md](docs/delivery.md)). Since the teardown of 2026-11-04 the delivery jobs fail after the checks, because the bootstraps they deploy through are gone. |
 | Production readiness | Every control, with the test, CI job, CDK assertion or cdk-nag rule that proves it: [docs/production-readiness.md](docs/production-readiness.md). What can fail and what contains it: [docs/resilience.md](docs/resilience.md). The threats and the risks that remain: [docs/threat-model.md](docs/threat-model.md), [SECURITY.md](SECURITY.md#known-risks). |
 
 ### Milestones
@@ -33,18 +34,19 @@ an SMS confirmation that cannot be lost: simulated locally and in staging, and a
 | M5 | The dispatcher and simulated SMS gateway, delivery status, the simulated inbox, the race and idempotency proofs | Built |
 | M6 | Tier 2 if time allows, UI states and accessibility, web and end-to-end tests, CI completion | Built: cancel, retry, demo data and two metrics in the API and the web app; Playwright in CI at 390 and 1280 px |
 | M7 | Final documentation pass, clean-clone rehearsal, release tag | Built: the documentation pass, a rehearsal from a fresh clone, and `v1.0.0` tagged on 2026-10-27 |
-| AWS | The hosted demo, deployed by hand on 2026-10-26 and then by the pipeline; then the hardening that replaces it: staging and production from validated configuration, the image promoted by digest behind an approval with automatic rollback, private subnets, IAM database authentication with a least-privilege role, a WAF CAPTCHA, the SMS circuit breaker, account guardrails, alarms, a canary and fault-injection experiments ([docs/production-readiness.md](docs/production-readiness.md)) | Deployed: the hosted demo on 2026-10-26; staging and production, which replaced it, on 2026-11-02 ([deployment status](docs/production-readiness.md#deployment-status)) |
+| AWS | The hosted demo, deployed by hand on 2026-10-26 and then by the pipeline; then the hardening that replaces it: staging and production from validated configuration, the image promoted by digest behind an approval with automatic rollback, private subnets, IAM database authentication with a least-privilege role, a WAF CAPTCHA, the SMS circuit breaker, account guardrails, alarms, a canary and fault-injection experiments ([docs/production-readiness.md](docs/production-readiness.md)) | Deployed: the hosted demo on 2026-10-26; staging and production, which replaced it, on 2026-11-02. Torn down on 2026-11-04 ([deployment status](docs/production-readiness.md#deployment-status)) |
 
 ### Environments
 
-*Deployed on 2026-11-02 ([deployment status](docs/production-readiness.md#deployment-status)).* Both run in Cape
-Town from one image, with the `prod` profile. Values: [infra/config/](infra/config); settings:
+*Deployed on 2026-11-02 and torn down on 2026-11-04; neither address resolves
+([deployment status](docs/production-readiness.md#deployment-status)).* Both ran in Cape Town from one image, with the
+`prod` profile, as the code still builds them. Values: [infra/config/](infra/config); settings:
 [docs/configuration.md](docs/configuration.md); the full comparison:
 [infra/README.md](infra/README.md#environments-staging-and-production).
 
 | | Staging | Production |
 |---|---|---|
-| Address | https://stg.branchbook.click | https://branchbook.click |
+| Address (until 2026-11-04) | `stg.branchbook.click` | `branchbook.click` |
 | Deployed | On every push to `main` that passes every check | The same image, by digest, once staging passes and a person approves |
 | Tasks, database | 1 to 2 tasks; Single-AZ | 2 to 4 tasks over two zones; Multi-AZ, deletion protection |
 | SMS | Simulated; the published demo numbers only | Real, through AWS End User Messaging, South Africa only, five a day to a number, and only to verified numbers while the account is in the SMS sandbox; the demo numbers stay simulated |

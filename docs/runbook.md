@@ -10,6 +10,10 @@ to write a migration a rollback can survive. The commands are for the local stac
 in this file is a synthetic demo number. The failure modes behind the alarms, and the drills that rehearse them, are
 in [resilience.md](resilience.md).
 
+Staging and production were torn down on 2026-11-04
+([deployment status](production-readiness.md#deployment-status)), so the sections for them apply once they are
+[brought back](../infra/README.md#bringing-it-back); everything for the local stack works as before.
+
 ## Is it healthy?
 
 | Check | Command | Healthy |
@@ -441,7 +445,7 @@ that GitHub environment where one is set. What each watches, its threshold and h
 | `ResponseTimeP99` | The slowest 1% of requests took over 1.5 seconds for 15 minutes. | 1. `DatabaseCpu` and `DatabaseConnections`. 2. `ServiceCpu` and the running task count. 3. Requests and WAF blocks on the dashboard: a surge, or one address? | Let autoscaling add tasks; raise `service.maxTasks` within the connection budget, or `database.instanceClass`. |
 | `DatabaseCpu` | The database's CPU averaged over 80% for 15 minutes. | 1. Requests on the dashboard. 2. `try_again` bookings ([Read the metrics](#read-the-metrics)). 3. A retention batch failing hour after hour ([above](#did-the-retention-purge-run)). | A larger `database.instanceClass`; in production the change is applied through the Multi-AZ standby. |
 | `DatabaseConnections` | More than 80% of the connection budget (60 of 75) is in use. | 1. Running tasks against `service.maxTasks`. 2. A migration task still running. 3. A deployment with old and new tasks side by side. | `config.ts` keeps the most the service can open inside the budget, so a breach means something else connects: find and stop it. |
-| `DatabaseMemory` | The database had under 128 MiB of freeable memory for 15 minutes. In ALARM in both environments as of 2026-11-03: `db.t4g.micro` (1 GiB) leaves about 36 to 107 MB free under normal load. | 1. `DatabaseConnections`. 2. `DatabaseCpu`. 3. The trend since the last deployment. | A larger `database.instanceClass`: `db.t4g.small`, not yet made ([deployment status](production-readiness.md#deployment-status)). Lowering `databaseFreeableMemoryMiB` would only hide it. |
+| `DatabaseMemory` | The database had under 128 MiB of freeable memory for 15 minutes. In ALARM in both environments from their first deployment until they were torn down on 2026-11-04: `db.t4g.micro` (1 GiB) left about 36 to 107 MB free under normal load. | 1. `DatabaseConnections`. 2. `DatabaseCpu`. 3. The trend since the last deployment. | A larger `database.instanceClass`: `db.t4g.small`, not yet made ([deployment status](production-readiness.md#deployment-status)). Lowering `databaseFreeableMemoryMiB` would only hide it. |
 | `ServiceCpu` | The tasks' CPU averaged over 85% for 15 minutes, beyond what autoscaling absorbed. | 1. Is the service at `service.maxTasks`? 2. Requests per task on the dashboard. 3. WAF's per-address blocks: one client driving it? | Raise `service.maxTasks` within the connection budget, or `service.cpu`. |
 | `ServiceMemory` | A task used over 85% of its memory for 15 minutes. | 1. Tasks restarting? 2. Since which deployment? 3. The same on the other tasks? | Raise `service.memoryMiB`, or roll back the deployment that started it. |
 | `CanaryFailing` | The outside-in canary failed two runs in a row: `/readyz` or the availability API did not answer 200 with a sane body. | 1. The canary's last run in the CloudWatch Synthetics console. 2. `EXPECT_PROD_PROFILE=1 EXPECT_CAPTCHA=1 scripts/smoke.sh <address>` from your machine. 3. `NoHealthyTask` and `ServerErrors`. | As for the alarm it points to; if only the canary fails, the domain, the certificate or WAF. |
@@ -502,10 +506,10 @@ Each environment has the AWS FIS experiment template `<prefix>-stop-one-task`, a
 
 Run them on staging first. Staging runs one task, so stopping it shows recovery from zero rather than continuity.
 
-All three were run on 2026-11-02, with a probe calling `GET /api/v1/branches/SAN/availability`, which reads the
-database, once a second: in staging a stopped task meant 61 seconds of `502` and `503`; in production no request failed
-while a task was replaced, and a database failover gave 1 minute 49 seconds of intermittent errors
-([resilience.md](resilience.md#recovery-targets)).
+All three were run on 2026-11-02, while the environments ran, with a probe calling
+`GET /api/v1/branches/SAN/availability`, which reads the database, once a second: in staging a stopped task meant 61
+seconds of `502` and `503`; in production no request failed while a task was replaced, and a database failover gave 1
+minute 49 seconds of intermittent errors ([resilience.md](resilience.md#recovery-targets)).
 
 ## Restore the database to a point in time
 

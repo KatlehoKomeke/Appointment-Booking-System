@@ -63,9 +63,10 @@ The GitHub settings behind layers 4 and 6 can be read with
 
 ### At run time
 
-*Layer 8 is in place: the deploy roles were deployed on 2026-11-01, and every delivery job signs in through them.
-Layers 9 and 10 reached AWS with each environment's first deployment, on 2026-11-02; production's database has IAM
-database authentication on ([deployment status](docs/production-readiness.md#deployment-status)).*
+*Layer 8 is in place: the deploy roles were deployed on 2026-11-01, every delivery job signs in through them, and
+they were kept when the environments were torn down on 2026-11-04. Layers 9 and 10 reached AWS with each environment's
+first deployment, on 2026-11-02, with IAM database authentication on in production, and were deleted with the
+environments on 2026-11-04 ([deployment status](docs/production-readiness.md#deployment-status)).*
 
 8. **No AWS access key exists.** GitHub Actions signs in through OpenID Connect, with sessions of at most one hour.
    Each GitHub environment, `staging` and `production`, holds its own role's ARN as its secret
@@ -88,7 +89,8 @@ database authentication on ([deployment status](docs/production-readiness.md#dep
 
 ### In AWS
 
-The controls below are deployed in staging and production, first on 2026-11-02, as above.
+The controls below were deployed in staging and production from 2026-11-02 until both were torn down on 2026-11-04,
+as above; the code still builds them.
 
 Neither environment has a sign-in, so neither holds a password of its own
 ([ADR-0004](docs/adr/0004-restraint-no-login-no-id-number.md)). Production texts real SMS, so any South African
@@ -286,8 +288,8 @@ also waits for a person's approval. Since this change, IAM limits a deployment t
 create carries a permissions boundary, each bootstrap's execution policy allows IAM only on its own environment's
 roles, and a deploy scope denies each role the other environment's stacks and the administrator's
 ([ADR-0008](docs/adr/0008-two-environments-promoted-by-digest.md)). Production's bootstrap has run CloudFormation with
-its own execution policy, `branchbook-cdk-cfn-exec-production`, since the administrator narrowed it on 2026-11-02,
-after production's first deployment through it
+its own execution policy, `branchbook-cdk-cfn-exec-production`, from the administrator narrowing it on 2026-11-02,
+after production's first deployment through it, until it was deleted with the environments on 2026-11-04
 ([infra/README.md](infra/README.md#hardening-the-account-that-already-runs-production)). What IAM, GitHub and the
 code each enforce, and what is still not prevented, are in
 [infra/README.md](infra/README.md#who-can-change-what-in-aws).
@@ -317,6 +319,8 @@ is off the public port; the pipeline's deployments are limited by IAM, not only 
 lookups as well as its bookings; code, dependencies and the image are scanned; staging comes before production, behind
 an approval, with the image promoted by digest ([Delivery](docs/production-readiness.md#delivery)); and the service no
 longer connects as the database's owner. **Closed by the first deployments, 2026-11-02**
-([deployment status](docs/production-readiness.md#deployment-status)): production's bootstrap no longer has CDK's
-default execution policy, since the administrator narrowed it to `branchbook-cdk-cfn-exec-production`; and production
-now has a release recorded by the pipeline to roll back to.
+([deployment status](docs/production-readiness.md#deployment-status)): production's bootstrap no longer had CDK's
+default execution policy, once the administrator narrowed it to `branchbook-cdk-cfn-exec-production`; and production
+had a release recorded by the pipeline to roll back to. The teardown of 2026-11-04 deleted the bootstrap and the
+record: a rebuild narrows the bootstrap from the start, and has no release to roll back to until production's first
+deployment passes ([Bringing it back](infra/README.md#bringing-it-back)).

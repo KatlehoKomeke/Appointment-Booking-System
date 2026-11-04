@@ -15,13 +15,13 @@ design](../web/README.md#ui-design). M5 adds the dispatcher that delivers the SM
 simulated inbox's API and the concurrent proofs. M6 adds the Tier 2 API: cancelling an appointment with its cancellation
 SMS, retrying a failed message from the simulated inbox, demo data for a fresh compose stack, and two meters on
 `/actuator/prometheus`, with the web app's screens for them: cancelling from the appointment page and Retry in the
-simulated inbox. The production hardening that followed is built, merged and deployed: staging and
+simulated inbox. The production hardening that followed is built and merged: staging and
 production from validated configuration, the image promoted by digest, private subnets, IAM database authentication with
 a least-privilege role, migrations as a deployment step, a WAF CAPTCHA, the SMS circuit breaker, and the alarms and
-drills ([production-readiness.md](production-readiness.md)). The pipeline first deployed it on 2026-11-02
-([deployment status](production-readiness.md#deployment-status)). Each section opens with its status. Diagrams are
-Mermaid, or SVG files in [assets/diagrams](assets/diagrams/README.md); solid parts are built and dashed parts are
-planned, with their milestone.
+drills ([production-readiness.md](production-readiness.md)). The pipeline deployed it on 2026-11-02, and it was torn
+down on 2026-11-04 ([deployment status](production-readiness.md#deployment-status)). Each section opens with its
+status. Diagrams are Mermaid, or SVG files in [assets/diagrams](assets/diagrams/README.md); solid parts are built and
+dashed parts are planned, with their milestone.
 
 **Contents:** [1. What it does](#1-what-the-system-does) ·
 [2. System and containers](#2-system-context-and-containers) ·
@@ -137,7 +137,8 @@ returns no slots without reading the appointments.
 
 ### 2.2 A booking through the firewall
 
-*Status: Built after M7; deployed on 2026-11-02 ([deployment status](production-readiness.md#deployment-status)).
+*Status: Built after M7; deployed on 2026-11-02 and torn down on 2026-11-04
+([deployment status](production-readiness.md#deployment-status)).
 Only staging and production put the CAPTCHA in front of a booking; locally, and wherever no CAPTCHA is configured,
 step 3 never happens and nothing changes.*
 
@@ -541,11 +542,12 @@ profile's JSON log lines. How the data is protected is in
 
 ## 10. Deployment
 
-*Status: Built and deployed. The image and the local stack are built, and staging and production, in Cape Town
-(af-south-1), were first deployed on 2026-11-02; production texts real SMS. Production's first deployment replaced in
-place, keeping its address and stack IDs, the single hosted demo that had run at https://branchbook.click since
-2026-10-26 ([deployment status](production-readiness.md#deployment-status)). Sections 10.2 and 10.3 describe staging
-and production.*
+*Status: Built; deployed 2026-11-02 and torn down 2026-11-04. The image and the local stack are built, and staging and
+production, in Cape Town (af-south-1), were deployed on 2026-11-02, production texting real SMS, and torn down on
+2026-11-04 to stop their costs. Production's first deployment replaced in place, keeping its address and stack IDs, the
+single hosted demo that had run at `branchbook.click` since 2026-10-26
+([deployment status](production-readiness.md#deployment-status)). Sections 10.2 and 10.3 describe staging and
+production as the code builds them.*
 
 ### 10.1 Locally: the image and the stack
 
@@ -611,7 +613,7 @@ and the budget) and `BranchbookGuardrails` (CloudTrail, GuardDuty, AWS Config, S
 permissions boundary and each environment's execution policy) by hand
 ([infra/README.md](../infra/README.md#who-can-change-what-in-aws)).
 
-A request to https://branchbook.click: Route 53 resolves the name to the load balancer, and is not in the data path;
+A request to `https://branchbook.click`: Route 53 resolves the name to the load balancer, and is not in the data path;
 AWS WAF blocks `/actuator`, comparing the decoded, lowercased path, limits each address's bookings and cancellations,
 lookups and requests, and asks for a CAPTCHA on every booking and cancellation `POST`
 ([2.2](#22-a-booking-through-the-firewall)), then applies AWS's managed rules; the load balancer redirects plain HTTP

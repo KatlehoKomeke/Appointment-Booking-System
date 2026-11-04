@@ -25,10 +25,12 @@ the SMS from Sending to Sent. The number `082 555 0000` always fails delivery, s
 simulated inbox at `/messages` shows every message. `make demo-409` races twenty bookings for one seat and prints
 `Booked: 1, refused with 409: 19`. `make down` deletes everything.
 
-The same image runs in AWS Cape Town twice, promoted by digest: staging, at https://stg.branchbook.click, takes only
-the demo numbers and texts nothing; production, at https://branchbook.click, sends any South African number outside
-the demo block `082 555 0000` to `0199` a real SMS. Both keep the inbox off, ask for a CAPTCHA before a booking or a
-cancel, and delete each booking once its appointment is over.
+The same image ran in AWS Cape Town twice, promoted by digest, from 2026-11-02 until both environments were torn
+down on 2026-11-04 ([deployment status](production-readiness.md#deployment-status)): staging, at
+`stg.branchbook.click`, took only the demo numbers and texted nothing; production, at `branchbook.click`, sent any
+South African number outside the demo block `082 555 0000` to `0199` a real SMS. Both kept the inbox off, asked for a
+CAPTCHA before a booking or a cancel, and deleted each booking once its appointment was over. The code still builds
+both.
 
 ## The design in six sentences
 
@@ -77,9 +79,10 @@ cancel, and delete each booking once its appointment is over.
 
 - It has one AWS account for both environments, not one each, so a mistake in staging's stacks could still reach
   production's resources through what IAM allows ([SECURITY.md](../SECURITY.md#known-risks)).
-- Not every recovery target is met or rehearsed. The drills of 2026-11-02 met the targets for a lost task and a
-  database failover, but a point-in-time restore lost 7 minutes 48 seconds against a 5-minute target, and pointing the
-  stack at a restored database has not been rehearsed ([resilience.md](resilience.md#recovery-targets)).
+- Not every recovery target is met or rehearsed. The drills of 2026-11-02, while the environments ran, met the targets
+  for a lost task and a database failover, but a point-in-time restore lost 7 minutes 48 seconds against a 5-minute
+  target, and pointing the stack at a restored database has not been rehearsed
+  ([resilience.md](resilience.md#recovery-targets)).
 - Delivery is best effort over AWS's shared route, and while the account is in the SMS sandbox only verified numbers
   receive a text; the booking stands either way.
 - There are no staff screens, reminders, rescheduling or an email channel, each ruled out with its reason in the

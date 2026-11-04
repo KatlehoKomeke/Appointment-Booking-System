@@ -89,3 +89,12 @@ to production at 19:15Z, where the smoke test passed with the CAPTCHA expected. 
 roll back to. The administrator then narrowed production's bootstrap to `branchbook-cdk-cfn-exec-production`; the
 first production deployment through it is #49's (`38d0a4d`)
 ([deployment status](../production-readiness.md#deployment-status)).
+
+**2026-11-04, both environments torn down.** Every BranchBook resource in AWS was deleted to stop its costs: the six
+environment stacks, `BranchbookRegistry`, the bootstraps `bbprod` and `bbstg`, and `BranchbookGuardrails`, with every
+database snapshot and the hosted zone deleted by hand. `BranchbookAccount`, with both deploy roles, and the GitHub
+environments `staging` and `production` are kept. A push to `main` still runs every check, then the delivery jobs fail,
+because the bootstraps they deploy through are gone. The design is unchanged: rebuilding the hosted zone, the
+guardrails and the bootstraps, with their deploy scopes, lets the next push deploy staging, then production after
+approval ([infra/README.md](../../infra/README.md#bringing-it-back);
+[deployment status](../production-readiness.md#deployment-status)).

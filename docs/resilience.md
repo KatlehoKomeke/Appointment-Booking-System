@@ -1,8 +1,9 @@
 # Resilience
 
-*Status: Built and deployed. Staging and production, their alarms and their AWS FIS experiment templates were first
-deployed by the pipeline on 2026-11-02 ([deployment status](production-readiness.md#deployment-status)). The drills of
-2026-11-02 measured three of the recovery targets: losing a task and failing the database over met theirs, and the
+*Status: Built; deployed 2026-11-02 and torn down 2026-11-04. Staging and production, their alarms and their AWS FIS
+experiment templates were deployed by the pipeline on 2026-11-02 and torn down on 2026-11-04
+([deployment status](production-readiness.md#deployment-status)). The drills of 2026-11-02, run while the environments
+ran, measured three of the recovery targets: losing a task and failing the database over met theirs, and the
 point-in-time restore met its RTO but not its RPO ([Recovery targets](#recovery-targets)).*
 
 This page lists what can fail, what contains each failure, how it is noticed and how it is rehearsed. What each alarm
@@ -179,9 +180,9 @@ the backups until they expire ([SECURITY.md](../SECURITY.md#personal-information
 ## Recovery targets
 
 RTO is how long until the service is whole again; RPO is how much committed data may be lost. Each is measured by the
-drill or experiment named, and the operator records the date and the result here. The drills of 2026-11-02 ran with a
-probe calling `GET /api/v1/branches/SAN/availability`, which reads the database, once a second; the details are under
-each failure above.
+drill or experiment named, and the operator records the date and the result here. The drills of 2026-11-02, while
+the environments ran, used a probe calling `GET /api/v1/branches/SAN/availability`, which reads the database, once a
+second; the details are under each failure above.
 
 | Failure | RTO target | RPO target | Measured by | Measured on | RTO measured | RPO measured |
 |---|---|---|---|---|---|---|

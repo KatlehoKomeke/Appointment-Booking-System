@@ -1,8 +1,8 @@
 # Production readiness
 
-*Status: Built, merged to `main` and deployed. Every control below is in the code and proven by the evidence beside
-it. The pipeline first deployed staging, https://stg.branchbook.click, and production, https://branchbook.click, on
-2026-11-02 ([Deployment status](#deployment-status)).*
+*Status: Built and merged to `main`. Every control below is in the code and proven by the evidence beside it. The
+pipeline deployed staging and production on 2026-11-02; both were torn down on 2026-11-04
+([Deployment status](#deployment-status)).*
 
 This page is the control-by-control account of what makes BranchBook fit to run for a bank: what each control is,
 and its evidence, a test, a CI job, a CDK assertion or cdk-nag, so each claim can be checked. The decisions behind
@@ -29,30 +29,22 @@ under [infra/test](../infra/test), with the test's name in quotes.
 
 ## Deployment status
 
-As of 2026-11-03, with `main` at `38d0a4d`. This is the one place the deployment's state is recorded; other pages link
+As of 2026-11-04, with `main` at `78019db`. This is the one place the deployment's state is recorded; other pages link
 here.
 
-**Deployed.** Staging and production run the production hardening in AWS Cape Town (`af-south-1`). One pipeline run,
-41498174936, deployed both on 2026-11-02 from `d6471c0` (#48's merge), with one image digest:
-
-- **Staging,** https://stg.branchbook.click, at 18:42Z: `BranchbookStagingData`, `BranchbookStagingApp` and
-  `BranchbookStagingRelease`, through the bootstrap `CDKToolkitStaging` (qualifier `bbstg`). The smoke and end-to-end
-  tests passed there. The WAF CAPTCHA is live, so `/api/v1/client-config` publishes the CAPTCHA script; WAF answers
-  `/actuator` with `403`; the OpenAPI document and Swagger UI answer `404`.
-- **Production,** https://branchbook.click, at 19:15Z, after a person's approval, the same digest: `BranchbookData`,
-  `BranchbookApp` and `BranchbookRelease`, through the bootstrap `CDKToolkitProduction` (qualifier `bbprod`). It
-  replaced the single hosted demo in place, keeping its stack IDs. Checked afterwards: the database runs Multi-AZ, with
-  deletion protection, IAM database authentication and 14-day backups; every production IAM role carries
-  `branchbook-permissions-boundary`; and the smoke test passes with `EXPECT_PROD_PROFILE=1 EXPECT_CAPTCHA=1`, so a
-  booking without a CAPTCHA token gets `405` with `x-amzn-waf-action: captcha`.
+**Torn down.** Staging and production ran in AWS Cape Town (`af-south-1`) from 2026-11-02 until 2026-11-04, when every
+BranchBook resource in AWS was deleted to stop its costs ([the teardown](#the-teardown-2026-11-04), below). Neither
+`stg.branchbook.click` nor `branchbook.click` resolves. The code, its configuration and the pipeline are unchanged, so
+every control on this page is still in the code with its evidence, and the environments can be rebuilt from `main`
+([infra/README.md, Bringing it back](../infra/README.md#bringing-it-back)). The history below is in the past tense; the
+drills' figures were measured while the environments ran.
 
 **Merged.** The production hardening is on `main`: pull requests
 [#32](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/32) and
 [#33](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/33) on 2026-10-31, and
 [#34](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/34) on 2026-11-01 (`ab9aa7f`). It defines
-both environments' stacks and bootstraps as above; the image registry `BranchbookRegistry`; and the pipeline that
-builds the image once and promotes its digest from staging to production, behind a person's approval, with an
-automatic rollback.
+both environments' stacks and bootstraps; the image registry `BranchbookRegistry`; and the pipeline that builds the
+image once and promotes its digest from staging to production, behind a person's approval, with an automatic rollback.
 
 **Done by the administrator.** On 2026-11-01: `BranchbookAccount`, `BranchbookGuardrails`, both bootstraps and the
 GitHub environments `staging` and `production`. On 2026-11-02: the `Protect main` ruleset gained its required checks
@@ -60,7 +52,7 @@ and its code-scanning rule, actions pinned to a full commit SHA became required,
 deleted; `BranchbookGuardrails` was redeployed, so #43's `ReadOwnStackOutputs` took effect; and, after production's
 first deployment, `CDKToolkitProduction` was narrowed to the execution policy `branchbook-cdk-cfn-exec-production`
 ([infra/README.md](../infra/README.md#hardening-the-account-that-already-runs-production), step 5). The first
-production deployment through the narrowed policy is #49's (`38d0a4d`).
+production deployment through the narrowed policy was #49's (`38d0a4d`).
 
 **How it got there.**
 
@@ -83,12 +75,27 @@ production deployment through the narrowed policy is #49's (`38d0a4d`).
   validation ("already exists"). The empty log group was deleted by hand and the job re-run
   ([runbook](runbook.md#a-first-deployment-fails-the-log-group-already-exists)).
 
-Until production's first deployment, https://branchbook.click served the single hosted demo, last deployed by the
-previous pipeline on 2026-10-31 from `bab2d81`, on the infrastructure before the hardening, as
+**Deployed, 2026-11-02.** One pipeline run, 41498174936, deployed both environments from `d6471c0` (#48's merge),
+with one image digest:
+
+- **Staging,** `stg.branchbook.click`, at 18:42Z: `BranchbookStagingData`, `BranchbookStagingApp` and
+  `BranchbookStagingRelease`, through the bootstrap `CDKToolkitStaging` (qualifier `bbstg`). The smoke and end-to-end
+  tests passed there. The WAF CAPTCHA was live, so `/api/v1/client-config` published the CAPTCHA script; WAF answered
+  `/actuator` with `403`; the OpenAPI document and Swagger UI answered `404`.
+- **Production,** `branchbook.click`, at 19:15Z, after a person's approval, the same digest: `BranchbookData`,
+  `BranchbookApp` and `BranchbookRelease`, through the bootstrap `CDKToolkitProduction` (qualifier `bbprod`). It
+  replaced the single hosted demo in place, keeping its stack IDs. Checked afterwards: the database ran Multi-AZ, with
+  deletion protection, IAM database authentication and 14-day backups; every production IAM role carried
+  `branchbook-permissions-boundary`; and the smoke test passed with `EXPECT_PROD_PROFILE=1 EXPECT_CAPTCHA=1`, so a
+  booking without a CAPTCHA token got `405` with `x-amzn-waf-action: captcha`.
+
+Until production's first deployment, `branchbook.click` served the single hosted demo, last deployed by the previous
+pipeline on 2026-10-31 from `bab2d81`, on the infrastructure before the hardening, as
 [ADR-0006](adr/0006-hosted-demo-on-aws-with-cdk.md) designed it.
 
-**The drills, 2026-11-02,** with a probe calling `GET /api/v1/branches/SAN/availability`, which reads the database,
-once a second ([resilience.md](resilience.md#recovery-targets)):
+**The drills, 2026-11-02,** run while the environments ran, with a probe calling
+`GET /api/v1/branches/SAN/availability`, which reads the database, once a second
+([resilience.md](resilience.md#recovery-targets)):
 
 - Stopping staging's one task: 61 seconds of `502` and `503` until the replacement served.
 - Stopping one of production's two tasks: none of 233 requests failed; the service was back at full strength about 95
@@ -99,22 +106,46 @@ once a second ([resilience.md](resilience.md#recovery-targets)):
   7 minutes 48 seconds before the request, missing the 5-minute RPO. Pointing the stack at the restored instance was
   not rehearsed.
 
-**Left.**
+**Open when they were torn down.** These applied to the running environments, and apply again once they are rebuilt:
 
-- **`DatabaseMemory` is raised in both environments.** `db.t4g.micro` (1 GiB) leaves about 36 to 107 MB free under
+- **`DatabaseMemory` was raised in both environments.** `db.t4g.micro` (1 GiB) left about 36 to 107 MB free under
   normal load, under the alarm's 128 MiB (`databaseFreeableMemoryMiB` in [infra/config/](../infra/config)). Lowering the
-  threshold would hide it; the fix is a larger instance class, `db.t4g.small`, not yet made
+  threshold would hide it; the fix is a larger instance class, `db.t4g.small`, not yet made in the configuration
   ([runbook](runbook.md#alarms)).
 - **The restore's RPO, measured again** on a quiet day: the newest restorable point was already 6.5 minutes behind
   shortly after the failover drill.
 - **The restore's step 3,** pointing the stack at the restored instance, to rehearse
   ([runbook](runbook.md#restore-the-database-to-a-point-in-time)).
-- **The SMS sandbox.** The account is still in it, so only verified numbers receive production's texts; the banner
-  says so ([infra/README.md](../infra/README.md#real-sms)).
+- **The SMS sandbox.** The account was in it while production ran, so only verified numbers received production's
+  texts; the banner says so ([infra/README.md](../infra/README.md#real-sms)).
 - **One AWS account for both environments,** and **a merge to `main` needs no second person's review**
   ([SECURITY.md](../SECURITY.md#known-risks)).
 
-The hosted environments' teardown date stays 2026-11-30.
+<a id="the-teardown-2026-11-04"></a>
+
+**The teardown, 2026-11-04.** Every BranchBook resource in AWS was deleted to stop its costs, ahead of the planned
+date of 2026-11-30.
+
+- **Deleted:** the stacks `BranchbookApp`, `BranchbookData`, `BranchbookRelease`, `BranchbookStagingApp`,
+  `BranchbookStagingData`, `BranchbookStagingRelease` and `BranchbookRegistry`; the bootstraps `CDKToolkitProduction`
+  (`bbprod`) and `CDKToolkitStaging` (`bbstg`); and `BranchbookGuardrails`, so GuardDuty, AWS Config recording,
+  Security Hub, the CloudTrail trail and IAM Access Analyzer are off in the account.
+- **Removed by hand,** because their stacks keep them: every database snapshot, the final ones included, so no
+  booking data is kept anywhere; the ECR repository `branchbook`; the bootstraps' asset buckets; production's canary
+  artifact bucket; both of `BranchbookGuardrails`' audit buckets; the log groups left behind; and the Route 53 hosted
+  zone for `branchbook.click`. Both CloudTrail KMS keys are scheduled for deletion on 2026-11-11, AWS's 7-day minimum.
+- **Kept:** `BranchbookAccount` in `us-east-1`, with the GitHub OIDC provider, the two deploy roles and the budget
+  alert, which costs nothing; the GitHub environments `staging` and `production`, with their secrets; and the
+  registration of the domain `branchbook.click`, paid up front, with auto-renew off, which expires on 2027-10-26. With
+  no hosted zone, neither address resolves.
+- **Left alone:** the default `CDKToolkit`, which other CDK apps in the account share. Its `af-south-1` ECR repository
+  held the hosted demo's images, which cost cents; their size was not measured.
+- **The pipeline:** pull-request checks run as before. A push to `main` runs the checks, then the delivery jobs fail,
+  because the bootstraps they deploy through are gone; nothing can be created in AWS.
+
+**Bringing it back** is five steps, in [infra/README.md](../infra/README.md#bringing-it-back): a new hosted zone and
+its ID in the configuration, the guardrails, the two bootstraps with their deploy scopes, a merge to `main`, and the
+domain's auto-renew. The steps have not been run.
 
 ## Security
 
@@ -157,7 +188,7 @@ The hosted environments' teardown date stays 2026-11-30.
 |---|---|---|
 | Audit and detection | `BranchbookGuardrails`: a CloudTrail trail over every Region with log file validation, GuardDuty, AWS Config, Security Hub (AWS Foundational Security Best Practices) and IAM Access Analyzer. | [guardrails-stack.test.ts](../infra/test/guardrails-stack.test.ts) |
 | A permissions boundary on every application role | The boundary denies IAM users and keys, leaving or changing the boundary, account and Organizations changes, tampering with the audit and detection services, and borrowing an unbounded role. | guardrails-stack.test.ts "the permissions boundary"; [deployment-policies.test.ts](../infra/test/deployment-policies.test.ts) "every role the stacks it deploys create carries the permissions boundary, custom-resource roles included" |
-| A narrowed execution policy per environment | Each CDK bootstrap's CloudFormation role may use the application's services, read its own environment's stacks' outputs ([pull request #43](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/43)), and use IAM only on its own environment's roles, with the boundary attached. Staging's bootstrap has had it from the start; production's since 2026-11-02. | deployment-policies.test.ts "the execution policy allows the service of every resource type the stacks it deploys contain" and "the execution policy may read the outputs of every stack the stacks it deploys reference, and no other stack"; guardrails-stack.test.ts |
+| A narrowed execution policy per environment | Each CDK bootstrap's CloudFormation role may use the application's services, read its own environment's stacks' outputs ([pull request #43](https://github.com/KatlehoKomeke/Appointment-Booking-System/pull/43)), and use IAM only on its own environment's roles, with the boundary attached. Staging's bootstrap had it from the start; production's from 2026-11-02, after its first deployment. | deployment-policies.test.ts "the execution policy allows the service of every resource type the stacks it deploys contain" and "the execution policy may read the outputs of every stack the stacks it deploys reference, and no other stack"; guardrails-stack.test.ts |
 | One deploy role per environment | Each GitHub environment's role trusts only this repository, by its immutable IDs, and that environment; it may assume only its own bootstrap's roles, and a deploy scope denies it the other environment's stacks. | [account-stack.test.ts](../infra/test/account-stack.test.ts) "creates exactly one deploy role per environment and no other role" |
 | cdk-nag | The AWS Solutions rule pack runs over every stack of both environments; each accepted finding is acknowledged where its resource is defined, with the reason. | [nag.test.ts](../infra/test/nag.test.ts) "every stack synthesises with no unacknowledged finding" |
 | No committed database password | `compose.yaml` holds none; `make up` writes a random one to the git-ignored `.env`, and CI generates its own and fails if any log mentions a password. | The `stack` job of [ci.yml](../.github/workflows/ci.yml), step *Check that the logs hold no credentials* |
@@ -245,7 +276,7 @@ What each alarm means and what to do is in the [runbook](runbook.md#alarms); the
 | Fault-injection experiments | How to run each, and what to record. | [runbook.md](runbook.md#run-a-fault-injection-experiment) |
 | Personal data deleted when it is due | Each booking is deleted within the hour after its appointment ends, and at once when it is cancelled. | `RetentionPurgeIT.anAppointmentGoesOnceItHasEndedNotBefore`, `CancelAppointmentIT.cancelReturnsTheCancelledAppointmentWithOnlyItsCancellationAndDeletesIt` |
 | Cost alerts | An AWS budget e-mails at 50, 80 and 100 percent of its monthly limit. The two environments, the guardrails and the observability are estimated, not measured, at about US$380 to 450 a month. | account-stack.test.ts; the limit is in [infra/config/account.json](../infra/config/account.json) |
-| Administrator steps written down | The guardrails, both bootstraps, the deploy roles, the GitHub environments, and the order for an account that already runs production. | [infra/README.md](../infra/README.md#first-time-setup) |
+| Administrator steps written down | The guardrails, both bootstraps, the deploy roles, the GitHub environments, the order for an account that already runs production, and bringing the environments back after the teardown. | [infra/README.md](../infra/README.md#first-time-setup), [Bringing it back](../infra/README.md#bringing-it-back) |
 
 ## Still outside this repository
 
@@ -271,12 +302,13 @@ pipeline's remaining gaps in [delivery.md, Known gaps](delivery.md#known-gaps).
 
 ## Not yet measured
 
-The recovery targets were measured on 2026-11-02, apart from the database failover's data loss (nothing was written
-during the drill) and the restore's step 3 ([resilience.md](resilience.md#recovery-targets)); the restore's RPO missed
-its target and is to be measured again. These are still to measure, and are recorded once run:
+The recovery targets were measured on 2026-11-02, while the environments ran, apart from the database failover's data
+loss (nothing was written during the drill) and the restore's step 3 ([resilience.md](resilience.md#recovery-targets));
+the restore's RPO missed its target and is to be measured again. These are still to measure, once the environments are
+rebuilt, and are recorded once run:
 
-- **The pipeline end to end:** the first push through staging, the approval and production ran on 2026-11-02, but has
-  not been timed, and the automatic rollback has not been rehearsed against AWS
+- **The pipeline end to end:** the first push through staging, the approval and production ran on 2026-11-02, but was
+  not timed, and the automatic rollback has not been rehearsed against AWS
   ([delivery.md](delivery.md#one-push-measured)).
 - **AWS's CAPTCHA puzzle in a browser** on staging, including that the Content-Security-Policy blocks nothing it
   needs. CI uses fakes and the staging bypass.
