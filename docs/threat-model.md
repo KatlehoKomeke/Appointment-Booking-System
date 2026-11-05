@@ -1,7 +1,7 @@
 # Threat model
 
-*Status: Written for the code as built. The AWS controls are built, merged and deployed, first on 2026-11-02
-([deployment status](production-readiness.md#deployment-status)).*
+*Status: Written for the code as built. The AWS controls are built and merged; they were deployed on 2026-11-02 and
+torn down with the environments on 2026-11-04 ([deployment status](production-readiness.md#deployment-status)).*
 
 This page takes each main flow and asks the six STRIDE questions of it: can someone **S**poof an identity, **T**amper
 with data, **R**epudiate an action, learn something they should not (**I**nformation disclosure), **D**eny service,

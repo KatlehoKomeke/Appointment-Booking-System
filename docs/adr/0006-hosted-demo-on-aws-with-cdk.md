@@ -210,3 +210,11 @@ non-root user write the `/tmp` volume Fargate mounts). Production replaced the h
 `BranchbookApp` and `BranchbookRelease` kept their stack IDs, and https://branchbook.click its address. Its database
 now runs Multi-AZ with deletion protection, IAM database authentication and 14-day backups. The teardown date,
 2026-11-30, is unchanged ([deployment status](../production-readiness.md#deployment-status)).
+
+**2026-11-04, torn down.** Every BranchBook resource in AWS was deleted to stop its costs, ahead of the 2026-11-30
+teardown date: both environments' stacks, `BranchbookRegistry`, both bootstraps and `BranchbookGuardrails`, then by
+hand every database snapshot, the final ones included, so no booking data is kept, and the hosted zone for
+`branchbook.click`. `BranchbookAccount` in `us-east-1` is kept, with the deploy roles and the budget alert, and so is
+the domain's registration, with auto-renew off, until 2027-10-26. With no hosted zone, `branchbook.click` no longer
+resolves. The code is unchanged; how to rebuild is in [infra/README.md](../../infra/README.md#bringing-it-back)
+([deployment status](../production-readiness.md#deployment-status)).

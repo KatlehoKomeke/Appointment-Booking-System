@@ -104,3 +104,9 @@ stop a production deployment from creating a role without the permissions bounda
 administrator then narrowed production's bootstrap to `branchbook-cdk-cfn-exec-production`, so in production too IAM
 now limits what a deployment may create, and every production role carries the permissions boundary
 ([deployment status](../production-readiness.md#deployment-status)).
+
+**2026-11-04.** Both environments were torn down with every BranchBook resource in AWS but `BranchbookAccount`. The
+deploy roles still sign a delivery job in, but the bootstraps it deploys through are gone, so a push to `main` runs the
+checks and then fails at delivery until the environments are brought back
+([infra/README.md](../../infra/README.md#bringing-it-back);
+[deployment status](../production-readiness.md#deployment-status)).

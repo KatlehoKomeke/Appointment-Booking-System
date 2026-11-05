@@ -3,7 +3,9 @@
 *Status: Built: two git hooks, five workflows, Dependabot with a 14-day cooldown, and a pipeline that builds one ARM64
 image per commit, tests, scans and attests it, then promotes its digest from staging to production, behind a reviewer's
 approval, with an automatic rollback. Its first run, on 2026-11-01, stopped at staging; on 2026-11-02 it deployed
-staging and, after a person's approval, production ([deployment status](production-readiness.md#deployment-status)).
+staging and, after a person's approval, production. Both were torn down on 2026-11-04; since then a push to `main`
+runs the checks, then the delivery jobs fail, because the bootstraps they deploy through are gone
+([deployment status](production-readiness.md#deployment-status)).
 Every action is pinned to a commit SHA and every tool image to a digest. The GitHub environments, variables and
 required checks it relies on, read back on 2026-11-02, are listed in [GitHub settings](#github-settings-this-relies-on).
 Not built: strict checks, a review on pull requests and `CODEOWNERS` ([Known gaps](#known-gaps)). `BranchbookAccount`
@@ -27,10 +29,10 @@ The numbered steps in the image:
 3. `ci`'s **`image`** job builds the ARM64 image once; **`stack`** runs that exact build; nothing rebuilds it later.
 4. On a push to `main`, once every `ci` check is green, **`publish`** pushes the image to ECR as `branchbook:<commit>`
    and attests it; its digest is what every later job deploys.
-5. **`deploy-staging`** deploys the digest to https://stg.branchbook.click, smoke- and end-to-end-tests it, then
+5. **`deploy-staging`** deploys the digest to `https://stg.branchbook.click`, smoke- and end-to-end-tests it, then
    records it.
 6. **`deploy-production`** waits for a person's approval, verifies the attestation, deploys the same digest to
-   https://branchbook.click, smoke-tests it, then records it. If the deployment or the smoke test fails after
+   `https://branchbook.click`, smoke-tests it, then records it. If the deployment or the smoke test fails after
    production changed, **`rollback-production`** redeploys the previous release.
 
 A. **Administrator**: `branchbook-admin`, `aws login`, `BRANCHBOOK_ALERT_EMAIL` or `BRANCHBOOK_GUARDRAILS=true`
@@ -407,7 +409,9 @@ review, image scan, SBOM, provenance or dynamic scan; and a manual run from a `v
 Closed by the first deployments, on 2026-11-02 ([deployment status](production-readiness.md#deployment-status)):
 production's bootstrap ran CloudFormation with CDK's default `AdministratorAccess` execution policy until the
 administrator narrowed it to `branchbook-cdk-cfn-exec-production` after production's first deployment through it; and
-that first deployment had no recorded release to roll back to, which production now has.
+that first deployment had no recorded release to roll back to, which production then had. The teardown of 2026-11-04
+deleted the bootstrap and the record, so a rebuild starts with both gaps and closes them the same way
+([Bringing it back](../infra/README.md#bringing-it-back)).
 
 | Gap | Effect today | What would close it |
 |---|---|---|
