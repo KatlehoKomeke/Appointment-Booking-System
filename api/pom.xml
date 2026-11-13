@@ -60,7 +60,7 @@
     <!-- The AWS SDK for Java v2, for the real SMS gateway (AWS End User Messaging SMS). Pinned to the newest release that
          was at least two weeks old when it was added (2.55.15, published 2026-10-12): the project waits two weeks
          before taking a new release, so a broken or withdrawn one is caught upstream first. -->
-    <aws-sdk.version>2.57.5</aws-sdk.version>
+    <aws-sdk.version>2.57.8</aws-sdk.version>
     <!-- The AWS Advanced JDBC Wrapper, whose iam plugin signs in to RDS with IAM database authentication. 4.5.0,
          published 2026-10-14, was the newest release at least two weeks old when it was added. -->
     <aws-advanced-jdbc-wrapper.version>4.5.0</aws-advanced-jdbc-wrapper.version>
